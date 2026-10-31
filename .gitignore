@@ -1,0 +1,7 @@
+target/
+build/
+.dart_tool/
+.idea/
+*.iml
+.env
+data/

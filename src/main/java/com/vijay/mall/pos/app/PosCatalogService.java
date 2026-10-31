@@ -1,0 +1,150 @@
+package com.vijay.mall.pos.app;
+
+import com.vijay.mall.catalog.app.CatalogService;
+import com.vijay.mall.catalog.domain.ProductData;
+import com.vijay.mall.common.Page;
+import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.pos.app.PosViews.PosAttributes;
+import com.vijay.mall.pos.app.PosViews.PosProduct;
+import com.vijay.mall.pos.app.PosViews.Scan;
+import com.vijay.mall.pos.domain.BarcodeParser;
+import com.vijay.mall.pos.domain.PosRecords.ProductPos;
+import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
+import com.vijay.mall.pos.domain.ScannedCode;
+import com.vijay.mall.pos.domain.SoldBy;
+import com.vijay.mall.pos.domain.WeighedMode;
+import com.vijay.mall.pos.infra.PosCatalogRepository;
+import java.time.Clock;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/** Finds products at the counter (scan or search) and keeps their counter attributes and barcodes. */
+@Service
+public class PosCatalogService {
+  private final CatalogService catalog;
+  private final PosCatalogRepository repo;
+  private final ShopService shop;
+  private final InventoryService inventory;
+  private final AuditService audit;
+  private final Clock clock;
+
+  public PosCatalogService(CatalogService catalog, PosCatalogRepository repo, ShopService shop, InventoryService inventory,
+                           AuditService audit, Clock clock) {
+    this.catalog = catalog;
+    this.repo = repo;
+    this.shop = shop;
+    this.inventory = inventory;
+    this.audit = audit;
+    this.clock = clock;
+  }
+
+  // ---------- counter ----------
+  /** Resolves a scanned code. Unknown codes and inactive products are 404 so the cashier can search by name instead. */
+  public Scan scan(String raw) {
+    ShopSetting s = shop.get();
+    ScannedCode code;
+    try {
+      code = BarcodeParser.parse(raw, s.weighedPrefix(), s.weighedMode())
+          .orElseThrow(() -> ApiException.validation("code", "code is empty"));
+    } catch (IllegalArgumentException e) {
+      throw ApiException.validation("code", e.getMessage());
+    }
+    return switch (code) {
+      case ScannedCode.Plain p -> {
+        UUID id = repo.productByBarcode(p.code()).orElseThrow(() -> ApiException.notFound("Barcode"));
+        PosProduct product = one(id);
+        if (product.soldBy() == SoldBy.WEIGHT) throw ApiException.validation("code", "weighed item: enter the weight");
+        yield new Scan(product, 1, product.soldBy().lineAmount(product.pricePaise(), 1));
+      }
+      case ScannedCode.Weighed w -> {
+        ProductPos pos = repo.findByPlu(normalizePlu(w.plu())).orElseThrow(() -> ApiException.notFound("Item code"));
+        PosProduct product = one(pos.productId());
+        if (product.soldBy() != SoldBy.WEIGHT) throw ApiException.validation("code", "this item code is not a weighed item");
+        long grams = w.mode() == WeighedMode.WEIGHT_GRAMS ? w.value() : product.soldBy().qtyForAmount(product.pricePaise(), w.value());
+        if (grams <= 0 || grams > 100_000) throw ApiException.validation("code", "weight on the label is out of range");
+        yield new Scan(product, (int) grams, product.soldBy().lineAmount(product.pricePaise(), (int) grams));
+      }
+    };
+  }
+
+  public Page<PosProduct> search(String q, int page, int size) {
+    Page<ProductData> found = catalog.posSearch(q, page, size);
+    return new Page<>(views(found.items()), found.page(), found.size(), found.total());
+  }
+
+  private PosProduct one(UUID id) {
+    List<ProductData> d = catalog.posProducts(List.of(id)).stream().filter(ProductData::active).toList();
+    if (d.isEmpty()) throw ApiException.notFound("Product");
+    return views(d).get(0);
+  }
+
+  private List<PosProduct> views(Collection<ProductData> items) {
+    List<UUID> ids = items.stream().map(ProductData::id).toList();
+    Map<UUID, ProductPos> pos = repo.forProducts(ids);
+    var stocks = inventory.stocks(ids);
+    return items.stream().map(p -> {
+      ProductPos a = pos.get(p.id());
+      return new PosProduct(p.id(), p.nameEn(), p.nameGu(), p.pricePaise(), p.mrpPaise(), a.soldBy(), a.gstPercent(), a.hsn(),
+          a.plu(), a.soldBy() == SoldBy.WEIGHT, stocks.get(p.id()).qty(), p.imageUrl(), p.coinRedeemable(), p.earnsCoins(),
+          repo.barcodesOf(p.id()));
+    }).toList();
+  }
+
+  // ---------- admin ----------
+  public PosAttributes attributes(UUID productId) {
+    catalog.adminGet(productId);
+    ProductPos p = repo.find(productId).orElse(ProductPos.defaults(productId));
+    return new PosAttributes(productId, p.soldBy(), p.plu(), p.gstPercent(), p.hsn(), p.soldBy() == SoldBy.WEIGHT,
+        repo.barcodesOf(productId));
+  }
+
+  /** Saves counter attributes and replaces the barcodes. Weighed items become counter-only. */
+  @Transactional
+  public PosAttributes save(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, List<String> barcodes,
+                            UUID actor) {
+    catalog.adminGet(productId);
+    String code = plu == null || plu.isBlank() ? null : plu.trim();
+    boolean digits = code != null && code.matches("\\d{1,6}");
+    if (soldBy == SoldBy.WEIGHT && (code == null || !digits)) {
+      throw ApiException.validation("plu", "weighed items need a numeric item code (PLU)");
+    }
+    if (code != null && !digits) throw ApiException.validation("plu", "digits only, up to 6");
+    if (code != null) code = normalizePlu(code);
+    if (!List.of(0, 3, 5, 12, 18, 28).contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
+    List<String> codes = barcodes == null ? List.of() : barcodes.stream().map(String::strip).filter(c -> !c.isEmpty()).distinct().toList();
+    if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
+      throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");
+    }
+    if (soldBy == SoldBy.WEIGHT && codes.stream().anyMatch(c -> c.length() == 13 && c.startsWith(shop.get().weighedPrefix()))) {
+      throw ApiException.validation("barcodes", "a code starting with the scale prefix would be read as a weighed label");
+    }
+    Optional<ProductPos> samePlu = code == null ? Optional.empty() : repo.findByPlu(code).filter(x -> !x.productId().equals(productId));
+    if (samePlu.isPresent()) throw ApiException.conflict("PLU_TAKEN", "Item code already used by another product", Map.of("plu", code));
+    repo.save(new ProductPos(productId, soldBy, code, gstPercent, hsn == null ? "" : hsn.strip()), clock.instant());
+    repo.replaceBarcodes(productId, codes, clock.instant()).ifPresent(taken -> {
+      throw ApiException.conflict("BARCODE_TAKEN", "Barcode already belongs to another product", Map.of("barcode", taken));
+    });
+    catalog.setPosOnly(productId, soldBy == SoldBy.WEIGHT);
+    audit.log(actor, "UPDATE", "product_pos", productId, soldBy + " gst " + gstPercent + " barcodes " + codes.size());
+    return attributes(productId);
+  }
+
+  /** Scale labels pad the item code with zeros; the shop types it without them. Both sides are compared without. */
+  static String normalizePlu(String digits) { return digits.replaceFirst("^0+(?!$)", ""); }
+
+  /** Product lookups by id for pricing. */
+  public Map<UUID, ProductPos> attributesFor(Collection<UUID> ids) { return repo.forProducts(ids); }
+
+  Map<UUID, ProductData> productsById(Collection<UUID> ids) {
+    return catalog.posProducts(ids).stream().collect(Collectors.toMap(ProductData::id, Function.identity()));
+  }
+}

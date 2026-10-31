@@ -1,0 +1,88 @@
+spring:
+  application:
+    name: vijay-mall
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/mall}
+    username: ${DB_USER:mall}
+    password: ${DB_PASSWORD:mall}
+    hikari:
+      maximum-pool-size: 20
+  flyway:
+    enabled: true
+  jackson:
+    default-property-inclusion: always
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 32
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USER:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    max-swallow-size: 6MB
+  forward-headers-strategy: framework
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-0123456789}
+    access-ttl-seconds: 900
+    refresh-ttl-days: 30
+  otp:
+    channel: ${OTP_CHANNEL:console}
+    pepper: ${OTP_PEPPER:dev-pepper}
+    fixed-code: ${OTP_FIXED_CODE:}
+    from: ${OTP_FROM:no-reply@vijaysupermall.example}
+  bootstrap-admin-email: ${ADMIN_EMAIL:}
+  images-dir: ${IMAGES_DIR:./data/images}
+  delivery:
+    fee-paise: 4000
+    free-above-paise: 49900
+  payment:
+    online-provider: razorpay
+    online-timeout-minutes: 15
+    razorpay-key-id: ${RAZORPAY_KEY_ID:}
+    razorpay-key-secret: ${RAZORPAY_KEY_SECRET:}
+    razorpay-webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+    razorpay-base-url: https://api.razorpay.com

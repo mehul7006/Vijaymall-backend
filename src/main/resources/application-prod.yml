@@ -1,0 +1,21 @@
+logging:
+  level:
+    root: INFO
+    com.vijay.mall: INFO
+    access: INFO
+  structured:
+    format:
+      console: logstash
+      file: logstash
+  file:
+    name: ${LOG_DIR:./logs}/mall.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 30
+      total-size-cap: 1GB
+springdoc:
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false

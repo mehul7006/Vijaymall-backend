@@ -1,0 +1,8 @@
+app:
+  otp:
+    channel: console
+    fixed-code: "12345"
+  bootstrap-admin-email: admin@vijaysupermall.local
+logging:
+  level:
+    com.vijay.mall: DEBUG
