@@ -23,7 +23,8 @@ public final class CouponRules {
       c -> Optional.ofNullable(c.coupon().categoryId())
           .flatMap(cat -> violation(c.lines().stream().noneMatch(l -> cat.equals(l.categoryId())), "CATEGORY")),
       c -> violation(c.coupon().perUserLimit() > 0 && c.userUses() >= c.coupon().perUserLimit(), "LIMIT_REACHED"),
-      c -> violation(c.coupon().totalLimit() > 0 && c.coupon().usedCount() >= c.coupon().totalLimit(), "LIMIT_REACHED"));
+      c -> violation(c.coupon().totalLimit() > 0 && c.coupon().usedCount() >= c.coupon().totalLimit(), "LIMIT_REACHED"),
+      c -> violation(c.coupon().firstOrderOnly() && c.priorOrders() > 0, "FIRST_ORDER_ONLY"));
 
   /** First violation, if any. Rules are evaluated lazily, so later rules do not run once one fails. */
   public static Optional<String> firstViolation(List<CouponRule> rules, CouponContext ctx) {

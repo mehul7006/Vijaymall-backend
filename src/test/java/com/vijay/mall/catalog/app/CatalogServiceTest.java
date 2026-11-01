@@ -484,4 +484,115 @@ class CatalogServiceTest {
     assertThatThrownBy(() -> service.updateBanner(id, "t", "s", null, null, null, true)).satisfies(t -> assertApi(t, 404, "NOT_FOUND"));
     verify(banners, never()).update(any(), any(), any(), any(), any(), any(), anyBoolean());
   }
+
+  // ---------- variants, ratings, saved-items helper, stock history ----------
+  private void stubInsert(UUID id) {
+    when(products.insert(any(), any(), any(), any(), anyLong(), anyLong(), any(), any(), anyBoolean(), anyBoolean(), any(), any(),
+        anyBoolean(), anyBoolean(), any())).thenReturn(id);
+    when(products.find(id)).thenReturn(Optional.of(data(id)));
+  }
+
+  @Test
+  void createPutsTheProductInAGroupWhenOneIsGiven() {
+    UUID id = UUID.randomUUID();
+    UUID group = UUID.randomUUID();
+    stubInsert(id);
+    service.create(new CatalogService.ProductInput(cat, "Atta", "આટો", null, 6000, 5000, null, null, true, false, null, null,
+        true, true, 0, 5, group), actor);
+    verify(products).setGroup(id, group);
+  }
+
+  @Test
+  void createWithoutAGroupLeavesTheProductAsItsOwnGroup() {
+    UUID id = UUID.randomUUID();
+    stubInsert(id);
+    service.create(input(6000, 5000, null, null, 0, 5), actor);
+    verify(products, never()).setGroup(any(), any());
+  }
+
+  @Test
+  void updateCanMoveAProductToAnotherGroupAndOtherwiseKeepsIt() {
+    UUID group = UUID.randomUUID();
+    when(products.find(pid)).thenReturn(Optional.of(data(pid)));
+    service.update(pid, new CatalogService.ProductInput(cat, "Atta", "આટો", null, 6000, 5000, null, null, true, false, null,
+        null, true, true, 0, 5, group), actor);
+    verify(products).setGroup(pid, group);
+
+    service.update(pid, input(6000, 5000, null, null, 0, 5), actor);
+    verify(products, org.mockito.Mockito.times(1)).setGroup(any(), any());
+  }
+
+  @Test
+  void productsWithoutAGroupAreTheirOwnGroupAndHaveNoReviews() {
+    ProductData d = data(pid);
+    assertThat(d.productGroupId()).isEqualTo(pid);
+    assertThat(d.rating()).isZero();
+    assertThat(d.reviewCount()).isZero();
+  }
+
+  @Test
+  void unitLabelIsThePackSizeOrTheUnitWhenThereIsNone() {
+    assertThat(data(pid).unitLabel()).isEqualTo("1 kg");
+    assertThat(new ProductData(pid, cat, "R", "R", "", 1, 1, "kg", "", null, true, false, null, null, true, true).unitLabel()).isEqualTo("kg");
+    assertThat(new ProductData(pid, cat, "R", "R", "", 1, 1, "pc", null, null, true, false, null, null, true, true).unitLabel()).isEqualTo("pc");
+  }
+
+  @Test
+  void pricedLinesCarryTheGujaratiNameAndPackLabel() {
+    when(products.findAll(any())).thenReturn(List.of(data(pid)));
+    PricedLine line = service.price(List.of(new CatalogService.ItemRequest(pid, 1))).get(0);
+    assertThat(line.nameGu()).isEqualTo("ચોખા");
+    assertThat(line.unitLabel()).isEqualTo("1 kg");
+  }
+
+  @Test
+  void visibleKeepsTheGivenOrderAndLeavesOutMissingInactiveAndCounterOnlyProducts() {
+    UUID y = UUID.randomUUID();
+    UUID inactive = UUID.randomUUID();
+    UUID counterOnly = UUID.randomUUID();
+    UUID missing = UUID.randomUUID();
+    List<UUID> ids = List.of(counterOnly, y, missing, inactive, pid);
+    when(products.findAll(ids)).thenReturn(List.of(data(pid), data(y), data(inactive, false, false, null, null), data(counterOnly)));
+    when(products.posOnlyAmong(ids)).thenReturn(java.util.Set.of(counterOnly));
+    stock.put(pid, new Stock(pid, 3, 5));
+
+    var out = service.visible(ids);
+
+    assertThat(out).extracting(com.vijay.mall.catalog.domain.Product::id).containsExactly(y, pid);
+    assertThat(out.get(1).inStock()).isTrue();
+    assertThat(out.get(0).inStock()).isFalse();
+  }
+
+  @Test
+  void visibleWithNothingToLookUpTouchesNothing() {
+    assertThat(service.visible(List.of())).isEmpty();
+    verifyNoInteractions(products);
+  }
+
+  @Test
+  void updateRatingIsStoredOnTheProduct() {
+    service.updateRating(pid, 4.5, 12);
+    verify(products).setRating(pid, 4.5, 12);
+  }
+
+  @Test
+  void stockMovementsShowProductNameAndPackLabel() {
+    UUID gone = UUID.randomUUID();
+    var moves = List.of(
+        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), pid, -2, "ORDER", null, null, NOW),
+        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), gone, 5, "RESTOCK", null, actor, NOW));
+    when(inventory.movements(null, 0, 20)).thenReturn(new Page<>(moves, 0, 20, 2));
+    when(products.findAll(any())).thenReturn(List.of(data(pid)));
+
+    var out = service.stockMovements(null, 0, 20);
+
+    assertThat(out.total()).isEqualTo(2);
+    assertThat(out.items().get(0).name()).isEqualTo("Rice");
+    assertThat(out.items().get(0).packLabel()).isEqualTo("1 kg");
+    assertThat(out.items().get(0).delta()).isEqualTo(-2);
+    assertThat(out.items().get(0).reason()).isEqualTo("ORDER");
+    assertThat(out.items().get(1).name()).isEqualTo("?");
+    assertThat(out.items().get(1).packLabel()).isEmpty();
+    assertThat(out.items().get(1).cashierId()).isEqualTo(actor);
+  }
 }

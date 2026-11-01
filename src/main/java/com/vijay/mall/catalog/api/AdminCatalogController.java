@@ -35,12 +35,13 @@ public class AdminCatalogController {
   public record ProductBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu,
                             String description, @Min(0) long mrpPaise, @Min(0) long pricePaise, String unit,
                             String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
-                            Boolean earnsCoins, Boolean coinRedeemable, Integer qtyOnHand, Integer lowThreshold) {
+                            Boolean earnsCoins, Boolean coinRedeemable, Integer qtyOnHand, Integer lowThreshold,
+                            UUID productGroupId) {
     CatalogService.ProductInput toInput() {
       return new CatalogService.ProductInput(categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit,
           packSize, active == null || active, Boolean.TRUE.equals(hotSale), hotStart, hotEnd,
           earnsCoins == null || earnsCoins, coinRedeemable == null || coinRedeemable,
-          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold);
+          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold, productGroupId);
     }
   }
   public record StockBody(int delta, String reason) {}
@@ -79,6 +80,14 @@ public class AdminCatalogController {
   @PostMapping("/products/{id}/stock")
   public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b) {
     return catalog.restock(id, b.delta(), b.reason(), CurrentUser.id());
+  }
+
+  /** Stock history, newest first. Leave productId out for every product. */
+  @GetMapping("/stock-movements")
+  public Page<CatalogService.StockMovementView> stockMovements(@RequestParam(required = false) UUID productId,
+                                                              @RequestParam(defaultValue = "0") int page,
+                                                              @RequestParam(defaultValue = "20") int size) {
+    return catalog.stockMovements(productId, page, size);
   }
 
   @PostMapping("/products/{id}/image")

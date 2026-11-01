@@ -12,6 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryRepository {
   public record Stock(UUID productId, int qty, int low) {}
 
+  /** One line of the stock history. refId is the order or sale behind it; actorId the person who adjusted it. */
+  public record Movement(UUID id, UUID productId, int delta, String reason, UUID refId, UUID actorId, Instant at) {}
+
   private final InventoryJpa jpa;
   private final StockMovementJpa movements;
 
@@ -63,6 +66,16 @@ public class InventoryRepository {
     m.actorId = actorId;
     m.createdAt = now;
     movements.save(m);
+  }
+
+  /** Stock history, newest first; one product, or every product when productId is null. */
+  public com.vijay.mall.common.Page<Movement> movementPage(UUID productId, int page, int size) {
+    PageRequest req = PageRequest.of(page, size, org.springframework.data.domain.Sort.by(
+        org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+    var result = productId == null ? movements.findAll(req) : movements.findByProductId(productId, req);
+    List<Movement> rows = result.getContent().stream()
+        .map(m -> new Movement(m.id, m.productId, m.delta, m.reason, m.refId, m.actorId, m.createdAt)).toList();
+    return new com.vijay.mall.common.Page<>(rows, page, size, result.getTotalElements());
   }
 
   /** Products at or below their own threshold, emptiest first. The caller filters inactive products. */

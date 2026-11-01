@@ -1,5 +1,6 @@
 package com.vijay.mall.wallet.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.wallet.app.OrderNumberLookup;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/wallet")
 public class WalletController {
+  @Schema(name = "WalletRule")
   public record RuleView(String name, long spendPaise, long coins, String mode) {}
 
   public record WalletView(int coins, long valuePaise, long paisePerCoin, int maxRedeemPercent, List<RuleView> rules) {}

@@ -11,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 interface OtpJpa extends JpaRepository<OtpChallengeEntity, UUID> {
   Optional<OtpChallengeEntity> findFirstByEmailAndConsumedFalseOrderByCreatedAtDesc(String email);
 
+  Optional<OtpChallengeEntity> findFirstByMobileAndConsumedFalseOrderByCreatedAtDesc(String mobile);
+
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query("update OtpChallengeEntity o set o.attempts = o.attempts + 1 where o.id = :id")
   int addAttempt(@Param("id") UUID id);

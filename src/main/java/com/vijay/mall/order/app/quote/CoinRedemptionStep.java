@@ -19,6 +19,10 @@ public class CoinRedemptionStep implements QuoteStep {
   @Override
   public void apply(QuoteContext c) {
     if (c.request.mode() == CoinRedemption.Mode.NONE) return;
+    if (c.couponBlocksCoins) {
+      c.warnings.add("Coins cannot be used together with coupon " + c.couponCode);
+      return;
+    }
     CoinSettings s = wallet.settings();
     long redeemable = c.lines.stream().filter(PricedLine::coinRedeemable).mapToLong(PricedLine::lineTotalPaise).sum();
     long base = Math.min(redeemable, c.subtotal - c.couponDiscount);

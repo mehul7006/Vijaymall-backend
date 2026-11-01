@@ -27,6 +27,8 @@ class OrderEntity extends BaseEntity {
   String paymentMethod;
   String paymentStatus;
   String addressSnapshot;
+  String deliverySlot;
+  String cancelReason;
   Instant expiresAt;
   Instant placedAt;
   Instant updatedAt;

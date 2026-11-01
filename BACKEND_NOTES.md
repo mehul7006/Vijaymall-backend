@@ -16,7 +16,7 @@ OTP_FROM ADMIN_EMAIL IMAGES_DIR RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEB
 In production set a long random `JWT_SECRET` and `OTP_PEPPER`, `OTP_CHANNEL=email`, and `ADMIN_EMAIL` for the first admin.
 
 ## Delivery fee
-`app.delivery.fee-paise` (4000 = Rs 40) and `app.delivery.free-above-paise` (49900) in application.yml.
+Delivery is free for now: `app.delivery.fee-paise` defaults to 0 (env `DELIVERY_FEE_PAISE`; 4000 = Rs 40). `app.delivery.free-above-paise` (49900) only matters once a fee is set. An admin-editable rule is planned.
 
 ## Where things are
 Modular monolith, one package per module (`api`, `app`, `domain`, `infra`). Modules call each other only through `*Service` classes

@@ -15,7 +15,7 @@ public class ShopSettingRepository {
   public ShopSetting get() {
     ShopSettingEntity e = jpa.findById(1).orElseThrow();
     return new ShopSetting(e.shopName, e.address, e.phone, e.gstin, e.stateCode, e.upiId, e.invoicePrefix,
-        e.receiptFooter, e.weighedPrefix, WeighedMode.valueOf(e.weighedMode));
+        e.receiptFooter, e.weighedPrefix, WeighedMode.valueOf(e.weighedMode), e.promise == null ? "" : e.promise);
   }
 
   @Transactional
@@ -24,6 +24,7 @@ public class ShopSettingRepository {
     e.shopName = s.shopName();
     e.address = s.address();
     e.phone = s.phone();
+    e.promise = s.promise() == null ? "" : s.promise();
     e.gstin = s.gstin();
     e.stateCode = s.stateCode();
     e.upiId = s.upiId();

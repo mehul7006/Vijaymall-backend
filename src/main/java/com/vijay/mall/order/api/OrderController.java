@@ -10,6 +10,7 @@ import com.vijay.mall.wallet.domain.CoinRedemption;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -28,12 +29,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class OrderController {
   public record PlaceBody(@NotEmpty List< CartController.ItemBody> items, String couponCode,
                           CoinRedemption.Mode coinMode, Integer percent, Fulfilment fulfilment, UUID addressId,
-                          @NotNull String paymentMethod, long expectedTotalPaise) {
+                          @NotNull String paymentMethod, long expectedTotalPaise, @Size(max = 40) String slot) {
     OrderService.PlaceCommand toCommand() {
       QuoteRequest q = new CartController.QuoteBody(items, couponCode, coinMode, percent, fulfilment).toRequest();
-      return new OrderService.PlaceCommand(q, addressId, paymentMethod, expectedTotalPaise);
+      return new OrderService.PlaceCommand(q, addressId, paymentMethod, expectedTotalPaise, slot);
     }
   }
+
+  /** The body is optional; the app sends the reason the customer picked. */
+  public record CancelBody(@Size(max = 200) String reason) {}
 
   private final OrderService orders;
 
@@ -54,5 +58,7 @@ public class OrderController {
   public OrderViews.View get(@PathVariable UUID id) { return orders.get(CurrentUser.id(), id); }
 
   @PostMapping("/{id}/cancel")
-  public OrderViews.View cancel(@PathVariable UUID id) { return orders.customerCancel(CurrentUser.id(), id); }
+  public OrderViews.View cancel(@PathVariable UUID id, @Valid @RequestBody(required = false) CancelBody body) {
+    return orders.customerCancel(CurrentUser.id(), id, body == null ? null : body.reason());
+  }
 }

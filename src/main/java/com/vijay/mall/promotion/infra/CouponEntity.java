@@ -22,6 +22,8 @@ class CouponEntity extends BaseEntity {
   Instant startAt;
   Instant endAt;
   boolean active;
+  boolean worksWithCoins = true;
+  boolean firstOrderOnly;
 
   protected CouponEntity() {}
 }

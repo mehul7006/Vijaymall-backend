@@ -34,13 +34,26 @@ public class PromotionService {
     return ApiException.unprocessable("COUPON_INVALID", "This coupon cannot be used", Map.of("reason", reason));
   }
 
+  /** What a coupon does to a cart: the discount, and whether coins may still be spent in the same order. */
+  public record Applied(long discountPaise, boolean worksWithCoins) {}
+
   /** Discount in paise for a code on a priced cart; throws COUPON_INVALID with a reason when not usable. */
   public long discountFor(String code, UUID userId, List<PricedLine> lines, long subtotalPaise) {
+    return apply(code, userId, lines, subtotalPaise, () -> 0).discountPaise();
+  }
+
+  /**
+   * Checks every coupon rule and prices the discount. {@code priorOrders} counts the customer's earlier orders; it is
+   * only called when the coupon is for the first order, so other coupons cost no extra query.
+   */
+  public Applied apply(String code, UUID userId, List<PricedLine> lines, long subtotalPaise,
+                       java.util.function.IntSupplier priorOrders) {
     Coupon c = coupons.findByCode(normalize(code)).orElseThrow(() -> invalid("NOT_FOUND"));
     int uses = coupons.userUses(c.id(), userId);
-    var ctx = new CouponContext(c, clock.instant(), subtotalPaise, lines, uses);
+    int prior = c.firstOrderOnly() ? priorOrders.getAsInt() : 0;
+    var ctx = new CouponContext(c, clock.instant(), subtotalPaise, lines, uses, prior);
     CouponRules.firstViolation(CouponRules.STANDARD, ctx).ifPresent(r -> { throw invalid(r); });
-    return CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise));
+    return new Applied(CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise)), c.worksWithCoins());
   }
 
   /** Counts one use for an order. Called inside the order transaction. */
@@ -90,7 +103,8 @@ public class PromotionService {
 
   private static Coupon normalized(Coupon c) {
     return new Coupon(c.id(), normalize(c.code()), c.kind(), c.value(), c.minOrderPaise(), c.maxDiscountPaise(),
-        c.categoryId(), c.perUserLimit(), c.totalLimit(), c.usedCount(), c.startAt(), c.endAt(), c.active());
+        c.categoryId(), c.perUserLimit(), c.totalLimit(), c.usedCount(), c.startAt(), c.endAt(), c.active(),
+        c.worksWithCoins(), c.firstOrderOnly());
   }
 
   private static void check(Coupon c) {

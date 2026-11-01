@@ -1,5 +1,7 @@
 package com.vijay.mall.notification.app;
 
+import com.vijay.mall.common.Page;
+import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.outbox.OutboxMessage;
 import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.notification.infra.NotificationRepository;
@@ -17,6 +19,9 @@ import tools.jackson.databind.json.JsonMapper;
 @Service
 public class NotificationService {
   private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
+
+  /** One page of the person's notifications, plus how many are still unread. */
+  public record Inbox(java.util.List<NotificationRepository.Row> items, int page, int size, long total, long unread) {}
 
   private final NotificationRepository repo;
   private final PushSender push;
@@ -52,6 +57,19 @@ public class NotificationService {
       log.error("Notification failed for {}: {}", m.type(), e.getMessage());
     }
   }
+
+  public Inbox inbox(UUID userId, int page, int size) {
+    Page<NotificationRepository.Row> p = repo.page(userId, Math.max(0, page), Page.clampSize(size));
+    return new Inbox(p.items(), p.page(), p.size(), p.total(), repo.unread(userId));
+  }
+
+  /** Marks one notification read. Reading it twice is fine; someone else's is "not found". */
+  public void markRead(UUID userId, UUID id) {
+    if (!repo.owns(userId, id)) throw ApiException.notFound("Notification");
+    repo.markRead(userId, id, clock.instant());
+  }
+
+  public void markAllRead(UUID userId) { repo.markAllRead(userId, clock.instant()); }
 
   private void notify(UUID userId, String title, String body, String kind, String ref) {
     repo.insert(userId, title, body, kind, ref, clock.instant());

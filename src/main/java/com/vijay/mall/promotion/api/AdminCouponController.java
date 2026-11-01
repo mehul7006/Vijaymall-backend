@@ -25,11 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminCouponController {
   public record Body(@NotBlank String code, @NotBlank String kind, @Min(1) long value, Long minOrderPaise,
                      Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
-                     Instant startAt, Instant endAt, Boolean active) {
+                     Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly) {
     Coupon toCoupon() {
       return new Coupon(null, code, kind, value, minOrderPaise == null ? 0 : minOrderPaise,
           maxDiscountPaise == null ? 0 : maxDiscountPaise, categoryId, perUserLimit == null ? 0 : perUserLimit,
-          totalLimit == null ? 0 : totalLimit, 0, startAt, endAt, active == null || active);
+          totalLimit == null ? 0 : totalLimit, 0, startAt, endAt, active == null || active,
+          worksWithCoins == null || worksWithCoins, Boolean.TRUE.equals(firstOrderOnly));
     }
   }
 

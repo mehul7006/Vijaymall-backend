@@ -25,6 +25,23 @@ public class OtpRepository {
     jpa.save(e);
   }
 
+  /** A code sent to a mobile number; the email column stays empty. */
+  @Transactional
+  public void insertMobile(String mobile, String hash, Instant expires, Instant now) {
+    OtpChallengeEntity e = new OtpChallengeEntity();
+    e.id = UUID.randomUUID();
+    e.mobile = mobile;
+    e.otpHash = hash;
+    e.expiresAt = expires;
+    e.createdAt = now;
+    jpa.save(e);
+  }
+
+  public Optional<Challenge> latestOpenMobile(String mobile) {
+    return jpa.findFirstByMobileAndConsumedFalseOrderByCreatedAtDesc(mobile)
+        .map(e -> new Challenge(e.id, e.otpHash, e.expiresAt, e.attempts));
+  }
+
   public Optional<Challenge> latestOpen(String email) {
     return jpa.findFirstByEmailAndConsumedFalseOrderByCreatedAtDesc(email)
         .map(e -> new Challenge(e.id, e.otpHash, e.expiresAt, e.attempts));

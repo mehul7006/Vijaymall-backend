@@ -1,7 +1,11 @@
 app:
   otp:
     channel: console
+    sms-channel: console
     fixed-code: "12345"
+  cors:
+    # flutter run -d chrome picks a random port, so allow any local port
+    allowed-origin-patterns: http://localhost:*,http://127.0.0.1:*
   bootstrap-admin-email: admin@vijaysupermall.local
 logging:
   level:
