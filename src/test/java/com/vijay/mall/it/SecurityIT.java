@@ -17,6 +17,13 @@ class SecurityIT extends IntegrationTestBase {
   }
 
   @Test
+  void couponOffersArePublicButTheyCannotBeChangedAnonymously() {
+    assertThat(get("/api/v1/coupons", null).getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(post("/api/v1/coupons", null, Map.of("code", "X")).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    assertThat(get("/api/v1/admin/coupons", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+  }
+
+  @Test
   void ordersNeedSignIn() {
     var res = get("/api/v1/orders", null);
     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);

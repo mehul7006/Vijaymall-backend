@@ -25,7 +25,8 @@ public class ProductRepository {
 
   private static ProductData toDomain(ProductEntity e) {
     return new ProductData(e.id, e.categoryId, e.nameEn, e.nameGu, e.description, e.mrpPaise, e.pricePaise, e.unit,
-        e.packSize, e.imageUrl, e.active, e.hotSale, e.hotStart, e.hotEnd, e.earnsCoins, e.coinRedeemable);
+        e.packSize, e.imageUrl, e.active, e.hotSale, e.hotStart, e.hotEnd, e.earnsCoins, e.coinRedeemable,
+        e.productGroupId == null ? e.id : e.productGroupId, e.rating, e.reviewCount);
   }
 
   public Optional<ProductData> find(UUID id) { return jpa.findById(id).map(ProductRepository::toDomain); }
@@ -77,6 +78,7 @@ public class ProductRepository {
                      boolean earns, boolean redeemable, Instant now) {
     ProductEntity e = new ProductEntity();
     e.id = UUID.randomUUID();
+    e.productGroupId = e.id; // alone until an admin groups it with other packs
     e.createdAt = now;
     fill(e, categoryId, nameEn, nameGu, description, mrp, price, unit, packSize, active, hotSale, hotStart, hotEnd, earns,
         redeemable, now);
@@ -89,6 +91,19 @@ public class ProductRepository {
                      boolean earns, boolean redeemable, Instant now) {
     jpa.findById(id).ifPresent(e -> fill(e, categoryId, nameEn, nameGu, description, mrp, price, unit, packSize, active,
         hotSale, hotStart, hotEnd, earns, redeemable, now));
+  }
+
+  /** Puts the product in the same group as its other packs. */
+  @Transactional
+  public void setGroup(UUID id, UUID groupId) { jpa.findById(id).ifPresent(e -> e.productGroupId = groupId); }
+
+  /** Stores the review average and count shown on product cards. */
+  @Transactional
+  public void setRating(UUID id, double rating, int reviewCount) {
+    jpa.findById(id).ifPresent(e -> {
+      e.rating = rating;
+      e.reviewCount = reviewCount;
+    });
   }
 
   @Transactional

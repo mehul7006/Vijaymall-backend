@@ -141,4 +141,15 @@ class InventoryServiceTest {
     assertThat(service.lowStock(5)).containsExactly(new Stock(A, 1, 5));
     verify(repo, never()).movement(any(), anyInt(), any(), isNull(), isNull(), any());
   }
+
+  @Test
+  void movementsAreClampedAndPassedToTheRepository() {
+    var page = new com.vijay.mall.common.Page<InventoryRepository.Movement>(List.of(), 0, 50, 0);
+    when(repo.movementPage(A, 0, 50)).thenReturn(page);
+    assertThat(service.movements(A, -4, 500)).isSameAs(page);
+
+    var all = new com.vijay.mall.common.Page<InventoryRepository.Movement>(List.of(), 2, 20, 0);
+    when(repo.movementPage(null, 2, 20)).thenReturn(all);
+    assertThat(service.movements(null, 2, 20)).isSameAs(all);
+  }
 }

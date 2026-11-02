@@ -2,6 +2,8 @@ package com.vijay.mall.identity.api;
 
 import com.vijay.mall.common.ratelimit.RateLimitFilter;
 import com.vijay.mall.identity.app.AuthService;
+import com.vijay.mall.identity.app.MobileAuthService;
+import com.vijay.mall.identity.app.MobileOtpService;
 import com.vijay.mall.identity.app.OtpService;
 import com.vijay.mall.identity.app.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,16 +22,23 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
   public record SendOtp(@NotBlank @Email String email) {}
   public record VerifyOtp(@NotBlank @Email String email, @NotBlank String otp, String deviceId) {}
+  public record SendMobileOtp(@NotBlank String mobile) {}
+  public record VerifyMobileOtp(@NotBlank String mobile, @NotBlank String otp, String deviceId) {}
   public record RefreshReq(@NotBlank String refreshToken) {}
 
   private final OtpService otp;
   private final AuthService auth;
   private final TokenService tokens;
+  private final MobileOtpService mobileOtp;
+  private final MobileAuthService mobileAuth;
 
-  public AuthController(OtpService otp, AuthService auth, TokenService tokens) {
+  public AuthController(OtpService otp, AuthService auth, TokenService tokens, MobileOtpService mobileOtp,
+                        MobileAuthService mobileAuth) {
     this.otp = otp;
     this.auth = auth;
     this.tokens = tokens;
+    this.mobileOtp = mobileOtp;
+    this.mobileAuth = mobileAuth;
   }
 
   @PostMapping("/otp/send")
@@ -41,6 +50,17 @@ public class AuthController {
   @PostMapping("/otp/verify")
   public TokenService.AuthResult verify(@Valid @RequestBody VerifyOtp body) {
     return auth.verify(body.email(), body.otp(), body.deviceId());
+  }
+
+  @PostMapping("/otp/send-mobile")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void sendMobile(@Valid @RequestBody SendMobileOtp body, HttpServletRequest req) {
+    mobileOtp.send(body.mobile(), RateLimitFilter.clientIp(req));
+  }
+
+  @PostMapping("/otp/verify-mobile")
+  public TokenService.AuthResult verifyMobile(@Valid @RequestBody VerifyMobileOtp body) {
+    return mobileAuth.verify(body.mobile(), body.otp(), body.deviceId());
   }
 
   @PostMapping("/refresh")

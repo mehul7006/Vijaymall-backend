@@ -8,6 +8,7 @@ import com.vijay.mall.identity.infra.DeviceRepository;
 import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +35,11 @@ public class ProfileService {
     if (mobile != null && !mobile.isBlank() && !mobile.matches("\\d{10}")) {
       throw ApiException.validation("mobile", "must be 10 digits");
     }
-    users.updateProfile(id, name == null ? null : name.trim(), (mobile == null || mobile.isBlank()) ? null : mobile, clock.instant());
+    String newMobile = (mobile == null || mobile.isBlank()) ? null : mobile;
+    if (users.mobileLocked(id, newMobile)) {
+      throw ApiException.conflict("MOBILE_VERIFIED", "A verified mobile number cannot be changed here", Map.of());
+    }
+    users.updateProfile(id, name == null ? null : name.trim(), newMobile, clock.instant());
     return get(id);
   }
 

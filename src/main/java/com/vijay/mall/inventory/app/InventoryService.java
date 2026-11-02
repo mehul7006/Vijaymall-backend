@@ -98,4 +98,9 @@ public class InventoryService {
   }
 
   public List<InventoryRepository.Stock> lowStock(int limit) { return repo.lowStock(limit); }
+
+  /** Stock history, newest first. productId null means all products. */
+  public com.vijay.mall.common.Page<InventoryRepository.Movement> movements(UUID productId, int page, int size) {
+    return repo.movementPage(productId, Math.max(0, page), com.vijay.mall.common.Page.clampSize(size));
+  }
 }

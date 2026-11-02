@@ -7,11 +7,23 @@ import java.util.UUID;
 public record ProductData(UUID id, UUID categoryId, String nameEn, String nameGu, String description, long mrpPaise,
                           long pricePaise, String unit, String packSize, String imageUrl, boolean active,
                           boolean hotSale, Instant hotStart, Instant hotEnd, boolean earnsCoins,
-                          boolean coinRedeemable) {
+                          boolean coinRedeemable, UUID productGroupId, double rating, int reviewCount) {
+
+  /** A product that is its own group and has no reviews. */
+  public ProductData(UUID id, UUID categoryId, String nameEn, String nameGu, String description, long mrpPaise,
+                     long pricePaise, String unit, String packSize, String imageUrl, boolean active,
+                     boolean hotSale, Instant hotStart, Instant hotEnd, boolean earnsCoins,
+                     boolean coinRedeemable) {
+    this(id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl, active,
+        hotSale, hotStart, hotEnd, earnsCoins, coinRedeemable, id, 0, 0);
+  }
+
+  /** Text shown next to the price: the pack size, or the unit when the product has no pack size. */
+  public String unitLabel() { return packSize == null || packSize.isBlank() ? unit : packSize; }
 
   public AdminProduct withStock(int qtyOnHand, int lowThreshold) {
     return new AdminProduct(id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl,
         qtyOnHand > 0, Math.min(qtyOnHand, 99), hotSale, earnsCoins, coinRedeemable, qtyOnHand, lowThreshold, active,
-        hotStart, hotEnd);
+        hotStart, hotEnd, productGroupId, rating, reviewCount);
   }
 }

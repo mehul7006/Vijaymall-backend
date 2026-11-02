@@ -71,13 +71,18 @@ app:
     refresh-ttl-days: 30
   otp:
     channel: ${OTP_CHANNEL:console}
+    # How mobile (SMS) codes are delivered: console (log it, dev only) or none (mobile login answers 503).
+    sms-channel: ${SMS_CHANNEL:none}
     pepper: ${OTP_PEPPER:dev-pepper}
     fixed-code: ${OTP_FIXED_CODE:}
     from: ${OTP_FROM:no-reply@vijaysupermall.example}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   bootstrap-admin-email: ${ADMIN_EMAIL:}
   images-dir: ${IMAGES_DIR:./data/images}
   delivery:
-    fee-paise: 4000
+    # Delivery is free for now. An admin-editable rule comes later; until then set DELIVERY_FEE_PAISE (4000 = Rs 40).
+    fee-paise: ${DELIVERY_FEE_PAISE:0}
     free-above-paise: 49900
   payment:
     online-provider: razorpay

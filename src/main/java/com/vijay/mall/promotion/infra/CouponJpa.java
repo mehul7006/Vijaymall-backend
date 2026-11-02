@@ -11,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 interface CouponJpa extends JpaRepository<CouponEntity, UUID> {
   List<CouponEntity> findAllByOrderByCodeAsc();
 
+  List<CouponEntity> findAllByActiveTrueOrderByCodeAsc();
+
   Optional<CouponEntity> findByCode(String code);
 
   /** Atomic: counts a use only while the total limit allows it. */

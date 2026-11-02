@@ -19,7 +19,7 @@ public class CouponRepository {
 
   private static Coupon toDomain(CouponEntity e) {
     return new Coupon(e.id, e.code, e.kind, e.amount, e.minOrderPaise, e.maxDiscountPaise, e.categoryId, e.perUserLimit,
-        e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active);
+        e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active, e.worksWithCoins, e.firstOrderOnly);
   }
 
   private static void fill(CouponEntity e, Coupon c) {
@@ -34,9 +34,15 @@ public class CouponRepository {
     e.startAt = c.startAt();
     e.endAt = c.endAt();
     e.active = c.active();
+    e.worksWithCoins = c.worksWithCoins();
+    e.firstOrderOnly = c.firstOrderOnly();
   }
 
   public List<Coupon> all() { return coupons.findAllByOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList(); }
+
+  public List<Coupon> allActive() {
+    return coupons.findAllByActiveTrueOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList();
+  }
 
   public Optional<Coupon> find(UUID id) { return coupons.findById(id).map(CouponRepository::toDomain); }
 

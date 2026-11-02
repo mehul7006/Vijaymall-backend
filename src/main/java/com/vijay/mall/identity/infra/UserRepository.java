@@ -40,17 +40,61 @@ public class UserRepository {
   public void updateProfile(UUID id, String name, String mobile, Instant now) {
     jpa.findById(id).ifPresent(e -> {
       e.name = name;
-      e.mobile = mobile;
+      // A verified number is only ever replaced by another number, never blanked by a name-only update.
+      if (!(e.mobileVerified && mobile == null)) {
+        if (!java.util.Objects.equals(e.mobile, mobile)) e.mobileVerified = false;
+        e.mobile = mobile;
+      }
       e.updatedAt = now;
     });
+  }
+
+  /** True when this account's mobile was proven by OTP and {@code newMobile} would change it. */
+  public boolean mobileLocked(UUID id, String newMobile) {
+    return newMobile != null
+        && jpa.findById(id).map(e -> e.mobileVerified && !newMobile.equals(e.mobile)).orElse(false);
+  }
+
+  /** The account that proved ownership of this number with an OTP. */
+  public Optional<User> findByVerifiedMobile(String mobile) {
+    return jpa.findFirstByMobileAndMobileVerifiedTrue(mobile).map(UserRepository::toDomain);
+  }
+
+  /**
+   * A customer the shop created at the counter with this number can claim it by proving the number with an OTP, so
+   * the coins and history earned at the counter show up in the app.
+   */
+  @Transactional
+  public Optional<User> adoptCounterCustomer(String mobile) {
+    return jpa.findFirstByMobileAndSourceOrderByCreatedAtAsc(mobile, "POS").map(e -> {
+      e.mobileVerified = true;
+      return toDomain(e);
+    });
+  }
+
+  /** A customer who signed up with a verified mobile number and no email. */
+  @Transactional
+  public User insertMobileCustomer(String mobile, Instant now) {
+    UserEntity e = new UserEntity();
+    e.id = UUID.randomUUID();
+    e.mobile = mobile;
+    e.mobileVerified = true;
+    e.role = "CUSTOMER";
+    e.status = "ACTIVE";
+    e.createdAt = now;
+    e.updatedAt = now;
+    return toDomain(jpa.save(e));
   }
 
   @Transactional
   public void setRole(UUID id, String role) { jpa.findById(id).ifPresent(e -> e.role = role); }
 
-  /** Earliest account with this mobile number, whether it signed up in the app or was made at the counter. */
+  /** The account that owns this number: the one that verified it, else the earliest (app or counter) that lists it. */
   public Optional<User> findByMobile(String mobile) {
-    return jpa.findFirstByMobileOrderByCreatedAtAsc(mobile).map(UserRepository::toDomain);
+    // Prefer the account that proved the number, so counter coins go to the person who really owns it.
+    return jpa.findFirstByMobileAndMobileVerifiedTrue(mobile)
+        .or(() -> jpa.findFirstByMobileOrderByCreatedAtAsc(mobile))
+        .map(UserRepository::toDomain);
   }
 
   /** A customer made at the shop counter; it has no real email, so a placeholder address is used. */

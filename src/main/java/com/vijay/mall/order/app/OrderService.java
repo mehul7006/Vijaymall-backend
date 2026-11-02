@@ -44,7 +44,15 @@ import tools.jackson.databind.json.JsonMapper;
 public class OrderService implements OrderNumberLookup {
   private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
-  public record PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise) {}
+  /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
+  public record PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise,
+                             String slot) {
+    public PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise) {
+      this(quote, addressId, paymentMethod, expectedTotalPaise, null);
+    }
+  }
+
+  static final int MAX_SLOT = 40;
 
   private final OrderRepository repo;
   private final QuoteService quotes;
@@ -94,6 +102,8 @@ public class OrderService implements OrderNumberLookup {
 
   private UUID doPlace(UUID userId, String idemKey, PlaceCommand cmd) {
     String method = cmd.paymentMethod();
+    String slot = cmd.slot() == null || cmd.slot().isBlank() ? null : cmd.slot().trim();
+    if (slot != null && slot.length() > MAX_SLOT) throw ApiException.validation("slot", "must be at most " + MAX_SLOT + " characters");
     if (!"COD".equals(method) && !"ONLINE".equals(method)) throw ApiException.validation("paymentMethod", "COD or ONLINE");
     payments.requireEnabled(method);
     Quote q = quotes.quote(userId, cmd.quote());
@@ -116,11 +126,12 @@ public class OrderService implements OrderNumberLookup {
 
     repo.insert(new OrderRepository.NewOrder(orderId, orderNo, userId, idemKey, f.name(), status, q.subtotalPaise(),
         q.couponCode(), q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), q.deliveryFeePaise(),
-        q.totalPaise(), (int) q.coinsToEarn(), method, needsPayment ? "INITIATED" : "NONE", addressJson, expires, now));
+        q.totalPaise(), (int) q.coinsToEarn(), method, needsPayment ? "INITIATED" : "NONE", addressJson, expires, now,
+        slot));
 
     for (Quote.Line l : q.lines()) {
       repo.insertItem(orderId, new OrderRepository.NewItem(l.productId(), l.name(), l.unitPricePaise(), l.qty(),
-          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable()));
+          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel()));
     }
     repo.insertHistory(orderId, null, status, userId, null, now);
 
@@ -145,13 +156,19 @@ public class OrderService implements OrderNumberLookup {
   }
 
   @Transactional
-  public OrderViews.View customerCancel(UUID userId, UUID orderId) {
+  public OrderViews.View customerCancel(UUID userId, UUID orderId) { return customerCancel(userId, orderId, null); }
+
+  /** Same, keeping the reason the customer gave (blank means none). */
+  @Transactional
+  public OrderViews.View customerCancel(UUID userId, UUID orderId, String reason) {
     OrderRepository.Row row = repo.find(orderId).filter(r -> r.userId().equals(userId))
         .orElseThrow(() -> ApiException.notFound("Order"));
     if (!OrderStatus.valueOf(row.status()).customerCanCancel()) {
       throw ApiException.conflict("ILLEGAL_TRANSITION", "This order can no longer be cancelled", Map.of());
     }
-    transition(row, OrderStatus.CANCELLED, userId, "cancelled by customer");
+    String why = reason == null || reason.isBlank() ? null : reason.trim();
+    transition(row, OrderStatus.CANCELLED, userId, why == null ? "cancelled by customer" : "cancelled by customer: " + why);
+    if (why != null) repo.setCancelReason(orderId, why);
     return view(repo.find(orderId).orElseThrow());
   }
 
@@ -266,7 +283,8 @@ public class OrderService implements OrderNumberLookup {
     PaymentSession session = OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? payments.sessionFor(r.id()).orElse(null) : null;
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
         repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
-        r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt());
+        r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
+        r.deliverySlot(), r.cancelReason());
   }
 
   private String toJson(Address a) {

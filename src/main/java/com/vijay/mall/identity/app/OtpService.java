@@ -37,6 +37,16 @@ public class OtpService {
     this.props = props;
     this.clock = clock;
     this.limiter = limiter;
+    if (fixedCode().isPresent()) {
+      log.warn("OTP fixed code is ACTIVE: every login code is the configured OTP_FIXED_CODE. Never use this in production.");
+    } else {
+      log.info("OTP fixed code is not set: login codes are random (set OTP_FIXED_CODE, or run the dev profile, for a fixed code).");
+    }
+  }
+
+  /** The configured fixed code, trimmed; empty when none is set. */
+  private java.util.Optional<String> fixedCode() {
+    return java.util.Optional.ofNullable(props.otp()).map(AppProps.Otp::fixedCode).map(String::trim).filter(c -> !c.isEmpty());
   }
 
   public static String normalize(String email) { return email.trim().toLowerCase(); }
@@ -46,8 +56,7 @@ public class OtpService {
     String email = normalize(rawEmail);
     limiter.check("otp-email:" + email, 5, 3600);
     limiter.check("otp-ip:" + ip, ipPerHour, 3600);
-    String fixed = props.otp().fixedCode();
-    String code = (fixed != null && !fixed.isBlank()) ? fixed : String.format("%05d", random.nextInt(100000));
+    String code = fixedCode().orElseGet(() -> String.format("%05d", random.nextInt(100000)));
     Instant now = clock.instant();
     repo.insert(email, OtpHasher.otpHash(props.otp().pepper(), email, code), now.plus(Duration.ofMinutes(5)), now);
     sender.send(email, code);

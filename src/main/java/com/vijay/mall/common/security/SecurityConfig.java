@@ -14,7 +14,9 @@ import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -73,12 +75,14 @@ public class SecurityConfig {
       return list;
     });
 
-    http.csrf(csrf -> csrf.disable())
+    http.cors(Customizer.withDefaults()) // uses the CorsConfigurationSource bean (CorsConfig)
+        .csrf(csrf -> csrf.disable())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(a -> a
             .requestMatchers("/api/v1/auth/**", "/api/v1/payments/webhook/**",
                 "/actuator/health", "/actuator/health/**", "/img/**",
                 "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/v1/coupons", "/api/v1/shop-settings").permitAll()
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
             .requestMatchers("/api/v1/pos/**").hasAnyRole("CASHIER", "ADMIN")
             .anyRequest().authenticated())

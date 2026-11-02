@@ -30,7 +30,20 @@ public class CatalogService {
   public record ProductInput(UUID categoryId, String nameEn, String nameGu, String description, long mrpPaise,
                              long pricePaise, String unit, String packSize, boolean active, boolean hotSale,
                              Instant hotStart, Instant hotEnd, boolean earnsCoins, boolean coinRedeemable,
-                             int qtyOnHand, int lowThreshold) {}
+                             int qtyOnHand, int lowThreshold, UUID productGroupId) {
+    /** Without a group: a new product is its own group, an existing one keeps its group. */
+    public ProductInput(UUID categoryId, String nameEn, String nameGu, String description, long mrpPaise,
+                        long pricePaise, String unit, String packSize, boolean active, boolean hotSale,
+                        Instant hotStart, Instant hotEnd, boolean earnsCoins, boolean coinRedeemable,
+                        int qtyOnHand, int lowThreshold) {
+      this(categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, active, hotSale, hotStart,
+          hotEnd, earnsCoins, coinRedeemable, qtyOnHand, lowThreshold, null);
+    }
+  }
+
+  /** One row of the admin stock report. packLabel is the pack size (or unit); cashierId is whoever made the change. */
+  public record StockMovementView(UUID id, UUID productId, String name, String packLabel, int delta, String reason,
+                                  Instant at, UUID cashierId) {}
 
   public record HotSale(List<HotBanner> banners, List<Product> products) {}
 
@@ -90,8 +103,27 @@ public class CatalogService {
       ProductData p = byId.get(e.getKey());
       if (p == null || !p.active() || counterOnly.contains(p.id())) throw ApiException.validation("productId", "product is not available: " + e.getKey());
       return new PricedLine(p.id(), p.categoryId(), p.nameEn(), e.getValue(), p.pricePaise(),
-          p.pricePaise() * e.getValue(), p.coinRedeemable(), p.earnsCoins());
+          p.pricePaise() * e.getValue(), p.coinRedeemable(), p.earnsCoins(), p.nameGu(), p.unitLabel());
     }).toList();
+  }
+
+  /** Customer view of these products in the same order, leaving out any that are inactive or counter-only. */
+  public List<Product> visible(List<UUID> ids) {
+    if (ids.isEmpty()) return List.of();
+    Instant now = clock.instant();
+    var stocks = inventory.stocks(ids);
+    java.util.Set<UUID> counterOnly = products.posOnlyAmong(ids);
+    Map<UUID, ProductData> byId = products.findAll(ids).stream()
+        .collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
+    return ids.stream().map(byId::get)
+        .filter(p -> p != null && p.active() && !counterOnly.contains(p.id()))
+        .map(p -> p.withStock(stocks.get(p.id()).qty(), stocks.get(p.id()).low()).toCustomer(now)).toList();
+  }
+
+  /** Review average and count, written by the review service after every change. */
+  @Transactional
+  public void updateRating(UUID productId, double rating, int reviewCount) {
+    products.setRating(productId, rating, reviewCount);
   }
 
   // ---------- counter (POS) side ----------
@@ -115,6 +147,19 @@ public class CatalogService {
 
   public AdminProduct adminGet(UUID id) { return one(id); }
 
+  /** Stock history with product names, newest first. productId null means all products. */
+  public Page<StockMovementView> stockMovements(UUID productId, int page, int size) {
+    Page<com.vijay.mall.inventory.infra.InventoryRepository.Movement> rows = inventory.movements(productId, page, size);
+    Map<UUID, ProductData> byId = products.findAll(rows.items().stream().map(m -> m.productId()).distinct().toList())
+        .stream().collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
+    List<StockMovementView> items = rows.items().stream().map(m -> {
+      ProductData p = byId.get(m.productId());
+      return new StockMovementView(m.id(), m.productId(), p == null ? "?" : p.nameEn(), p == null ? "" : p.unitLabel(),
+          m.delta(), m.reason(), m.at(), m.actorId());
+    }).toList();
+    return new Page<>(items, rows.page(), rows.size(), rows.total());
+  }
+
   private AdminProduct one(UUID id) {
     ProductData d = products.find(id).orElseThrow(() -> ApiException.notFound("Product"));
     var stock = inventory.stocks(List.of(id)).get(id);
@@ -135,6 +180,7 @@ public class CatalogService {
     UUID id = products.insert(in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
         in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
+    if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     inventory.create(id, Math.max(0, in.qtyOnHand()), in.lowThreshold() <= 0 ? 5 : in.lowThreshold());
     audit.log(actor, "CREATE", "product", id, in.nameEn() + " @ " + in.pricePaise());
     return adminGet(id);
@@ -147,6 +193,7 @@ public class CatalogService {
     products.update(id, in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
         in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
+    if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     int delta = in.qtyOnHand() - before.qtyOnHand();
     if (delta != 0 && in.qtyOnHand() >= 0) inventory.adjust(id, delta, "ADJUST", actor);
     if (in.lowThreshold() > 0) inventory.setLowThreshold(id, in.lowThreshold());

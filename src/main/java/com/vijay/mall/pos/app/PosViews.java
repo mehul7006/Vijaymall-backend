@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import java.time.Instant;
@@ -9,6 +10,8 @@ import java.util.UUID;
 /** Inputs and outputs of the counter use cases. */
 public final class PosViews {
   private PosViews() {}
+
+  @Schema(name = "PosItem")
 
   public record Item(UUID productId, int qty) {}
 

@@ -13,6 +13,7 @@ class ShopSettingEntity {
   String shopName;
   String address;
   String phone;
+  String promise;
   String gstin;
   String stateCode;
   String upiId;

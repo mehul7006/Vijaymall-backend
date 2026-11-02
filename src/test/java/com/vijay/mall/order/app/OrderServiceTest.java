@@ -346,4 +346,68 @@ class OrderServiceTest {
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     assertEquals("NOT_FOUND", assertThrows(ApiException.class, () -> service.get(user, r.id())).code());
   }
+
+  // ---------- delivery slot, cancel reason, line snapshots ----------
+  private OrderRepository.NewOrder placeWithSlot(String slot) {
+    when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
+    stubPlaced("PLACED");
+    OrderService.PlaceCommand base = cmd("COD", 10000, addressId, Fulfilment.DELIVERY);
+    service.place(user, "key-slot", new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000, slot));
+    ArgumentCaptor<OrderRepository.NewOrder> o = ArgumentCaptor.forClass(OrderRepository.NewOrder.class);
+    verify(repo).insert(o.capture());
+    return o.getValue();
+  }
+
+  @Test
+  void slotIsTrimmedAndStoredWithTheOrder() {
+    assertEquals("6 PM - 8 PM", placeWithSlot("  6 PM - 8 PM ").deliverySlot());
+  }
+
+  @Test
+  void blankOrMissingSlotIsStoredAsNothing() {
+    assertNull(placeWithSlot("   ").deliverySlot());
+  }
+
+  @Test
+  void aSlotLongerThanFortyCharactersIsRejectedBeforeAnythingIsSaved() {
+    when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
+    OrderService.PlaceCommand base = cmd("COD", 10000, addressId, Fulfilment.DELIVERY);
+    OrderService.PlaceCommand tooLong = new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000, "x".repeat(41));
+    assertEquals("VALIDATION_FAILED", assertThrows(ApiException.class, () -> service.place(user, "k", tooLong)).code());
+    verify(repo, never()).insert(any());
+  }
+
+  @Test
+  void orderLinesKeepTheGujaratiNameAndPackLabelFromTheQuote() {
+    when(quotes.quote(eq(user), any())).thenReturn(new Quote(
+        List.of(new Quote.Line(product, "Almonds", 1, 24900, 24900, true, true, "બદામ", "500 g")),
+        24900, null, 0, 0, 0, 0, 24900, 0, List.of()));
+    stubPlaced("PLACED");
+    service.place(user, "key-gu", cmd("COD", 24900, addressId, Fulfilment.DELIVERY));
+    ArgumentCaptor<OrderRepository.NewItem> item = ArgumentCaptor.forClass(OrderRepository.NewItem.class);
+    verify(repo).insertItem(any(), item.capture());
+    assertEquals("બદામ", item.getValue().nameGu());
+    assertEquals("500 g", item.getValue().unitLabel());
+  }
+
+  @Test
+  void customerCancelKeepsTheReason() {
+    OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
+    service.customerCancel(user, r.id(), "  Ordered by mistake ");
+    verify(repo).setCancelReason(r.id(), "Ordered by mistake");
+    verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("CANCELLED"), eq(user),
+        eq("cancelled by customer: Ordered by mistake"), any());
+  }
+
+  @Test
+  void customerCancelWithoutAReasonStoresNone() {
+    OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
+    service.customerCancel(user, r.id(), "  ");
+    verify(repo, never()).setCancelReason(any(), any());
+    verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("CANCELLED"), eq(user), eq("cancelled by customer"), any());
+  }
 }

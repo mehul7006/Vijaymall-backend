@@ -11,6 +11,11 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
 
   Optional<UserEntity> findFirstByMobileOrderByCreatedAtAsc(String mobile);
 
+  /** The account that proved it owns this number with an OTP. At most one exists (unique index). */
+  Optional<UserEntity> findFirstByMobileAndMobileVerifiedTrue(String mobile);
+
+  Optional<UserEntity> findFirstByMobileAndSourceOrderByCreatedAtAsc(String mobile, String source);
+
   List<UserEntity> findByRoleOrderByCreatedAtDesc(String role);
 
   boolean existsByIdAndStatus(UUID id, String status);

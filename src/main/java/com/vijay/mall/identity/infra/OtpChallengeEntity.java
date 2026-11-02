@@ -10,6 +10,7 @@ import java.util.UUID;
 @Table(name = "otp_challenge")
 class OtpChallengeEntity extends BaseEntity {
   String email;
+  String mobile;
   String otpHash;
   Instant expiresAt;
   int attempts;

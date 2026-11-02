@@ -13,6 +13,7 @@ class UserEntity extends BaseEntity {
   String email;
   String name;
   String mobile;
+  boolean mobileVerified;
   String role;
   String status;
   String source = "APP";

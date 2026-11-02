@@ -1,5 +1,6 @@
 package com.vijay.mall.wallet.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.wallet.app.WalletService;
 import com.vijay.mall.wallet.domain.CoinMode;
@@ -34,6 +35,8 @@ public class AdminWalletController {
           startAt, endAt, active == null || active);
     }
   }
+
+  @Schema(name = "CoinRuleView")
 
   public record RuleView(UUID id, String name, long spendPaise, long coins, String mode, long minOrderPaise,
                          Instant startAt, Instant endAt, boolean active) {

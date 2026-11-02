@@ -12,6 +12,8 @@ class OrderItemEntity extends BaseEntity {
   UUID orderId;
   UUID productId;
   @Column(name = "name_snapshot") String name;
+  @Column(name = "name_gu_snapshot") String nameGu;
+  @Column(name = "unit_label_snapshot") String unitLabel;
   long unitPricePaise;
   int qty;
   long lineTotalPaise;

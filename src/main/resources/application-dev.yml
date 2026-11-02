@@ -1,8 +1,11 @@
 app:
   otp:
     channel: console
-    fixed-code: "12345"
+    # Dev login code. OTP_FIXED_CODE overrides it; the prod profile refuses to start with any fixed code.
+    fixed-code: ${OTP_FIXED_CODE:12345}
   bootstrap-admin-email: admin@vijaysupermall.local
+  cors:
+    allowed-origins: http://localhost:*,http://127.0.0.1:*
 logging:
   level:
     com.vijay.mall: DEBUG

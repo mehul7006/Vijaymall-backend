@@ -60,14 +60,16 @@ class OrderApiIT extends IntegrationTestBase {
   }
 
   @Test
-  void deliveryFeeAppliesBelowTheFreeLimitAndNotForPickup() {
+  void deliveryIsFreeForNow() {
     String t = token(freshEmail());
     Object chips = product(t, "Potato Chips");
     var delivery = quote(t, cart(chips, 1, Map.of("fulfilment", "DELIVERY"))).getBody();
     var pickup = quote(t, cart(chips, 1, Map.of())).getBody();
-    assertThat(delivery.get("deliveryFeePaise")).isEqualTo(4000);
+    // The shipped default is a zero fee. The fee rule itself (below the free limit, none for pickup) is covered in
+    // QuoteStepsTest, which sets its own fee.
+    assertThat(delivery.get("deliveryFeePaise")).isEqualTo(0);
     assertThat(pickup.get("deliveryFeePaise")).isEqualTo(0);
-    assertThat(((Number) delivery.get("totalPaise")).longValue()).isEqualTo(((Number) pickup.get("totalPaise")).longValue() + 4000);
+    assertThat(delivery.get("totalPaise")).isEqualTo(pickup.get("totalPaise"));
   }
 
   @Test

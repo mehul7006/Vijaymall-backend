@@ -18,6 +18,9 @@ class ProductEntity extends BaseEntity {
   long pricePaise;
   String unit;
   String packSize;
+  UUID productGroupId;
+  double rating;
+  int reviewCount;
   String imageUrl;
   boolean active;
   boolean hotSale;

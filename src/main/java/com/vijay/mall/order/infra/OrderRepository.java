@@ -22,14 +22,29 @@ public class OrderRepository {
   public record Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                     String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                     long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
-                    String addressSnapshot, Instant expiresAt, Instant placedAt, long version) {}
+                    String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
+                    String cancelReason) {
+    public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
+               String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
+               long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
+               String addressSnapshot, Instant expiresAt, Instant placedAt, long version) {
+      this(id, orderNo, userId, fulfilment, status, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount,
+          deliveryFee, total, coinsEarned, coinsCredited, paymentMethod, paymentStatus, addressSnapshot, expiresAt,
+          placedAt, version, null, null);
+    }
+  }
 
   public record NewOrder(UUID id, String orderNo, UUID userId, String idemKey, String fulfilment, String status,
                          long subtotal, String couponCode, long couponDiscount, int coinsUsed, long coinDiscount,
                          long deliveryFee, long total, int coinsEarned, String paymentMethod, String paymentStatus,
-                         String addressSnapshot, Instant expiresAt, Instant now) {}
+                         String addressSnapshot, Instant expiresAt, Instant now, String deliverySlot) {}
 
-  public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns, boolean redeemable) {}
+  public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
+                        boolean redeemable, String nameGu, String unitLabel) {
+    public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns, boolean redeemable) {
+      this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, name, "");
+    }
+  }
 
   /** One line of an order list; the customer's name is added by the service, which knows the identity module. */
   public record SummaryRow(UUID id, UUID userId, String orderNo, String status, String fulfilment, long totalPaise,
@@ -51,7 +66,8 @@ public class OrderRepository {
   private static Row toRow(OrderEntity e) {
     return new Row(e.id, e.orderNo, e.userId, e.fulfilment, e.status, e.subtotalPaise, e.couponCode, e.couponDiscountPaise,
         e.coinsUsed, e.coinDiscountPaise, e.deliveryFeePaise, e.totalPaise, e.coinsEarned, e.coinsCredited, e.paymentMethod,
-        e.paymentStatus, e.addressSnapshot, e.expiresAt, e.placedAt, e.version == null ? 0 : e.version);
+        e.paymentStatus, e.addressSnapshot, e.expiresAt, e.placedAt, e.version == null ? 0 : e.version, e.deliverySlot,
+        e.cancelReason);
   }
 
   public String nextOrderNo() {
@@ -86,6 +102,7 @@ public class OrderRepository {
     e.paymentMethod = o.paymentMethod();
     e.paymentStatus = o.paymentStatus();
     e.addressSnapshot = o.addressSnapshot();
+    e.deliverySlot = o.deliverySlot();
     e.expiresAt = o.expiresAt();
     e.placedAt = o.now();
     e.updatedAt = o.now();
@@ -99,6 +116,8 @@ public class OrderRepository {
     e.orderId = orderId;
     e.productId = i.productId();
     e.name = i.name();
+    e.nameGu = i.nameGu() == null ? i.name() : i.nameGu();
+    e.unitLabel = i.unitLabel() == null ? "" : i.unitLabel();
     e.unitPricePaise = i.unitPrice();
     e.qty = i.qty();
     e.lineTotalPaise = i.lineTotal();
@@ -122,7 +141,8 @@ public class OrderRepository {
 
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
-        .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise)).toList();
+        .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
+            i.unitLabel)).toList();
   }
 
   public List<OrderViews.Step> timeline(UUID orderId) {
@@ -152,6 +172,12 @@ public class OrderRepository {
       e.updatedAt = now;
     });
   }
+
+  @Transactional
+  public void setCancelReason(UUID id, String reason) { orders.findById(id).ifPresent(e -> e.cancelReason = reason); }
+
+  /** Orders the person has placed that were not cancelled; used for "first order only" coupons. */
+  public long activeOrderCount(UUID userId) { return orders.countByUserIdAndStatusNot(userId, "CANCELLED"); }
 
   @Transactional
   public void markCoinsCredited(UUID id) { orders.findById(id).ifPresent(e -> e.coinsCredited = true); }

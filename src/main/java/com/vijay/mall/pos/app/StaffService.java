@@ -25,6 +25,9 @@ public class StaffService {
 
   public List<User> list() { return users.byRole(User.CASHIER); }
 
+  /** False for a blocked cashier. */
+  public boolean isActive(UUID id) { return !users.isBlocked(id); }
+
   @Transactional
   public User create(String email, String name, String mobile, UUID actor) {
     String e = email == null ? "" : email.trim().toLowerCase();

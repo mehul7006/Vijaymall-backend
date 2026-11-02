@@ -127,4 +127,20 @@ class ShopStaffReportServiceTest {
     assertThat(r.date()).isEqualTo(LocalDate.of(2026, 10, 27));
     assertThat(r.cashExpectedPaise()).isZero();
   }
+
+  @Test
+  void aBlockedCashierIsNotActive() {
+    var users = mock(UserRepository.class);
+    var service = new StaffService(users, mock(AuditService.class), clock);
+    UUID blocked = UUID.randomUUID();
+    org.mockito.Mockito.when(users.isBlocked(blocked)).thenReturn(true);
+    org.junit.jupiter.api.Assertions.assertFalse(service.isActive(blocked));
+    org.junit.jupiter.api.Assertions.assertTrue(service.isActive(UUID.randomUUID()));
+  }
+
+  @Test
+  void aShopSettingBuiltTheOldWayHasNoPromise() {
+    assertThat(shop("Vijay", "24ABCDE1234F1Z5", "24", "u@upi", "VSM", "2").promise()).isEmpty();
+  }
 }
+

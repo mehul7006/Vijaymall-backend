@@ -18,6 +18,8 @@ public final class QuoteContext {
   public long deliveryFee;
   public long total;
   public long coinsToEarn;
+  /** Set by the coupon step when the coupon cannot be combined with coins; the coin step then skips redemption. */
+  public boolean couponBlocksCoins;
   /** When set, these lines are used as they are (counter sales price their own lines). */
   public final List<PricedLine> preset;
   public final List<String> warnings = new ArrayList<>();
@@ -32,7 +34,7 @@ public final class QuoteContext {
 
   public Quote toQuote() {
     var out = lines.stream().map(l -> new Quote.Line(l.productId(), l.name(), l.qty(), l.unitPricePaise(),
-        l.lineTotalPaise(), l.coinRedeemable(), l.earnsCoins())).toList();
+        l.lineTotalPaise(), l.coinRedeemable(), l.earnsCoins(), l.nameGu(), l.unitLabel())).toList();
     return new Quote(out, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount, deliveryFee, total,
         coinsToEarn, List.copyOf(warnings));
   }
