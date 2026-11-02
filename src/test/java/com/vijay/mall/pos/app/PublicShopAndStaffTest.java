@@ -30,6 +30,7 @@ class PublicShopAndStaffTest {
         .andExpect(jsonPath("$.shopName").value("Vijay Super Mall"))
         .andExpect(jsonPath("$.phone").value("99999 00000"))
         .andExpect(jsonPath("$.address").value("Station Road"))
+        .andExpect(jsonPath("$.promise").value(""))
         .andExpect(jsonPath("$.gstin").doesNotExist())
         .andExpect(jsonPath("$.upiId").doesNotExist())
         .andExpect(jsonPath("$.invoicePrefix").doesNotExist());

@@ -56,9 +56,18 @@ class PublicCouponTest {
   void viewKeepsOfferDetailsAndDropsInternals() {
     var c = coupon("SAVE5", true, EARLIER, LATER, 100, 7);
     var v = PublicCoupon.from(c);
-    assertThat(v).isEqualTo(new PublicCoupon("SAVE5", Coupon.FLAT, 500, 10_000, 0, null, EARLIER, LATER));
+    assertThat(v).isEqualTo(new PublicCoupon("SAVE5", Coupon.FLAT, 500, 10_000, 0, null, EARLIER, LATER, true, false));
     assertThat(PublicCoupon.class.getRecordComponents()).extracting(rc -> rc.getName())
         .doesNotContain("id", "totalLimit", "usedCount", "perUserLimit", "active");
+  }
+
+  @Test
+  void viewCarriesTheCoinAndFirstOrderFlags() {
+    var c = new Coupon(UUID.randomUUID(), "NEW100", Coupon.FLAT, 10_000, 0, 0, null, 1, 0, 0, null, null, true, false, true);
+    var v = PublicCoupon.from(c);
+    assertThat(v.worksWithCoins()).isFalse();
+    assertThat(v.firstOrderOnly()).isTrue();
+    assertThat(c.offeredAt(NOW)).as("the flags do not hide a coupon from the list").isTrue();
   }
 
   @Test

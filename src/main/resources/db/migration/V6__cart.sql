@@ -1,4 +1,4 @@
--- Server-side basket: one row per user plus its lines. Version number leaves room for V4/V5.
+-- Server-side basket: one row per user plus its lines.
 CREATE TABLE cart (
   user_id      uuid PRIMARY KEY REFERENCES users(id),
   coupon_code  text,

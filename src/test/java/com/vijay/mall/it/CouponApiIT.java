@@ -206,6 +206,7 @@ class CouponApiIT extends IntegrationTestBase {
 
     var shown = res.stream().filter(x -> visible.equals(x.get("code"))).findFirst().orElseThrow();
     assertThat(shown).containsEntry("kind", "FLAT").containsEntry("value", 500).containsEntry("minOrderPaise", 1000)
+        .containsEntry("worksWithCoins", true).containsEntry("firstOrderOnly", false)
         .doesNotContainKeys("id", "usedCount", "totalLimit");
     assertThat(getList("/api/v1/coupons", t)).as("signed-in customers see the same list").anyMatch(x -> visible.equals(x.get("code")));
   }
