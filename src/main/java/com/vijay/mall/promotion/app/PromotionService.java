@@ -7,6 +7,7 @@ import com.vijay.mall.promotion.domain.Coupon;
 import com.vijay.mall.promotion.domain.CouponContext;
 import com.vijay.mall.promotion.domain.CouponMath;
 import com.vijay.mall.promotion.domain.CouponRules;
+import com.vijay.mall.promotion.domain.PublicCoupon;
 import com.vijay.mall.promotion.infra.CouponRepository;
 import java.time.Clock;
 import java.util.List;
@@ -69,6 +70,12 @@ public class PromotionService {
   @Transactional
   public void release(UUID orderId) {
     coupons.openRedemptionCoupon(orderId).ifPresent(cid -> coupons.releaseRedemption(orderId, cid));
+  }
+
+  /** Coupons a customer may browse right now (no sign-in needed). Hides inactive, not-yet-started, ended and used-up ones. */
+  public List<PublicCoupon> listOffered() {
+    var now = clock.instant();
+    return coupons.allActive().stream().filter(c -> c.offeredAt(now)).map(PublicCoupon::from).toList();
   }
 
   // ---------- admin ----------

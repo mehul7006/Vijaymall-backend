@@ -183,4 +183,30 @@ class CouponApiIT extends IntegrationTestBase {
     call(HttpMethod.DELETE, "/api/v1/admin/coupons/" + id, admin, null, null);
     assertThat(getList("/api/v1/admin/coupons", admin)).anyMatch(x -> id.equals(x.get("id")) && Boolean.FALSE.equals(x.get("active")));
   }
+
+  @Test
+  void publicListShowsOnlyOffersACustomerCouldUseAndNeedsNoSignIn() {
+    String admin = adminToken();
+    String visible = code();
+    String inactive = code();
+    String ended = code();
+    String notStarted = code();
+    String usedUp = code();
+    create(admin, coupon(visible, Map.of("minOrderPaise", 1000, "perUserLimit", 1, "totalLimit", 50)));
+    create(admin, coupon(inactive, Map.of("active", false)));
+    create(admin, coupon(ended, Map.of("startAt", Instant.now().minusSeconds(7200).toString(), "endAt", Instant.now().minusSeconds(3600).toString())));
+    create(admin, coupon(notStarted, Map.of("startAt", Instant.now().plusSeconds(3600).toString())));
+    create(admin, coupon(usedUp, Map.of("totalLimit", 1)));
+    String t = token(freshEmail());
+    assertThat(order(t, juice(t), usedUp).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+    var res = getList("/api/v1/coupons", null);
+    assertThat(res).anyMatch(x -> visible.equals(x.get("code")));
+    assertThat(res).noneMatch(x -> List.of(inactive, ended, notStarted, usedUp).contains(x.get("code")));
+
+    var shown = res.stream().filter(x -> visible.equals(x.get("code"))).findFirst().orElseThrow();
+    assertThat(shown).containsEntry("kind", "FLAT").containsEntry("value", 500).containsEntry("minOrderPaise", 1000)
+        .doesNotContainKeys("id", "usedCount", "totalLimit");
+    assertThat(getList("/api/v1/coupons", t)).as("signed-in customers see the same list").anyMatch(x -> visible.equals(x.get("code")));
+  }
 }

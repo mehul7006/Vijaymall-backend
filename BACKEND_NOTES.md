@@ -63,3 +63,19 @@ Run everything and check coverage: `mvn verify` (Docker must be running for the 
 - These numbers have NOT been measured yet: the sandbox I work in cannot run Maven. The first `mvn verify` on your machine will show the real figure; send me the list of uncovered lines and I will add tests for them.
 
 Integration test map: OrderFlowIT, OrderApiIT, OrderCancelIT (orders); OnlinePaymentIT (second payment provider, refunds, expiry); WalletLedgerIT; CouponApiIT; CatalogApiIT; IdentityApiIT, AuthFlowIT; SecurityIT, ErrorHandlingIT; InventoryConcurrencyIT.
+
+---
+## Update: public coupon list and dev OTP code
+
+- `GET /api/v1/coupons` is public (no sign-in). It returns the offers a customer could use right now: active, inside `startAt`/`endAt`, and not used up. Each item has `code, kind, value, minOrderPaise, maxDiscountPaise, categoryId, startAt, endAt` (value is paise for FLAT, percent for PERCENT; 0 means no minimum / no cap). Internal fields (`id`, `totalLimit`, `usedCount`, `perUserLimit`, `active`) are not exposed. Only GET is public; applying a code still goes through the authenticated `POST /api/v1/cart/quote`, which does the full per-user checks.
+- Fixed login code for dev / frontend testing: run with the `dev` profile (code is `12345`), or on any non-prod profile set `OTP_FIXED_CODE=12345`. In the `dev` profile `OTP_FIXED_CODE` now overrides the default. The `prod` profile (the Docker image default) refuses to start with a fixed code, by design.
+- On startup the log says whether the fixed code is active: `OTP fixed code is ACTIVE` or `OTP fixed code is not set`. If a client gets `OTP_INVALID / WRONG` for `12345`, check that line first: it means the running instance is not using a fixed code (for example it was started without the `dev` profile and without `OTP_FIXED_CODE`).
+
+---
+## Update: UI team's integration gaps (BACKEND_INTEGRATION_GAPS.md)
+
+- **CORS (§3.1).** There was none. Set `CORS_ALLOWED_ORIGINS` (comma separated; patterns such as `http://localhost:*` are allowed) to the deployed web origin(s). Empty means no CORS headers. Allowed headers: `Authorization, Content-Type, Idempotency-Key, Accept`. The `dev` profile allows `http://localhost:*` and `http://127.0.0.1:*`.
+- **Public shop details (§3.5).** `GET /api/v1/shop-settings` (no sign-in) returns `{shopName, phone, address}` only. A `promise` field is not added here because it belongs to the `shop_promise` migration on the `frontend-gaps` branch.
+- **Staff `active` (§3.4).** `GET/POST /api/v1/admin/staff` items now include `active` (false for a blocked cashier).
+- **Saved basket (§9).** `GET / PUT / DELETE /api/v1/cart`, signed-in customers only (guests keep a local basket, the recommended option in §9.4). `GET` returns `{items:[{productId,qty}], couponCode, coinMode, percent, updatedAt}`; with no saved basket it returns `200` with `items: []`, `coinMode: "NONE"`. `PUT` replaces the whole basket (last write wins), merges repeated products, upper-cases the coupon, keeps `percent` only for `PERCENT`, skips products that no longer exist, and returns what is stored. Lines for inactive or sold-out products are left out on read. Limits: 100 lines, quantity 1 to 999. `POST /cart/quote` is unchanged. Migration `V6__cart.sql` (version leaves room for V4/V5 from the `frontend-gaps` branch); `cart_item` has an extra `position` column so `GET` returns lines in the order they were saved.
+- **Not covered here.** Wishlist, reviews, notifications inbox, mobile OTP, stock movements, `/admin/reports/summary`, `worksWithCoins`/`firstOrderOnly` and `cancelReason` are not in this checkout (single `initial commit`, migrations V1 to V3); they live on the unpushed `frontend-gaps` branch and were not reviewed.

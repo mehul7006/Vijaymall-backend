@@ -76,6 +76,30 @@ class OtpServiceTest {
   }
 
   @Test
+  void fixedCodeWithStrayWhitespaceStillMatchesWhatTheUserTypes() {
+    service(" 12345\n").send("bob@example.com", "1.2.3.4");
+    verify(sender).send("bob@example.com", "12345");
+    verify(repo).insert("bob@example.com", hash("bob@example.com", "12345"), NOW.plus(Duration.ofMinutes(5)), NOW);
+  }
+
+  @Test
+  void whitespaceOnlyFixedCodeMeansRandomCodes() {
+    service("   ").send("a@b.com", "ip");
+    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(sender).send(eq("a@b.com"), code.capture());
+    assertThat(code.getValue()).matches("\\d{5}");
+  }
+
+  @Test
+  void missingOtpSettingsMeanRandomCodes() {
+    var props = new AppProps(null, null, null, null, null, null);
+    new OtpService(repo, sender, props, clock, limiter, 20).send("a@b.com", "ip");
+    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(sender).send(eq("a@b.com"), code.capture());
+    assertThat(code.getValue()).hasSize(5);
+  }
+
+  @Test
   void sendStopsWhenRateLimited() {
     doThrow(new ApiException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED", "slow down"))
         .when(limiter).check(eq("otp-email:a@b.com"), anyInt(), anyLong());

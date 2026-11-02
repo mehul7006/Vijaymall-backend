@@ -40,6 +40,10 @@ public class CouponRepository {
 
   public List<Coupon> all() { return coupons.findAllByOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList(); }
 
+  public List<Coupon> allActive() {
+    return coupons.findAllByActiveTrueOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList();
+  }
+
   public Optional<Coupon> find(UUID id) { return coupons.findById(id).map(CouponRepository::toDomain); }
 
   public Optional<Coupon> findByCode(String code) { return coupons.findByCode(code).map(CouponRepository::toDomain); }
