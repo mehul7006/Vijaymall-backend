@@ -1,5 +1,6 @@
 package com.vijay.mall.promotion.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.promotion.domain.Coupon;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/coupons")
 public class AdminCouponController {
+  @Schema(name = "CouponBody")
   public record Body(@NotBlank String code, @NotBlank String kind, @Min(1) long value, Long minOrderPaise,
                      Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
                      Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly) {

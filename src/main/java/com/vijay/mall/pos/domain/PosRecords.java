@@ -40,7 +40,27 @@ public final class PosRecords {
                              long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
                              long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
                              int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
-                             List<SaleItemRecord> items, List<PaymentRecord> payments) { }
+                             List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType) {
+        /** A bill whose payment type is worked out from its payments. */
+        public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
+                          long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                          long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                          int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
+                          List<SaleItemRecord> items, List<PaymentRecord> payments) {
+            this(id, invoiceNo, cashierId, customerId, customerMobile, subtotalPaise, couponCode, couponDiscountPaise,
+                coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise, coinsEarned,
+                tenderedPaise, changePaise, createdAt, items, payments, PaymentRules.classify(lines(payments)));
+        }
+
+        /** What the customer put on credit with this bill (0 when none). */
+        public long creditPaise() {
+            return payments.stream().filter(p -> PaymentRules.CREDIT.equals(p.mode())).mapToLong(PaymentRecord::amountPaise).sum();
+        }
+    }
+
+    static List<PaymentRules.Line> lines(List<PaymentRecord> payments) {
+        return payments.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
+    }
 
     public record ReturnItemRecord(UUID saleItemId, int qty, long refundPaise, long taxablePaise, long cgstPaise,
                                    long sgstPaise) { }
@@ -48,7 +68,16 @@ public final class PosRecords {
     public record ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
                                long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,
                                int coinsClawedBack, int coinsRestored, Instant createdAt,
-                               List<ReturnItemRecord> items, List<PaymentRecord> refunds) { }
+                               List<ReturnItemRecord> items, List<PaymentRecord> refunds, long creditAdjustedPaise) {
+        /** A return that did not touch customer credit. */
+        public ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
+                            long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                            int coinsClawedBack, int coinsRestored, Instant createdAt,
+                            List<ReturnItemRecord> items, List<PaymentRecord> refunds) {
+            this(id, creditNoteNo, saleId, cashierId, reason, refundPaise, taxablePaise, cgstPaise, sgstPaise,
+                coinsClawedBack, coinsRestored, createdAt, items, refunds, 0);
+        }
+    }
 
     /** What earlier returns of one bill already moved, so a new return only moves its own share. */
     public record ReturnedSoFar(long grossPaise, int coinsClawedBack, int coinsRestored) { }

@@ -110,6 +110,9 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
     String method = cmd.paymentMethod();
     String slot = cmd.slot() == null || cmd.slot().isBlank() ? null : cmd.slot().trim();
     if (slot != null && slot.length() > MAX_SLOT) throw ApiException.validation("slot", "must be at most " + MAX_SLOT + " characters");
+    if ("CREDIT".equals(method) || "HYBRID".equals(method)) {
+      throw ApiException.validation("paymentMethod", "credit and hybrid payment are only available at the shop counter");
+    }
     if (!"COD".equals(method) && !"ONLINE".equals(method)) throw ApiException.validation("paymentMethod", "COD or ONLINE");
     payments.requireEnabled(method);
     Quote q = quotes.quote(userId, cmd.quote());

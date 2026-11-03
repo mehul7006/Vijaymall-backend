@@ -20,6 +20,7 @@ class PosReturnEntity extends BaseEntity {
   long sgstPaise;
   int coinsClawedBack;
   int coinsRestored;
+  long creditAdjustPaise;
   Instant createdAt;
 
   protected PosReturnEntity() {}

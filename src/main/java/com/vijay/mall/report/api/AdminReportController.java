@@ -1,5 +1,6 @@
 package com.vijay.mall.report.api;
 
+import com.vijay.mall.report.app.CreditReportService;
 import com.vijay.mall.report.app.ReportService;
 import com.vijay.mall.report.app.ReportSummaryService;
 import java.time.LocalDate;
@@ -14,10 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminReportController {
   private final ReportService reports;
   private final ReportSummaryService summaries;
+  private final CreditReportService creditReports;
 
-  public AdminReportController(ReportService reports, ReportSummaryService summaries) {
+  public AdminReportController(ReportService reports, ReportSummaryService summaries, CreditReportService creditReports) {
     this.reports = reports;
     this.summaries = summaries;
+    this.creditReports = creditReports;
   }
 
   @GetMapping("/dashboard")
@@ -29,5 +32,21 @@ public class AdminReportController {
                                               @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                                               @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
     return summaries.summary(period, from, to);
+  }
+
+  /** Credit given, recovered and outstanding for a period (same period / from / to rules as the sales summary). */
+  @GetMapping("/reports/credit")
+  public CreditReportService.Report credit(@RequestParam(required = false) String period,
+                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+    return creditReports.report(period, from, to);
+  }
+
+  /** Customers with credit accounts, biggest balance first. */
+  @GetMapping("/credit/accounts")
+  public com.vijay.mall.common.Page<CreditReportService.Debtor> creditAccounts(
+      @RequestParam(defaultValue = "true") boolean outstandingOnly, @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size) {
+    return creditReports.debtors(outstandingOnly, page, size);
   }
 }

@@ -59,6 +59,7 @@ public class PosSaleRepository {
     e.coinsEarned = s.coinsEarned();
     e.tenderedPaise = s.tenderedPaise();
     e.changePaise = s.changePaise();
+    e.paymentType = s.paymentType();
     e.status = "COMPLETED";
     e.createdAt = s.createdAt();
     sales.saveAndFlush(e);
@@ -117,6 +118,7 @@ public class PosSaleRepository {
     e.sgstPaise = r.sgstPaise();
     e.coinsClawedBack = r.coinsClawedBack();
     e.coinsRestored = r.coinsRestored();
+    e.creditAdjustPaise = r.creditAdjustedPaise();
     e.createdAt = r.createdAt();
     returns.saveAndFlush(e);
     r.items().forEach(i -> {
@@ -173,7 +175,7 @@ public class PosSaleRepository {
     return list.stream().map(s -> new SaleRecord(s.id, s.invoiceNo, s.cashierId, s.customerId, s.customerMobile,
         s.subtotalPaise, s.couponCode, s.couponDiscountPaise, s.coinsUsed, s.coinDiscountPaise, s.totalPaise,
         s.taxablePaise, s.cgstPaise, s.sgstPaise, s.coinsEarned, s.tenderedPaise, s.changePaise, s.createdAt,
-        lines.getOrDefault(s.id, List.of()), pays.getOrDefault(s.id, List.of()))).toList();
+        lines.getOrDefault(s.id, List.of()), pays.getOrDefault(s.id, List.of()), s.paymentType)).toList();
   }
 
   private static SaleItemRecord toItem(PosSaleItemEntity i) {
@@ -210,6 +212,6 @@ public class PosSaleRepository {
             Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference), Collectors.toList())));
     return list.stream().map(r -> new ReturnRecord(r.id, r.creditNoteNo, r.saleId, r.cashierId, r.reason, r.refundPaise,
         r.taxablePaise, r.cgstPaise, r.sgstPaise, r.coinsClawedBack, r.coinsRestored, r.createdAt,
-        its.getOrDefault(r.id, List.of()), rf.getOrDefault(r.id, List.of()))).toList();
+        its.getOrDefault(r.id, List.of()), rf.getOrDefault(r.id, List.of()), r.creditAdjustPaise)).toList();
   }
 }

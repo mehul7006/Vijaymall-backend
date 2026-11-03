@@ -310,7 +310,8 @@ class FrontendGapsIT extends IntegrationTestBase {
     assertThat(((Map) ((Map) schemas.get("PosItem")).get("properties")).keySet()).containsExactlyInAnyOrder("productId", "qty");
     assertThat(((Map) ((Map) schemas.get("SalesSummary")).get("properties")).keySet())
         .contains("salesPaise", "orders", "byDay", "topProducts", "coinsIssued");
-    assertThat(schemas).containsKeys("OrderSummary", "QuoteLine", "WalletRule", "CoinRuleView");
+    assertThat(schemas).containsKeys("OrderSummary", "QuoteLine", "WalletRule", "CoinRuleView", "Basket", "BasketBody", "BasketLine", "CouponBody", "PosCart", "CreditLedgerEntry", "CreditReceipt",
+        "CreditDayRow");
   }
 }
 

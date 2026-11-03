@@ -33,11 +33,16 @@ public class PosReportService {
     Instant to = d.plusDays(1).atStartOfDay(InvoiceNumbers.SHOP_ZONE).toInstant();
     var sales = repo.sales(from, to, cashierId);
     var returns = repo.returns(from, to, cashierId);
-    Map<String, Long> paid = allModes(repo.paidByMode(from, to, cashierId));
+    Map<String, Long> rawPaid = repo.paidByMode(from, to, cashierId);
+    Map<String, Long> paid = allModes(rawPaid);
     Map<String, Long> refunded = allModes(repo.refundedByMode(from, to, cashierId));
+    Map<String, Long> recovered = allModes(repo.creditRecoveredByMode(from, to, cashierId));
+    long recoveredTotal = recovered.values().stream().mapToLong(Long::longValue).sum();
+    // Repayments handed over in cash go into the drawer too, so the cash that should be there includes them.
     return new DayReport(d, sales.bills(), sales.totalPaise(), sales.taxablePaise(), sales.cgstPaise(), sales.sgstPaise(),
         sales.coinsUsed(), returns.notes(), returns.refundPaise(), sales.totalPaise() - returns.refundPaise(), paid, refunded,
-        paid.get("CASH") - refunded.get("CASH"));
+        paid.get("CASH") - refunded.get("CASH") + recovered.get("CASH"), rawPaid.getOrDefault(PaymentRules.CREDIT, 0L),
+        repo.creditReturned(from, to, cashierId), recoveredTotal, recovered);
   }
 
   private static Map<String, Long> allModes(Map<String, Long> found) {

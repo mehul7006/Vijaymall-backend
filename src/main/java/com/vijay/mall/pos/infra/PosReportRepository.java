@@ -51,6 +51,21 @@ public class PosReportRepository {
     return rows.stream().collect(Collectors.toMap(r -> (String) r[0], r -> num(r[1])));
   }
 
+  /** Part of the returns that reduced customers' credit instead of being paid out. */
+  public long creditReturned(Instant from, Instant to, UUID cashier) {
+    return num(bind(em.createQuery("select sum(x.creditAdjustPaise) from PosReturnEntity x where x.createdAt >= :f "
+        + "and x.createdAt < :t" + cashierClause("x", cashier)), from, to, cashier).getSingleResult());
+  }
+
+  /** Money customers handed over in the period to pay off their credit, by mode. */
+  @SuppressWarnings("unchecked")
+  public Map<String, Long> creditRecoveredByMode(Instant from, Instant to, UUID cashier) {
+    List<Object[]> rows = bind(em.createQuery("select l.mode, sum(l.amountPaise) from CreditPaymentLineEntity l "
+        + "join CreditPaymentEntity p on p.id = l.paymentId where p.createdAt >= :f and p.createdAt < :t"
+        + cashierClause("p", cashier) + " group by l.mode"), from, to, cashier).getResultList();
+    return rows.stream().collect(Collectors.toMap(r -> (String) r[0], r -> num(r[1])));
+  }
+
   @SuppressWarnings("unchecked")
   public Map<String, Long> refundedByMode(Instant from, Instant to, UUID cashier) {
     List<Object[]> rows = bind(em.createQuery("select p.mode, sum(p.amountPaise) from PosRefundPaymentEntity p "

@@ -48,6 +48,7 @@ class PosReturnServiceTest {
   private InventoryService inventory;
   private WalletService wallet;
   private InvoiceCounterRepository counters;
+  private CreditService credit;
   private PosReturnService service;
   private SaleRecord sale;
 
@@ -57,10 +58,11 @@ class PosReturnServiceTest {
     inventory = mock(InventoryService.class);
     wallet = mock(WalletService.class);
     counters = mock(InvoiceCounterRepository.class);
+    credit = mock(CreditService.class);
     ShopService shop = mock(ShopService.class);
     when(shop.get()).thenReturn(PosTestData.shop());
     service = new PosReturnService(sales, inventory, wallet, shop, counters, mock(AuditService.class),
-        new TransactionTemplate(mock(PlatformTransactionManager.class)), Clock.fixed(NOW, ZoneOffset.UTC));
+        new TransactionTemplate(mock(PlatformTransactionManager.class)), Clock.fixed(NOW, ZoneOffset.UTC), credit);
     // 4 pieces at 2500 = 10000 gross, 9000 net after a 1000 discount; 12% GST; 20 coins earned, 10 coins used
     var item = new com.vijay.mall.pos.domain.PosRecords.SaleItemRecord(itemId, productId, "Soap", com.vijay.mall.pos.domain.SoldBy.UNIT,
         4, 2500, 10000, 1000, 9000, 12, "3401", 8036, 482, 482, 0);
@@ -186,5 +188,52 @@ class PosReturnServiceTest {
   @Test void returnsOf_delegates() {
     when(sales.returnsOf(saleId)).thenReturn(List.of());
     assertThat(service.returnsOf(saleId)).isEmpty();
+  }
+
+  // ---------- credit bills ----------
+  private SaleRecord billWithCredit(long credit, long cash) {
+    java.util.List<com.vijay.mall.pos.domain.PosRecords.PaymentRecord> pays = new java.util.ArrayList<>();
+    if (cash > 0) pays.add(new com.vijay.mall.pos.domain.PosRecords.PaymentRecord("CASH", cash, null));
+    pays.add(new com.vijay.mall.pos.domain.PosRecords.PaymentRecord("CREDIT", credit, null));
+    SaleRecord s = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, customer, "9000000001", 10000, null, 0, 10, 1000, 9000,
+        8036, 482, 482, 20, null, 0, NOW, sale.items(), pays);
+    when(sales.lockAndFind(saleId)).thenReturn(Optional.of(s));
+    return s;
+  }
+
+  @Test void returnOfACreditBill_reducesWhatIsOwedAndPaysOutNothing() {
+    billWithCredit(9000, 0);
+    when(credit.returnAdjustment(eq(customer), eq(saleId), eq(9000L), eq(2250L), any())).thenReturn(2250L);
+    ReturnRecord r = service.refund(cashier, saleId, "cr1", new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null));
+    assertThat(r.refundPaise()).isEqualTo(2250);
+    assertThat(r.creditAdjustedPaise()).isEqualTo(2250);
+    assertThat(r.refunds()).isEmpty();
+    verify(credit).recordReturn(eq(customer), eq(saleId), any(UUID.class), eq("VSM-CN/2026-27/000003"), eq(2250L), eq(cashier), any());
+  }
+
+  @Test void returnOfAHybridBill_paysOutOnlyTheRestInCashByDefault() {
+    billWithCredit(1000, 8000);
+    when(credit.returnAdjustment(eq(customer), eq(saleId), eq(1000L), eq(2250L), any())).thenReturn(1000L);
+    ReturnRecord r = service.refund(cashier, saleId, "cr2", new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null));
+    assertThat(r.creditAdjustedPaise()).isEqualTo(1000);
+    assertThat(r.refunds()).hasSize(1);
+    assertThat(r.refunds().get(0).mode()).isEqualTo("CASH");
+    assertThat(r.refunds().get(0).amountPaise()).isEqualTo(1250);
+  }
+
+  @Test void returnPayOutMustAddUpToTheRestAndSaysWhy() {
+    billWithCredit(1000, 8000);
+    when(credit.returnAdjustment(eq(customer), eq(saleId), eq(1000L), eq(2250L), any())).thenReturn(1000L);
+    var in = new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, List.of(new com.vijay.mall.pos.app.PosViews.Pay("CASH", 2250, null)));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.refund(cashier, saleId, "cr3", in))
+        .isInstanceOf(com.vijay.mall.common.error.ApiException.class).hasMessageContaining("reduces the customer's credit");
+    verify(credit, org.mockito.Mockito.never()).recordReturn(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+  }
+
+  @Test void returnOfABillWithoutCredit_neverTouchesTheCreditAccount() {
+    service.refund(cashier, saleId, "cr4", new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null));
+    verify(credit, org.mockito.Mockito.never()).returnAdjustment(any(), any(), org.mockito.ArgumentMatchers.anyLong(),
+        org.mockito.ArgumentMatchers.anyLong(), any());
+    assertThat(insertedReturn().creditAdjustedPaise()).isZero();
   }
 }

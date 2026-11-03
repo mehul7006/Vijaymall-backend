@@ -465,4 +465,15 @@ class OrderServiceTest {
     verify(repo, never()).setCancelReason(any(), any());
     verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("CANCELLED"), eq(user), eq("cancelled by customer"), any());
   }
+
+  @Test
+  void creditAndHybridAreOnlyForTheShopCounter() {
+    when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
+    for (String method : List.of("CREDIT", "HYBRID")) {
+      OrderService.PlaceCommand base = cmd("COD", 10000, addressId, Fulfilment.DELIVERY);
+      OrderService.PlaceCommand c = new OrderService.PlaceCommand(base.quote(), addressId, method, 10000);
+      assertEquals("VALIDATION_FAILED", assertThrows(ApiException.class, () -> service.place(user, "k-" + method, c)).code());
+    }
+    verify(repo, never()).insert(any());
+  }
 }
