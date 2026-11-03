@@ -36,7 +36,7 @@ public class AdminCatalogController {
                             String description, @Min(0) long mrpPaise, @Min(0) long pricePaise, String unit,
                             String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
                             Boolean earnsCoins, Boolean coinRedeemable, Integer qtyOnHand, Integer lowThreshold,
-                            UUID productGroupId) {
+                            UUID productGroupId, String variantName, Integer variantOrder) {
     CatalogService.ProductInput toInput() {
       return new CatalogService.ProductInput(categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit,
           packSize, active == null || active, Boolean.TRUE.equals(hotSale), hotStart, hotEnd,
@@ -44,6 +44,25 @@ public class AdminCatalogController {
           qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold, productGroupId);
     }
   }
+  /** A new variant (size, flavour, colour) of an existing product; name, description and category are copied from it. */
+  public record VariantBody(String variantName, String packSize, String unit, @Min(0) long mrpPaise, @Min(0) long pricePaise,
+                            Boolean active, Integer qtyOnHand, Integer lowThreshold, Integer variantOrder) {
+    CatalogService.VariantInput toInput() {
+      return new CatalogService.VariantInput(variantName, packSize, unit, mrpPaise, pricePaise, active,
+          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold, variantOrder);
+    }
+  }
+
+  /** What every variant of a product shares. */
+  public record GroupBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu, String description,
+                          Boolean hotSale, Instant hotStart, Instant hotEnd, Boolean earnsCoins, Boolean coinRedeemable,
+                          Boolean active) {
+    CatalogService.GroupInput toInput() {
+      return new CatalogService.GroupInput(categoryId, nameEn, nameGu, description, hotSale, hotStart, hotEnd, earnsCoins,
+          coinRedeemable, active);
+    }
+  }
+
   public record StockBody(int delta, String reason) {}
   public record CategoryBody(@NotBlank String nameEn, @NotBlank String nameGu, Integer sortOrder, Boolean active) {}
   public record BannerBody(@NotBlank String title, String subtitle, String imageUrl, Instant startAt, Instant endAt,
@@ -67,14 +86,37 @@ public class AdminCatalogController {
 
   @PostMapping("/products")
   @ResponseStatus(HttpStatus.CREATED)
-  public AdminProduct create(@Valid @RequestBody ProductBody b) { return catalog.create(b.toInput(), CurrentUser.id()); }
+  public AdminProduct create(@Valid @RequestBody ProductBody b) {
+    AdminProduct created = catalog.create(b.toInput(), CurrentUser.id());
+    return b.variantName() == null && b.variantOrder() == null ? created
+        : catalog.setVariant(created.id(), b.variantName(), b.variantOrder(), CurrentUser.id());
+  }
 
   @GetMapping("/products/{id}")
   public AdminProduct get(@PathVariable UUID id) { return catalog.adminGet(id); }
 
   @PutMapping("/products/{id}")
   public AdminProduct update(@PathVariable UUID id, @Valid @RequestBody ProductBody b) {
-    return catalog.update(id, b.toInput(), CurrentUser.id());
+    AdminProduct updated = catalog.update(id, b.toInput(), CurrentUser.id());
+    return b.variantName() == null && b.variantOrder() == null ? updated
+        : catalog.setVariant(id, b.variantName(), b.variantOrder(), CurrentUser.id());
+  }
+
+  /** Every variant of the product this id belongs to, including inactive ones, with stock. */
+  @GetMapping("/products/{id}/variants")
+  public List<AdminProduct> variants(@PathVariable UUID id) { return catalog.adminVariants(id); }
+
+  /** Adds a variant (another size, flavour or colour) to this product. */
+  @PostMapping("/products/{id}/variants")
+  @ResponseStatus(HttpStatus.CREATED)
+  public AdminProduct addVariant(@PathVariable UUID id, @Valid @RequestBody VariantBody b) {
+    return catalog.addVariant(id, b.toInput(), CurrentUser.id());
+  }
+
+  /** Edits the name, description, category and flags that all variants of a product share. */
+  @PutMapping("/product-groups/{id}")
+  public List<AdminProduct> updateGroup(@PathVariable UUID id, @Valid @RequestBody GroupBody b) {
+    return catalog.updateGroup(id, b.toInput(), CurrentUser.id());
   }
 
   @PostMapping("/products/{id}/stock")

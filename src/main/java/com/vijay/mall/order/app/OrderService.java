@@ -9,7 +9,9 @@ import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.identity.domain.Address;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.catalog.app.PurchaseLookup;
 import com.vijay.mall.order.domain.Fulfilment;
+import com.vijay.mall.order.domain.OrderChanged;
 import com.vijay.mall.order.domain.OrderStatus;
 import com.vijay.mall.order.domain.OrderViews;
 import com.vijay.mall.order.domain.Quote;
@@ -30,6 +32,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,7 +44,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Order use cases: place, move through statuses, cancel, expire. Talks to other modules only through their services. */
 @Service
-public class OrderService implements OrderNumberLookup {
+public class OrderService implements OrderNumberLookup, PurchaseLookup {
   private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
   /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
@@ -67,10 +70,12 @@ public class OrderService implements OrderNumberLookup {
   private final TransactionTemplate tx;
   private final AppProps props;
   private final Clock clock;
+  private final ApplicationEventPublisher events;
 
   public OrderService(OrderRepository repo, QuoteService quotes, InventoryService inventory, WalletService wallet,
                       PromotionService promotions, PaymentService payments, ProfileService profiles, OutboxService outbox,
-                      AuditService audit, JsonMapper json, TransactionTemplate tx, AppProps props, Clock clock) {
+                      AuditService audit, JsonMapper json, TransactionTemplate tx, AppProps props, Clock clock,
+                      ApplicationEventPublisher events) {
     this.repo = repo;
     this.quotes = quotes;
     this.inventory = inventory;
@@ -84,6 +89,7 @@ public class OrderService implements OrderNumberLookup {
     this.tx = tx;
     this.props = props;
     this.clock = clock;
+    this.events = events;
   }
 
   // ---------- place ----------
@@ -143,6 +149,7 @@ public class OrderService implements OrderNumberLookup {
     log.info("Order placed orderNo={} user={} total={} method={} status={} coinsUsed={} coupon={} items={}", orderNo, userId,
         q.totalPaise(), method, status, q.coinsUsed(), q.couponCode(), q.lines().size());
     outbox.add("ORDER_PLACED", Map.of("orderId", orderId, "orderNo", orderNo, "userId", userId, "totalPaise", q.totalPaise()));
+    events.publishEvent(new OrderChanged(orderId, orderNo, userId, status, null, now));
     return orderId;
   }
 
@@ -150,6 +157,7 @@ public class OrderService implements OrderNumberLookup {
   @Transactional
   public OrderViews.AdminView adminChangeStatus(UUID orderId, OrderStatus target, String note, UUID actor) {
     OrderRepository.Row row = repo.find(orderId).orElseThrow(() -> ApiException.notFound("Order"));
+    if (OrderStatus.valueOf(row.status()) == target) return adminView(row); // already there: nothing to do, not an error
     transition(row, target, actor, note);
     audit.log(actor, "ORDER_STATUS", "orders", orderId, target.name());
     return adminView(repo.find(orderId).orElseThrow());
@@ -177,7 +185,8 @@ public class OrderService implements OrderNumberLookup {
     OrderStatus from = OrderStatus.valueOf(row.status());
     Fulfilment f = Fulfilment.valueOf(row.fulfilment());
     if (!from.canMoveTo(target, f)) {
-      throw ApiException.conflict("ILLEGAL_TRANSITION", "Cannot move from " + from + " to " + target, Map.of());
+      String why = from.isFinal() ? "Order is " + from + " and can no longer be changed" : "Cannot move from " + from + " to " + target;
+      throw ApiException.conflict("ILLEGAL_TRANSITION", why, Map.of());
     }
     Instant now = clock.instant();
     if (!repo.updateStatus(row.id(), target.name(), row.version(), now)) {
@@ -189,6 +198,7 @@ public class OrderService implements OrderNumberLookup {
     if (target == OrderStatus.CANCELLED) onCancelled(row);
     if (target.completesOrder()) onCompleted(row);
     outbox.add("ORDER_STATUS", Map.of("orderId", row.id(), "orderNo", row.orderNo(), "userId", row.userId(), "status", target.name()));
+    events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), target.name(), from.name(), now));
   }
 
   private void onCancelled(OrderRepository.Row row) {
@@ -221,6 +231,9 @@ public class OrderService implements OrderNumberLookup {
     } else if (OrderStatus.CANCELLED.name().equals(row.status())) {
       // paid after we expired the order: give the money back
       if (payments.refund(row.id(), "paid after expiry")) repo.setPaymentStatus(row.id(), "REFUNDED", clock.instant());
+    } else {
+      // staff moved the order on before the payment arrived: the order stays where it is, the payment is recorded
+      repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
     }
   }
 
@@ -253,7 +266,9 @@ public class OrderService implements OrderNumberLookup {
   public Page<OrderViews.Summary> list(UUID userId, int page, int size) {
     Page<OrderRepository.SummaryRow> p = repo.list(userId, Math.max(0, page), Page.clampSize(size));
     return new Page<>(p.items().stream().map(r -> new OrderViews.Summary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
-        r.totalPaise(), r.itemCount(), r.placedAt())).toList(), p.page(), p.size(), p.total());
+        r.totalPaise(), r.itemCount(), r.placedAt(), r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(),
+        r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus())).toList(),
+        p.page(), p.size(), p.total());
   }
 
   public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) {
@@ -262,8 +277,16 @@ public class OrderService implements OrderNumberLookup {
     return new Page<>(p.items().stream().map(r -> {
       User u = customers.get(r.userId());
       return new OrderViews.AdminSummary(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.totalPaise(), r.itemCount(),
-          r.placedAt(), u == null ? null : u.name(), u == null ? null : u.email(), u == null ? null : u.mobile());
+          r.placedAt(), u == null ? null : u.name(), u == null ? null : u.email(), u == null ? null : u.mobile(),
+          r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(),
+          r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus());
     }).toList(), p.page(), p.size(), p.total());
+  }
+
+  /** The customer's latest delivered or picked-up order that contains this product, if any. Used to allow reviews. */
+  @Override
+  public Optional<UUID> deliveredOrderWith(UUID userId, UUID productId) {
+    return repo.latestCompletedOrderWith(userId, productId);
   }
 
   @Override

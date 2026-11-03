@@ -98,11 +98,33 @@ class FrontendGapsIT extends IntegrationTestBase {
     assertThat(base.get("productGroupId")).isNotNull();
   }
 
+  /** Places a pickup order for one product and has the admin deliver it (picked up), as a real customer would see it. */
+  private void deliverPickupOrder(String customerToken, String productName) {
+    restock(productName, 20);
+    Object pid = productByName(customerToken, productName).get("id");
+    Map<String, Object> cart = new HashMap<>(Map.of("items", List.of(Map.of("productId", pid, "qty", 1)),
+        "coinMode", "NONE", "fulfilment", "PICKUP"));
+    long total = ((Number) post("/api/v1/cart/quote", customerToken, cart).getBody().get("totalPaise")).longValue();
+    cart.put("paymentMethod", "COD");
+    cart.put("expectedTotalPaise", total);
+    var placed = call(HttpMethod.POST, "/api/v1/orders", customerToken, cart, UUID.randomUUID().toString());
+    assertThat(placed.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    String id = (String) placed.getBody().get("id");
+    assertThat(post("/api/v1/admin/orders/" + id + "/status", adminToken(), Map.of("status", "PICKED_UP")).getStatusCode())
+        .isEqualTo(HttpStatus.OK);
+  }
+
   // ---------- 2.11 reviews ----------
   @Test
   void aReviewUpdatesTheRatingAndWritingAgainReplacesIt() {
     String token = token(freshEmail());
     Object pid = productByName(token, "Digestive Biscuits").get("id");
+    var early = post("/api/v1/products/" + pid + "/reviews", token, Map.of("rating", 5));
+    assertThat(early.getStatusCode()).as("not delivered yet").isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(early.getBody().get("code")).isEqualTo("REVIEW_NOT_ALLOWED");
+    assertThat(get("/api/v1/products/" + pid + "/reviews/mine", token).getBody()).containsEntry("canReview", false);
+    deliverPickupOrder(token, "Digestive Biscuits");
+    assertThat(get("/api/v1/products/" + pid + "/reviews/mine", token).getBody()).containsEntry("canReview", true);
     assertThat(post("/api/v1/products/" + pid + "/reviews", token, Map.of("rating", 5, "comment", "Crunchy")).getStatusCode())
         .isEqualTo(HttpStatus.OK);
     var second = post("/api/v1/products/" + pid + "/reviews", token, Map.of("rating", 3));

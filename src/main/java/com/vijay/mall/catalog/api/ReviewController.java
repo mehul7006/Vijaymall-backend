@@ -31,7 +31,11 @@ public class ReviewController {
     return reviews.list(productId, page, size);
   }
 
-  /** Signed-in customers only. Writing again replaces the earlier review. */
+  /** Signed-in customers: may I review this product yet, and what did I write? */
+  @GetMapping("/mine")
+  public ReviewService.Mine mine(@PathVariable UUID productId) { return reviews.mine(CurrentUser.id(), productId); }
+
+  /** Signed-in customers who have had the product delivered. Writing again replaces the earlier review. */
   @PostMapping
   public ReviewService.Review write(@PathVariable UUID productId, @Valid @RequestBody ReviewBody body) {
     return reviews.write(CurrentUser.id(), productId, body.rating(), body.comment());

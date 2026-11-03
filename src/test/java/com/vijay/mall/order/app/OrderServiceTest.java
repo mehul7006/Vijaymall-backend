@@ -60,6 +60,7 @@ class OrderServiceTest {
   private ProfileService profiles;
   private OutboxService outbox;
   private OrderService service;
+  private org.springframework.context.ApplicationEventPublisher events;
 
   private final UUID user = UUID.randomUUID();
   private final UUID product = UUID.randomUUID();
@@ -75,11 +76,12 @@ class OrderServiceTest {
     payments = mock(PaymentService.class);
     profiles = mock(ProfileService.class);
     outbox = mock(OutboxService.class);
+    events = mock(org.springframework.context.ApplicationEventPublisher.class);
     AppProps props = new AppProps(null, null, null, null,
         new AppProps.Payment("fake", 15, null, null, null, null), new AppProps.Delivery(4000, 49900));
     service = new OrderService(repo, quotes, inventory, wallet, promotions, payments, profiles, outbox,
         mock(AuditService.class), JsonMapper.builder().build(), new TransactionTemplate(mock(PlatformTransactionManager.class)),
-        props, Clock.fixed(NOW, ZoneOffset.UTC));
+        props, Clock.fixed(NOW, ZoneOffset.UTC), events);
     when(repo.nextOrderNo()).thenReturn("VSM-1001");
     when(repo.findByIdem(any(), anyString())).thenReturn(Optional.empty());
     when(repo.items(any())).thenReturn(List.of());
@@ -224,12 +226,65 @@ class OrderServiceTest {
   }
 
   @Test
-  void skippingStepsIsIllegal() {
+  void staffMayJumpToAnyStatusWithoutFollowingTheSequence() {
     OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
     when(repo.find(r.id())).thenReturn(Optional.of(r));
-    ApiException e = assertThrows(ApiException.class, () -> service.adminChangeStatus(r.id(), OrderStatus.DELIVERED, null, user));
-    assertEquals("ILLEGAL_TRANSITION", e.code());
+    when(repo.updateStatus(eq(r.id()), eq("DELIVERED"), anyLong(), any())).thenReturn(true);
+    service.adminChangeStatus(r.id(), OrderStatus.DELIVERED, null, user);
+    verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("DELIVERED"), any(), any(), any());
+    verify(wallet).credit(user, 7, r.id());
+  }
+
+  @Test
+  void staffMayGoBackwardsToo() {
+    OrderRepository.Row r = row("PACKED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    when(repo.updateStatus(eq(r.id()), eq("CONFIRMED"), anyLong(), any())).thenReturn(true);
+    service.adminChangeStatus(r.id(), OrderStatus.CONFIRMED, null, user);
+    verify(repo).insertHistory(eq(r.id()), eq("PACKED"), eq("CONFIRMED"), any(), any(), any());
+  }
+
+  @Test
+  void sameStatusAgainChangesNothing() {
+    OrderRepository.Row r = row("PACKED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    service.adminChangeStatus(r.id(), OrderStatus.PACKED, null, user);
     verify(repo, never()).updateStatus(any(), any(), anyLong(), any());
+    verify(events, never()).publishEvent(any(Object.class));
+  }
+
+  @Test
+  void aDeliveredOrderCanNoLongerBeChanged() {
+    for (String done : new String[] {"DELIVERED", "PICKED_UP", "CANCELLED"}) {
+      OrderRepository.Row r = row(done, "COD", "NONE", 0, 7, true, user);
+      when(repo.find(r.id())).thenReturn(Optional.of(r));
+      ApiException e = assertThrows(ApiException.class, () -> service.adminChangeStatus(r.id(), OrderStatus.PACKED, null, user));
+      assertEquals("ILLEGAL_TRANSITION", e.code());
+      assertEquals(409, e.status().value());
+      verify(repo, never()).updateStatus(eq(r.id()), any(), anyLong(), any());
+    }
+  }
+
+  @Test
+  void paymentPendingCannotBeChosenByHand() {
+    OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    assertEquals("ILLEGAL_TRANSITION", assertThrows(ApiException.class,
+        () -> service.adminChangeStatus(r.id(), OrderStatus.PAYMENT_PENDING, null, user)).code());
+  }
+
+  @Test
+  void everyStatusChangePublishesAnEventForLiveScreens() {
+    OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    when(repo.updateStatus(eq(r.id()), eq("CONFIRMED"), anyLong(), any())).thenReturn(true);
+    service.adminChangeStatus(r.id(), OrderStatus.CONFIRMED, null, user);
+    ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
+    verify(events).publishEvent(sent.capture());
+    var ev = (com.vijay.mall.order.domain.OrderChanged) sent.getValue();
+    assertEquals(user, ev.userId());
+    assertEquals("CONFIRMED", ev.status());
+    assertEquals("PLACED", ev.previousStatus());
   }
 
   @Test

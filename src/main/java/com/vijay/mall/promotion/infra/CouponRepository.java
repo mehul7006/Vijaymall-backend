@@ -1,6 +1,8 @@
 package com.vijay.mall.promotion.infra;
 
 import com.vijay.mall.promotion.domain.Coupon;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class CouponRepository {
   private final CouponJpa coupons;
   private final RedemptionJpa redemptions;
+
+  @PersistenceContext
+  private EntityManager em;
 
   CouponRepository(CouponJpa coupons, RedemptionJpa redemptions) {
     this.coupons = coupons;
@@ -62,6 +67,16 @@ public class CouponRepository {
 
   public int userUses(UUID couponId, UUID userId) {
     return (int) redemptions.countByCouponIdAndUserIdAndReleasedFalse(couponId, userId);
+  }
+
+  /**
+   * Makes orders of the same customer and coupon wait for each other until their transaction ends, so the per-customer
+   * limit cannot be beaten by two orders placed at once. Other customers and other coupons are not held up.
+   */
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+  public void lockCustomerUse(UUID couponId, UUID userId) {
+    em.createNativeQuery("select count(*) from (select pg_advisory_xact_lock(hashtextextended(:k, 0))) as locked")
+        .setParameter("k", "coupon-use:" + couponId + ":" + userId).getSingleResult();
   }
 
   /** Atomic: counts a use only while the total limit allows it. */

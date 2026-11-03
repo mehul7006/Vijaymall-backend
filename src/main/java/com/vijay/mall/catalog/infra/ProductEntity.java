@@ -19,6 +19,8 @@ class ProductEntity extends BaseEntity {
   String unit;
   String packSize;
   UUID productGroupId;
+  String variantName = "";
+  int variantOrder;
   double rating;
   int reviewCount;
   String imageUrl;

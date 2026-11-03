@@ -57,11 +57,19 @@ public class PromotionService {
     return new Applied(CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise)), c.worksWithCoins());
   }
 
-  /** Counts one use for an order. Called inside the order transaction. */
+  /**
+   * Counts one use for an order. Called inside the order transaction. The per-customer limit (1 = once per customer,
+   * N = N times) is checked again here under a lock on that customer and coupon, because two orders placed at the
+   * same moment would both pass the check made when pricing the quote.
+   */
   @Transactional
   public void consume(String code, UUID userId, UUID orderId, long discount) {
     if (code == null || code.isBlank()) return;
     Coupon c = coupons.findByCode(normalize(code)).orElseThrow(() -> invalid("NOT_FOUND"));
+    if (userId != null && c.perUserLimit() > 0) {
+      coupons.lockCustomerUse(c.id(), userId);
+      if (coupons.userUses(c.id(), userId) >= c.perUserLimit()) throw invalid("LIMIT_REACHED");
+    }
     if (coupons.takeUse(c.id()) == 0) throw invalid("LIMIT_REACHED");
     coupons.insertRedemption(c.id(), userId, orderId, discount);
   }
@@ -118,6 +126,8 @@ public class PromotionService {
     if (c.code() == null || c.code().isBlank()) throw ApiException.validation("code", "code is required");
     if (!Coupon.FLAT.equals(c.kind()) && !Coupon.PERCENT.equals(c.kind())) throw ApiException.validation("kind", "FLAT or PERCENT");
     if (c.value() <= 0) throw ApiException.validation("value", "must be positive");
+    if (c.perUserLimit() < 0) throw ApiException.validation("perUserLimit", "0 for no limit, 1 for once per customer, or more");
+    if (c.totalLimit() < 0) throw ApiException.validation("totalLimit", "0 for no limit, or more");
     if (Coupon.PERCENT.equals(c.kind()) && c.value() > 100) throw ApiException.validation("value", "percent cannot exceed 100");
     if (c.startAt() != null && c.endAt() != null && c.endAt().isBefore(c.startAt())) throw ApiException.validation("endAt", "must be after startAt");
   }

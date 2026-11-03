@@ -26,10 +26,14 @@ public final class OrderViews {
   @Schema(name = "OrderSummary")
 
   public record Summary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
-                        Instant placedAt) {}
+                        Instant placedAt, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                        long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {}
 
+  /** Same money fields as {@link Summary} (and as {@link View}), so the customer and the shop always read the same numbers. */
   public record AdminSummary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
-                             Instant placedAt, String customerName, String customerEmail, String customerMobile) {}
+                             Instant placedAt, String customerName, String customerEmail, String customerMobile,
+                             long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                             long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {}
 
   public record View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,

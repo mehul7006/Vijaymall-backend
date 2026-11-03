@@ -56,9 +56,9 @@ class PublicCouponTest {
   void viewKeepsOfferDetailsAndDropsInternals() {
     var c = coupon("SAVE5", true, EARLIER, LATER, 100, 7);
     var v = PublicCoupon.from(c);
-    assertThat(v).isEqualTo(new PublicCoupon("SAVE5", Coupon.FLAT, 500, 10_000, 0, null, EARLIER, LATER, true, false));
+    assertThat(v).isEqualTo(new PublicCoupon("SAVE5", Coupon.FLAT, 500, 10_000, 0, null, EARLIER, LATER, true, false, 1));
     assertThat(PublicCoupon.class.getRecordComponents()).extracting(rc -> rc.getName())
-        .doesNotContain("id", "totalLimit", "usedCount", "perUserLimit", "active");
+        .doesNotContain("id", "totalLimit", "usedCount", "active");
   }
 
   @Test

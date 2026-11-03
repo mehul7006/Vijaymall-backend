@@ -1,5 +1,6 @@
 package com.vijay.mall.catalog.infra;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -14,6 +15,13 @@ interface ReviewJpa extends JpaRepository<ReviewEntity, UUID> {
   Page<ReviewEntity> findByProductId(UUID productId, Pageable page);
 
   long countByProductId(UUID productId);
+
+  Page<ReviewEntity> findByProductIdIn(Collection<UUID> productIds, Pageable page);
+
+  long countByProductIdIn(Collection<UUID> productIds);
+
+  @Query("select coalesce(avg(r.rating), 0.0) from ReviewEntity r where r.productId in :pids")
+  Double averageOf(@Param("pids") Collection<UUID> productIds);
 
   @Query("select coalesce(avg(r.rating), 0.0) from ReviewEntity r where r.productId = :pid")
   Double average(@Param("pid") UUID productId);

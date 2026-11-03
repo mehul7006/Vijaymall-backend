@@ -71,3 +71,38 @@ Integration test map: OrderFlowIT, OrderApiIT, OrderCancelIT (orders); OnlinePay
 - Saved basket: `GET / PUT / DELETE /api/v1/cart`, signed-in customers only (guests keep a local basket). `GET` returns `{items:[{productId,qty}], couponCode, coinMode, percent, updatedAt}`; with no saved basket it returns `200` with `items: []`, `coinMode: "NONE"`. `PUT` replaces the whole basket (last write wins), merges repeated products, upper-cases the coupon, keeps `percent` only for `PERCENT`, skips products that no longer exist, and returns what is stored. Lines for inactive or sold-out products are left out on read. Limits: 100 lines, quantity 1 to 999. `POST /cart/quote` is unchanged. Migration `V6__cart.sql`; `cart_item.position` keeps the saved order.
 - Fixed login code for dev / frontend testing: run with the `dev` profile (code is `12345`), or on any non-prod profile set `OTP_FIXED_CODE=12345`. In the `dev` profile `OTP_FIXED_CODE` overrides the default. The `prod` profile (the Docker image default) refuses to start with a fixed code, by design.
 - On startup the log says whether the fixed code is active: `OTP fixed code is ACTIVE` or `OTP fixed code is not set`. If a client gets `OTP_INVALID / WRONG` for `12345`, the running instance is not using a fixed code (started without the `dev` profile and without `OTP_FIXED_CODE`).
+
+## Order defects round (status rules, live updates, variants, reviews)
+
+- **Status changes.** Staff and admins may move an open order to any status except PAYMENT_PENDING (system-set) and
+  its current one (a repeat is a no-op, not an error). DELIVERED, PICKED_UP and CANCELLED are closed: any change
+  returns `409 ILLEGAL_TRANSITION`. Customers can still cancel only before PACKED. Cancelled stays closed because it has
+  already returned stock, coupon use, coins and money. Business risk: an unpaid ONLINE order can now be advanced by staff.
+- **Staff access.** `/api/v1/admin/orders/**` is open to ADMIN and CASHIER; everything else under `/admin` stays admin-only.
+  New-order notifications go to all active staff.
+- **Live updates (SSE).** `GET /api/v1/orders/stream` (customer, own orders) and `GET /api/v1/admin/orders/stream`
+  (staff, all orders). Events: `ready`, `order` `{orderId, orderNo, status, previousStatus, at}`, plus a keep-alive
+  comment every 25 s. Sent after commit. Streams last 10 minutes, so the app reconnects with a fresh token; EventSource
+  cannot set headers, so these two paths (only) accept `?access_token=`. In-memory: one server instance only; use a
+  shared channel (Redis / LISTEN-NOTIFY) when scaling out. FCM push is unchanged and remains the background path.
+- **Reorder.** `GET /api/v1/orders/{id}/reorder` checks each line against live catalog and stock (UNAVAILABLE,
+  OUT_OF_STOCK, LOW_STOCK, price change) so the app does not guess from the products it has loaded.
+- **Order value.** Order lists (customer and admin) now carry the same breakdown as the detail view: subtotal, coupon
+  and code, coins used and their discount, delivery fee, payment method/status, total.
+- **Coupons.** `perUserLimit` (0 = unlimited, 1 = once, N = N times) is enforced when the order is placed, under a
+  per-customer lock so parallel orders cannot beat it; cancelling gives the use back. Shown on `GET /coupons`.
+- **Variants.** A variant is still a product row (cart, orders, stock, POS use its id) but rows sharing a
+  `product_group_id` are one product. `GET /product-groups`, `/product-groups/{id}` (group id or any variant id),
+  `/product-groups/{id}/reviews`; admin `GET|POST /admin/products/{id}/variants`, `PUT /admin/product-groups/{id}`;
+  `variantName`/`variantOrder` on the product body. `/products` is unchanged. Migration V7.
+- **Reviews.** Only a customer with a DELIVERED/PICKED_UP order containing the product may review
+  (`422 REVIEW_NOT_ALLOWED` otherwise); the order id is stored and returned as `verified`. `GET /products/{id}/reviews/mine`
+  tells the app whether to show the button. Product rating and count are recomputed on each review.
+
+## Sold-out products are hidden from the shop
+
+`GET /products`, `GET /hot-sale` and `GET /product-groups` leave out products whose stock is 0. In the grouped list a
+product stays if any variant has stock, and only its in-stock variants are listed. Opening a product by id
+(`/products/{id}`, `/product-groups/{id}`) still works and shows `inStock: false`, so wishlist, order history and shared
+links keep working. Pass `includeOutOfStock=true` on the two list endpoints to get everything. Admin and POS lists are
+unchanged. A product disappears from the list when the last unit is sold, so the app should refresh lists after an order.

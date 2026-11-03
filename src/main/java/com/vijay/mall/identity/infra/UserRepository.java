@@ -140,5 +140,8 @@ public class UserRepository {
   /** Active admin users, used to address "new order" notifications. */
   public List<UUID> adminIds() { return jpa.activeAdminIds(); }
 
+  /** Active admins and counter staff: everyone who works the orders. */
+  public List<UUID> staffIds() { return jpa.activeStaffIds(); }
+
   public boolean isBlocked(UUID id) { return jpa.existsByIdAndStatus(id, "BLOCKED"); }
 }

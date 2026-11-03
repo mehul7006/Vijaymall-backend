@@ -4,6 +4,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.error.ErrorBody;
 import com.vijay.mall.common.web.TraceIdFilter;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
@@ -28,6 +30,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -52,6 +56,24 @@ public class SecurityConfig {
   @Bean
   JwtDecoder jwtDecoder(SecretKey key) {
     return NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+  }
+
+  /** Live order streams: a browser EventSource cannot send an Authorization header, so these two GETs also accept ?access_token=. */
+  static final List<String> STREAM_PATHS = List.of("/api/v1/orders/stream", "/api/v1/admin/orders/stream");
+
+  /** The Authorization header when there is one; otherwise ?access_token= on the stream paths only, never anywhere else. */
+  static String streamToken(HttpServletRequest req) {
+    if (!"GET".equals(req.getMethod()) || !STREAM_PATHS.contains(req.getRequestURI())) return null;
+    String t = req.getParameter("access_token");
+    return t == null || t.isBlank() ? null : t.trim();
+  }
+
+  static BearerTokenResolver bearerTokenResolver() {
+    DefaultBearerTokenResolver header = new DefaultBearerTokenResolver();
+    return req -> {
+      String fromHeader = header.resolve(req);
+      return fromHeader != null ? fromHeader : streamToken(req);
+    };
   }
 
   private static void write(HttpServletResponse res, JsonMapper om, HttpStatus s, String code, String msg)
@@ -80,16 +102,22 @@ public class SecurityConfig {
         .cors(Customizer.withDefaults())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(a -> a
+            // The stream is authorized when it opens; its later async dispatch (when it ends) must not be checked again.
+            .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
             .requestMatchers("/api/v1/auth/**", "/api/v1/payments/webhook/**",
                 "/actuator/health", "/actuator/health/**", "/img/**",
                 "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
             // Guests may browse the catalog (SecurityIT.catalogIsPublic). Writing a review still needs a sign-in.
             .requestMatchers(HttpMethod.GET, "/api/v1/categories", "/api/v1/products", "/api/v1/products/*",
-                "/api/v1/products/*/reviews", "/api/v1/hot-sale", "/api/v1/shop-settings", "/api/v1/coupons").permitAll()
+                "/api/v1/products/*/reviews", "/api/v1/hot-sale", "/api/v1/shop-settings", "/api/v1/coupons",
+                "/api/v1/product-groups", "/api/v1/product-groups/*", "/api/v1/product-groups/*/reviews").permitAll()
+            // Counter staff (CASHIER) work the orders too; everything else under /admin stays admin-only.
+            .requestMatchers("/api/v1/admin/orders", "/api/v1/admin/orders/**").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
             .requestMatchers("/api/v1/pos/**").hasAnyRole("CASHIER", "ADMIN")
             .anyRequest().authenticated())
         .oauth2ResourceServer(o -> o
+            .bearerTokenResolver(bearerTokenResolver())
             .jwt(j -> j.jwtAuthenticationConverter(converter))
             .authenticationEntryPoint(entry)
             .accessDeniedHandler(denied))

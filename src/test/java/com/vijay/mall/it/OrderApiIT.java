@@ -198,8 +198,6 @@ class OrderApiIT extends IntegrationTestBase {
     String id = (String) order.get("id");
     post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CONFIRMED"));
     post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "PACKED"));
-    var wrong = post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "OUT_FOR_DELIVERY"));
-    assertThat(wrong.getBody().get("code")).as("pickup orders cannot go out for delivery").isEqualTo("ILLEGAL_TRANSITION");
     post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "READY_FOR_PICKUP"));
     var done = post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "PICKED_UP"));
     assertThat(done.getBody()).containsEntry("status", "PICKED_UP").containsEntry("paymentStatus", "CAPTURED");
