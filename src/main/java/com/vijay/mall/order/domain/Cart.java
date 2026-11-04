@@ -1,5 +1,6 @@
 package com.vijay.mall.order.domain;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -7,9 +8,12 @@ import java.util.List;
 import java.util.UUID;
 
 /** A customer's saved basket. Lines are pack ids, exactly what POST /cart/quote accepts. */
+@Schema(name = "Basket")
 public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coinMode, Integer percent, Instant updatedAt) {
   public static final int MAX_LINES = 100;
   public static final int MAX_QTY = 999;
+
+  @Schema(name = "BasketLine")
 
   public record Line(UUID productId, int qty) {}
 

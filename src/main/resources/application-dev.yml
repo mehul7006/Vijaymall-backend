@@ -1,11 +1,13 @@
 app:
   otp:
     channel: console
+    sms-channel: console
     # Dev login code. OTP_FIXED_CODE overrides it; the prod profile refuses to start with any fixed code.
     fixed-code: ${OTP_FIXED_CODE:12345}
-  bootstrap-admin-email: admin@vijaysupermall.local
   cors:
-    allowed-origins: http://localhost:*,http://127.0.0.1:*
+    # flutter run -d chrome picks a random port, so allow any local port
+    allowed-origin-patterns: http://localhost:*,http://127.0.0.1:*
+  bootstrap-admin-email: admin@vijaysupermall.local
 logging:
   level:
     com.vijay.mall: DEBUG

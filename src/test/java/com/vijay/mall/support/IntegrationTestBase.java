@@ -87,7 +87,7 @@ public abstract class IntegrationTestBase {
 
   @SuppressWarnings("unchecked")
   protected Map<String, Object> productByName(String token, String nameEn) {
-    List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/products?size=50", token).getBody().get("items");
+    List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/products?size=50&includeOutOfStock=true", token).getBody().get("items");
     return items.stream().filter(p -> nameEn.equals(p.get("nameEn"))).findFirst().orElseThrow();
   }
 

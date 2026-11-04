@@ -66,6 +66,7 @@ class PosServiceTest {
   private PosSaleRepository sales;
   private PosHoldRepository holds;
   private InvoiceCounterRepository counters;
+  private CreditService credit;
   private PosService service;
 
   @BeforeEach
@@ -80,9 +81,10 @@ class PosServiceTest {
     sales = mock(PosSaleRepository.class);
     holds = mock(PosHoldRepository.class);
     counters = mock(InvoiceCounterRepository.class);
+    credit = mock(CreditService.class);
     service = new PosService(catalog, quotes, inventory, wallet, promotions, users, shop, sales, holds, counters,
         mock(AuditService.class), JsonMapper.builder().build(), new TransactionTemplate(mock(PlatformTransactionManager.class)),
-        Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock.fixed(NOW, ZoneOffset.UTC), credit);
     when(shop.get()).thenReturn(PosTestData.shop());
     ProductData riceData = PosTestData.product(rice, "Rice", 5900, true);
     ProductData sugarData = PosTestData.product(sugar, "Sugar", 4500, true);
@@ -373,5 +375,66 @@ class PosServiceTest {
     HoldRecord bad = new HoldRecord(UUID.randomUUID(), cashier, "a", null, "not json", NOW);
     when(holds.find(bad.id())).thenReturn(Optional.of(bad));
     assertThatThrownBy(() -> service.getHold(bad.id())).isInstanceOf(IllegalStateException.class);
+  }
+
+  // ---------- credit and hybrid ----------
+  private UUID creditCustomer(String mobile) {
+    UUID cust = UUID.randomUUID();
+    when(users.findByMobile(mobile)).thenReturn(Optional.of(new User(cust, "a@b.c", "A", mobile, "CUSTOMER")));
+    when(sales.find(any())).thenReturn(Optional.of(mock(SaleRecord.class)));
+    return cust;
+  }
+
+  @Test void sale_fullyOnCredit_putsTheWholeBillOnTheCustomersAccount() {
+    UUID cust = creditCustomer("9000000005");
+    when(quotes.quoteLines(eq(cust), anyList(), any(), any(), any())).thenReturn(quote(11800, null, 0, 0, 0, 0));
+    service.sale(cashier, "c1", new SaleInput(cart("9000000005", null, null, new Item(rice, 2)), List.of(new Pay("CREDIT", 11800, null)), null));
+    SaleRecord s = capture();
+    assertThat(s.paymentType()).isEqualTo("CREDIT");
+    assertThat(s.creditPaise()).isEqualTo(11800);
+    verify(credit).chargeSale(eq(cust), eq(11800L), any(UUID.class), eq("VSM/2026-27/000042"), eq(cashier), any());
+  }
+
+  @Test void sale_hybrid_putsOnlyTheCreditShareOnTheAccount() {
+    UUID cust = creditCustomer("9000000006");
+    when(quotes.quoteLines(eq(cust), anyList(), any(), any(), any())).thenReturn(quote(11800, null, 0, 0, 0, 0));
+    service.sale(cashier, "c2", new SaleInput(cart("9000000006", null, null, new Item(rice, 2)),
+        List.of(new Pay("CASH", 5000, null), new Pay("UPI", 1800, "u"), new Pay("CREDIT", 5000, null)), null));
+    assertThat(capture().paymentType()).isEqualTo("HYBRID");
+    verify(credit).chargeSale(eq(cust), eq(5000L), any(UUID.class), anyString(), eq(cashier), any());
+  }
+
+  @Test void sale_onCredit_needsACustomer_andReservesNothing() {
+    when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
+    var in = new SaleInput(cart(null, null, null, new Item(rice, 1)), List.of(new Pay("CREDIT", 5900, null)), null);
+    assertThatThrownBy(() -> service.sale(cashier, "c3", in)).isInstanceOf(ApiException.class).hasMessageContaining("mobile");
+    verify(inventory, never()).reserve(anyList(), any(), anyString());
+    verify(credit, never()).chargeSale(any(), anyLong(), any(), anyString(), any(), any());
+  }
+
+  @Test void sale_creditRefusedByTheAccount_failsTheBill() {
+    UUID cust = creditCustomer("9000000007");
+    when(quotes.quoteLines(eq(cust), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
+    org.mockito.Mockito.doThrow(ApiException.unprocessable("CREDIT_LIMIT_EXCEEDED", "over", java.util.Map.of()))
+        .when(credit).chargeSale(any(), anyLong(), any(), anyString(), any(), any());
+    var in = new SaleInput(cart("9000000007", null, null, new Item(rice, 1)), List.of(new Pay("CREDIT", 5900, null)), null);
+    assertThatThrownBy(() -> service.sale(cashier, "c4", in)).isInstanceOfSatisfying(ApiException.class,
+        e -> assertThat(e.code()).isEqualTo("CREDIT_LIMIT_EXCEEDED"));
+  }
+
+  @Test void sale_twoCreditLines_rejected() {
+    UUID cust = creditCustomer("9000000008");
+    when(quotes.quoteLines(eq(cust), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
+    var in = new SaleInput(cart("9000000008", null, null, new Item(rice, 1)),
+        List.of(new Pay("CREDIT", 2900, null), new Pay("CREDIT", 3000, null)), null);
+    assertThatThrownBy(() -> service.sale(cashier, "c5", in)).isInstanceOf(ApiException.class).hasMessageContaining("only one credit");
+  }
+
+  @Test void sale_withoutCredit_neverTouchesTheCreditAccount() {
+    when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
+    when(sales.find(any())).thenReturn(Optional.of(mock(SaleRecord.class)));
+    service.sale(cashier, "c6", new SaleInput(cart(null, null, null, new Item(rice, 1)), List.of(new Pay("CASH", 5900, null)), null));
+    assertThat(capture().paymentType()).isEqualTo("CASH");
+    verify(credit, never()).chargeSale(any(), anyLong(), any(), anyString(), any(), any());
   }
 }

@@ -74,6 +74,9 @@ public class ProfileService {
 
   public List<UUID> adminIds() { return users.adminIds(); }
 
+  /** Active admins and counter staff: everyone who works the orders. */
+  public List<UUID> staffIds() { return users.staffIds(); }
+
   public List<String> deviceTokens(UUID userId) { return devices.tokensOf(userId); }
 
   /** Many users at once (for admin order lists). */

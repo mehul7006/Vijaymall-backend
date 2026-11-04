@@ -7,18 +7,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class OrderStatusTest {
-  @Test void happy_path_delivery() {
-    assertThat(PLACED.next(DELIVERY)).containsExactlyInAnyOrder(CONFIRMED, CANCELLED);
-    assertThat(CONFIRMED.next(DELIVERY)).containsExactlyInAnyOrder(PACKED, CANCELLED);
-    assertThat(PACKED.next(DELIVERY)).containsExactlyInAnyOrder(OUT_FOR_DELIVERY, CANCELLED);
-    assertThat(OUT_FOR_DELIVERY.next(DELIVERY)).containsExactly(DELIVERED);
+  @Test void open_orders_may_move_to_any_other_status() {
+    for (var from : new OrderStatus[] {PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP}) {
+      for (var f : Fulfilment.values()) {
+        assertThat(from.next(f)).doesNotContain(from, PAYMENT_PENDING)
+            .contains(PLACED == from ? CONFIRMED : PLACED, DELIVERED, PICKED_UP, CANCELLED);
+      }
+    }
   }
-  @Test void happy_path_pickup() {
-    assertThat(PACKED.next(PICKUP)).containsExactlyInAnyOrder(READY_FOR_PICKUP, CANCELLED);
-    assertThat(READY_FOR_PICKUP.next(PICKUP)).containsExactly(PICKED_UP);
-  }
-  @Test void online_payment_starts_pending() {
-    assertThat(PAYMENT_PENDING.next(DELIVERY)).containsExactlyInAnyOrder(PLACED, CANCELLED);
+  @Test void payment_pending_can_become_anything_but_itself() {
+    assertThat(PAYMENT_PENDING.next(DELIVERY)).doesNotContain(PAYMENT_PENDING).contains(PLACED, CANCELLED, DELIVERED);
   }
   @Test void final_states_have_no_moves() {
     for (var s : new OrderStatus[] {DELIVERED, PICKED_UP, CANCELLED}) {
@@ -26,10 +24,13 @@ class OrderStatusTest {
       assertThat(s.isFinal()).isTrue();
     }
   }
-  @Test void cannot_skip_steps() {
-    assertThat(PLACED.canMoveTo(PACKED, DELIVERY)).isFalse();
-    assertThat(PACKED.canMoveTo(DELIVERED, DELIVERY)).isFalse();
-    assertThat(PACKED.canMoveTo(READY_FOR_PICKUP, DELIVERY)).isFalse();
+  @Test void sequence_is_not_enforced() {
+    assertThat(PLACED.canMoveTo(PACKED, DELIVERY)).isTrue();
+    assertThat(PACKED.canMoveTo(DELIVERED, DELIVERY)).isTrue();
+    assertThat(PACKED.canMoveTo(CONFIRMED, DELIVERY)).isTrue();
+    assertThat(PLACED.canMoveTo(PLACED, DELIVERY)).isFalse();
+    assertThat(PLACED.canMoveTo(PAYMENT_PENDING, DELIVERY)).isFalse();
+    assertThat(DELIVERED.canMoveTo(PACKED, DELIVERY)).isFalse();
   }
   @Test void customer_can_cancel_only_before_packed() {
     assertThat(PLACED.customerCanCancel()).isTrue();

@@ -26,6 +26,7 @@ class PosSaleEntity extends BaseEntity {
   int coinsEarned;
   Long tenderedPaise;
   long changePaise;
+  String paymentType;
   String status;
   Instant createdAt;
 

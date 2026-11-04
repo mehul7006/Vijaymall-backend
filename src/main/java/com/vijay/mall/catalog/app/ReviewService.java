@@ -18,20 +18,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class ReviewService {
   static final int MAX_COMMENT = 1000;
 
-  /** reviewer is the first name only. */
-  public record Review(UUID id, int rating, String comment, String reviewer, Instant createdAt) {}
+  /** reviewer is the first name only; verified is true when the review was written for a delivered order. */
+  public record Review(UUID id, int rating, String comment, String reviewer, Instant createdAt, boolean verified) {
+    public Review(UUID id, int rating, String comment, String reviewer, Instant createdAt) {
+      this(id, rating, comment, reviewer, createdAt, false);
+    }
+  }
+
+  /** Whether the signed-in customer may review this product yet (it must have been delivered to them), and their review. */
+  public record Mine(boolean canReview, Review review) {}
 
   public record ReviewList(List<Review> items, int page, int size, long total, double rating, int reviewCount) {}
 
   private final ReviewRepository reviews;
   private final CatalogService catalog;
   private final ProfileService profiles;
+  private final PurchaseLookup purchases;
   private final Clock clock;
 
-  public ReviewService(ReviewRepository reviews, CatalogService catalog, ProfileService profiles, Clock clock) {
+  public ReviewService(ReviewRepository reviews, CatalogService catalog, ProfileService profiles, PurchaseLookup purchases,
+                       Clock clock) {
     this.reviews = reviews;
     this.catalog = catalog;
     this.profiles = profiles;
+    this.purchases = purchases;
     this.clock = clock;
   }
 
@@ -45,21 +55,44 @@ public class ReviewService {
     return new ReviewList(items, p.page(), p.size(), p.total(), s.average(), s.count());
   }
 
-  /** Adds the person's review, or replaces the one they wrote before. */
+  /** Reviews of all variants of one product together, newest first. The id may be the group id or any variant's id. */
+  public ReviewList listGroup(UUID idOrGroupId, int page, int size) {
+    List<UUID> ids = catalog.variantIds(idOrGroupId);
+    Page<ReviewRepository.Row> p = reviews.pageOf(ids, Math.max(0, page), Page.clampSize(size));
+    Map<UUID, User> people = profiles.users(p.items().stream().map(ReviewRepository.Row::userId).distinct().toList());
+    List<Review> items = p.items().stream().map(r -> toReview(r, people.get(r.userId()))).toList();
+    ReviewRepository.Summary s = reviews.summaryOf(ids);
+    return new ReviewList(items, p.page(), p.size(), p.total(), Math.round(s.average() * 100.0) / 100.0, s.count());
+  }
+
+  /** Can this customer review the product, and what did they write? Used to show or hide the "write a review" button. */
+  public Mine mine(UUID userId, UUID productId) {
+    catalog.get(productId);
+    boolean delivered = purchases.deliveredOrderWith(userId, productId).isPresent();
+    Review mine = reviews.find(productId, userId).map(r -> toReview(r, profiles.get(userId))).orElse(null);
+    return new Mine(delivered, mine);
+  }
+
+  /**
+   * Adds the person's review, or replaces the one they wrote before. Only a customer who has had the product delivered
+   * (or picked it up) may review it; the review remembers that order.
+   */
   @Transactional
   public Review write(UUID userId, UUID productId, int rating, String comment) {
     if (rating < 1 || rating > 5) throw ApiException.validation("rating", "must be 1 to 5");
     String text = comment == null ? "" : comment.trim();
     if (text.length() > MAX_COMMENT) throw ApiException.validation("comment", "must be at most " + MAX_COMMENT + " characters");
     catalog.get(productId);
-    ReviewRepository.Row row = reviews.upsert(productId, userId, rating, text, clock.instant());
+    UUID orderId = purchases.deliveredOrderWith(userId, productId).orElseThrow(() -> ApiException.unprocessable(
+        "REVIEW_NOT_ALLOWED", "You can review a product after it has been delivered to you", Map.of()));
+    ReviewRepository.Row row = reviews.upsert(productId, userId, rating, text, orderId, clock.instant());
     ReviewRepository.Summary s = reviews.summary(productId);
     catalog.updateRating(productId, Math.round(s.average() * 100.0) / 100.0, s.count());
     return toReview(row, profiles.get(userId));
   }
 
   private static Review toReview(ReviewRepository.Row r, User u) {
-    return new Review(r.id(), r.rating(), r.comment(), firstName(u), r.createdAt());
+    return new Review(r.id(), r.rating(), r.comment(), firstName(u), r.createdAt(), r.verified());
   }
 
   static String firstName(User u) {

@@ -16,9 +16,11 @@ import com.vijay.mall.inventory.app.InventoryService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,32 @@ public class CatalogService {
 
   public record HotSale(List<HotBanner> banners, List<Product> products) {}
 
+  /**
+   * One sellable variant of a product (for example "Mango, 500 g"). id is what the cart, the order and the review use.
+   * label is the text to show next to the price: the pack size, or the unit when there is no pack size.
+   */
+  public record Variant(UUID id, String variantName, String packSize, String unit, String label, long mrpPaise,
+                        long pricePaise, String imageUrl, boolean inStock, int qtyAvailable) {}
+
+  /**
+   * One product with all its variants, the way a shop shows it: a single card, a variant picker, one rating.
+   * Name, description, category and flags are shared by every variant. defaultVariantId is the first variant in
+   * display order that is in stock (or the first when none is). fromPricePaise is the lowest variant price.
+   * rating and reviewCount cover the reviews of all variants together.
+   */
+  public record ProductGroup(UUID groupId, UUID defaultVariantId, UUID categoryId, String nameEn, String nameGu,
+                             String description, String imageUrl, boolean hotSale, boolean earnsCoins,
+                             boolean coinRedeemable, double rating, int reviewCount, long fromPricePaise, boolean inStock,
+                             List<Variant> variants) {}
+
+  /** A new variant of an existing product. It copies the shared details from that product. */
+  public record VariantInput(String variantName, String packSize, String unit, long mrpPaise, long pricePaise,
+                             Boolean active, int qtyOnHand, int lowThreshold, Integer variantOrder) {}
+
+  /** Details shared by every variant of a product; editing them once updates all variants. */
+  public record GroupInput(UUID categoryId, String nameEn, String nameGu, String description, Boolean hotSale,
+                           Instant hotStart, Instant hotEnd, Boolean earnsCoins, Boolean coinRedeemable, Boolean active) {}
+
   private final ProductRepository products;
   private final CategoryRepository categories;
   private final BannerRepository banners;
@@ -69,9 +97,17 @@ public class CatalogService {
 
   public List<Category> categories() { return categories.listActive(); }
 
+  /** The shop list. Products with no stock are left out; use the overload to include them. */
   public Page<Product> list(String q, UUID categoryId, boolean hot, int page, int size) {
+    return list(q, categoryId, hot, false, page, size);
+  }
+
+  public Page<Product> list(String q, UUID categoryId, boolean hot, boolean includeOutOfStock, int page, int size) {
     Instant now = clock.instant();
-    Page<AdminProduct> p = withStock(products.search(q, categoryId, hot, true, now, Math.max(0, page), Page.clampSize(size)));
+    int pg = Math.max(0, page);
+    int sz = Page.clampSize(size);
+    Page<AdminProduct> p = withStock(includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
+        : products.searchInStock(q, categoryId, hot, now, pg, sz));
     return new Page<>(p.items().stream().map(a -> a.toCustomer(now)).toList(), p.page(), p.size(), p.total());
   }
 
@@ -83,9 +119,79 @@ public class CatalogService {
 
   public HotSale hotSale() {
     Instant now = clock.instant();
-    List<Product> list = withStock(products.search(null, null, true, true, now, 0, 20)).items().stream()
+    List<Product> list = withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
         .map(a -> a.toCustomer(now)).toList();
     return new HotSale(banners.live(now), list);
+  }
+
+  /** Products with their variants, one entry per product. A product matches when any of its variants does. */
+  public Page<ProductGroup> groups(String q, UUID categoryId, boolean hot, int page, int size) {
+    return groups(q, categoryId, hot, false, page, size);
+  }
+
+  /** With includeOutOfStock false (the default) products with no stock are left out, and so are a product's sold-out variants. */
+  @Transactional(readOnly = true)
+  public Page<ProductGroup> groups(String q, UUID categoryId, boolean hot, boolean includeOutOfStock, int page, int size) {
+    Instant now = clock.instant();
+    Page<UUID> ids = products.searchGroups(q, categoryId, hot, !includeOutOfStock, now, Math.max(0, page), Page.clampSize(size));
+    List<ProductData> rows = products.visibleMembers(ids.items());
+    var stocks = inventory.stocks(rows.stream().map(ProductData::id).toList());
+    if (!includeOutOfStock) {
+      var inStock = stocks.entrySet().stream().filter(e -> e.getValue().qty() > 0).map(Map.Entry::getKey).collect(Collectors.toSet());
+      rows = rows.stream().filter(r -> inStock.contains(r.id())).toList();
+    }
+    var info = products.variantInfo(rows.stream().map(ProductData::id).toList());
+    Map<UUID, List<ProductData>> byGroup = rows.stream()
+        .collect(Collectors.groupingBy(ProductData::productGroupId, LinkedHashMap::new, Collectors.toList()));
+    List<ProductGroup> items = ids.items().stream().filter(byGroup::containsKey)
+        .map(g -> toGroup(byGroup.get(g), stocks, info, now)).toList();
+    return new Page<>(items, ids.page(), ids.size(), ids.total());
+  }
+
+  /** One product with its variants. The id may be the group id or the id of any of its variants. */
+  @Transactional(readOnly = true)
+  public ProductGroup group(UUID idOrGroupId) {
+    Instant now = clock.instant();
+    List<ProductData> rows = products.allMembersOf(idOrGroupId).stream()
+        .filter(p -> p.active() && !products.isPosOnly(p.id())).toList();
+    if (rows.isEmpty()) throw ApiException.notFound("Product");
+    var stocks = inventory.stocks(rows.stream().map(ProductData::id).toList());
+    var info = products.variantInfo(rows.stream().map(ProductData::id).toList());
+    return toGroup(rows, stocks, info, now);
+  }
+
+  /** Ids of the visible variants of the product that holds this id; used to read the reviews of all variants together. */
+  @Transactional(readOnly = true)
+  public List<UUID> variantIds(UUID idOrGroupId) {
+    return group(idOrGroupId).variants().stream().map(Variant::id).toList();
+  }
+
+  private static ProductGroup toGroup(List<ProductData> members,
+                                      Map<UUID, com.vijay.mall.inventory.infra.InventoryRepository.Stock> stocks,
+                                      Map<UUID, ProductRepository.VariantInfo> info, Instant now) {
+    var none = new ProductRepository.VariantInfo("", 0);
+    List<ProductData> sorted = members.stream().sorted(Comparator
+        .comparingInt((ProductData p) -> info.getOrDefault(p.id(), none).order())
+        .thenComparingLong(ProductData::pricePaise)).toList();
+    List<Variant> variants = sorted.stream().map(p -> {
+      var stock = stocks.get(p.id());
+      int qty = stock == null ? 0 : stock.qty();
+      return new Variant(p.id(), info.getOrDefault(p.id(), none).name(), p.packSize() == null ? "" : p.packSize(), p.unit(),
+          p.unitLabel(), p.mrpPaise(), p.pricePaise(), p.imageUrl(), qty > 0, Math.min(qty, 99));
+    }).toList();
+    Variant def = variants.stream().filter(Variant::inStock).findFirst().orElse(variants.get(0));
+    ProductData shared = sorted.get(0);
+    int reviews = sorted.stream().mapToInt(ProductData::reviewCount).sum();
+    double weighted = sorted.stream().mapToDouble(p -> p.rating() * p.reviewCount()).sum();
+    double rating = reviews == 0 ? 0 : Math.round(weighted / reviews * 100.0) / 100.0;
+    String image = def.imageUrl() != null ? def.imageUrl()
+        : variants.stream().map(Variant::imageUrl).filter(u -> u != null).findFirst().orElse(null);
+    boolean hot = sorted.stream().anyMatch(p -> p.hotSale() && (p.hotStart() == null || !now.isBefore(p.hotStart()))
+        && (p.hotEnd() == null || !now.isAfter(p.hotEnd())));
+    return new ProductGroup(shared.productGroupId(), def.id(), shared.categoryId(), shared.nameEn(), shared.nameGu(),
+        shared.description(), image, hot, shared.earnsCoins(), shared.coinRedeemable(), rating, reviews,
+        variants.stream().mapToLong(Variant::pricePaise).min().orElse(0), variants.stream().anyMatch(Variant::inStock),
+        variants);
   }
 
   /** Prices a cart from the current catalog. Unknown or inactive products are rejected. */
@@ -246,6 +352,63 @@ public class CatalogService {
 
   @Transactional
   public void deleteBanner(UUID id) { banners.delete(id); }
+
+  /** Every variant of a product, active or not, with stock numbers. The id may be the group id or any variant's id. */
+  @Transactional(readOnly = true)
+  public List<AdminProduct> adminVariants(UUID idOrGroupId) {
+    List<ProductData> rows = products.allMembersOf(idOrGroupId);
+    if (rows.isEmpty()) throw ApiException.notFound("Product");
+    return withStock(new Page<>(rows, 0, rows.size(), rows.size())).items();
+  }
+
+  /** Adds a variant to an existing product. Name, description, category and flags are copied from that product. */
+  @Transactional
+  public AdminProduct addVariant(UUID baseId, VariantInput in, UUID actor) {
+    AdminProduct base = one(baseId);
+    String name = nz(in.variantName()).trim();
+    String pack = nz(in.packSize()).trim();
+    if (name.isEmpty() && pack.isEmpty()) throw ApiException.validation("packSize", "give the variant a name or a pack size");
+    var members = products.allMembersOf(base.productGroupId());
+    var info = products.variantInfo(members.stream().map(ProductData::id).toList());
+    boolean duplicate = members.stream().anyMatch(m -> nz(m.packSize()).trim().equalsIgnoreCase(pack)
+        && info.getOrDefault(m.id(), new ProductRepository.VariantInfo("", 0)).name().trim().equalsIgnoreCase(name));
+    if (duplicate) throw ApiException.validation("packSize", "this product already has that variant");
+    int order = in.variantOrder() != null ? in.variantOrder()
+        : info.values().stream().mapToInt(ProductRepository.VariantInfo::order).max().orElse(-1) + 1;
+    AdminProduct created = create(new ProductInput(base.categoryId(), base.nameEn(), base.nameGu(), base.description(),
+        in.mrpPaise(), in.pricePaise(), nz(in.unit(), base.unit()), pack, in.active() == null || in.active(), base.hotSale(),
+        base.hotStart(), base.hotEnd(), base.earnsCoins(), base.coinRedeemable(), in.qtyOnHand(),
+        in.lowThreshold() <= 0 ? 5 : in.lowThreshold(), base.productGroupId()), actor);
+    products.setVariant(created.id(), name, order);
+    return adminGet(created.id());
+  }
+
+  /** Renames a variant or changes its place in the picker. A null value keeps what is there. */
+  @Transactional
+  public AdminProduct setVariant(UUID id, String variantName, Integer variantOrder, UUID actor) {
+    adminGet(id);
+    var current = products.variantInfo(List.of(id)).getOrDefault(id, new ProductRepository.VariantInfo("", 0));
+    products.setVariant(id, variantName == null ? current.name() : variantName.trim(),
+        variantOrder == null ? current.order() : variantOrder);
+    audit.log(actor, "UPDATE", "product", id, "variant " + (variantName == null ? current.name() : variantName.trim()));
+    return adminGet(id);
+  }
+
+  /** Edits what every variant of a product shares, in one go. */
+  @Transactional
+  public List<AdminProduct> updateGroup(UUID idOrGroupId, GroupInput in, UUID actor) {
+    List<ProductData> rows = products.allMembersOf(idOrGroupId);
+    if (rows.isEmpty()) throw ApiException.notFound("Product");
+    if (in.hotStart() != null && in.hotEnd() != null && in.hotEnd().isBefore(in.hotStart())) {
+      throw ApiException.validation("hotEnd", "must be after hotStart");
+    }
+    UUID group = rows.get(0).productGroupId();
+    products.updateShared(group, in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), Boolean.TRUE.equals(in.hotSale()),
+        in.hotStart(), in.hotEnd(), in.earnsCoins() == null || in.earnsCoins(), in.coinRedeemable() == null || in.coinRedeemable(),
+        in.active(), clock.instant());
+    audit.log(actor, "UPDATE", "product_group", group, in.nameEn());
+    return adminVariants(group);
+  }
 
   private static void validate(ProductInput in) {
     if (in.pricePaise() < 0 || in.mrpPaise() < 0) throw ApiException.validation("pricePaise", "price cannot be negative");

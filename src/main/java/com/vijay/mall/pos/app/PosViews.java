@@ -16,6 +16,7 @@ public final class PosViews {
   public record Item(UUID productId, int qty) {}
 
   /** What is in the basket. {@code customerMobile} is needed only to use a coupon or coins, or to earn coins. */
+  @Schema(name = "PosCart")
   public record Cart(List<Item> items, String customerMobile, String couponCode, CoinRedemption.Mode coinMode,
                      Integer percent) {}
 
@@ -49,5 +50,6 @@ public final class PosViews {
   public record DayReport(java.time.LocalDate date, long bills, long salesPaise, long taxablePaise, long cgstPaise,
                           long sgstPaise, long coinsRedeemed, long creditNotes, long refundsPaise, long netPaise,
                           java.util.Map<String, Long> paidByMode, java.util.Map<String, Long> refundedByMode,
-                          long cashExpectedPaise) {}
+                          long cashExpectedPaise, long creditGivenPaise, long creditReturnedPaise,
+                          long creditRecoveredPaise, java.util.Map<String, Long> creditRecoveredByMode) {}
 }

@@ -45,7 +45,7 @@ public class NotificationService {
         case "ORDER_PLACED" -> {
           String no = p.path("orderNo").asString();
           notify(UUID.fromString(p.path("userId").asString()), "Order placed", "Your order " + no + " has been placed.", "ORDER", no);
-          for (UUID admin : profiles.adminIds()) notify(admin, "New order", "Order " + no + " just arrived.", "ORDER", no);
+          for (UUID admin : profiles.staffIds()) notify(admin, "New order", "Order " + no + " just arrived.", "ORDER", no);
         }
         case "ORDER_STATUS" -> {
           String no = p.path("orderNo").asString();

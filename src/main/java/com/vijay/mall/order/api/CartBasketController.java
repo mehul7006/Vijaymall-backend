@@ -1,5 +1,6 @@
 package com.vijay.mall.order.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.order.app.CartService;
 import com.vijay.mall.order.domain.Cart;
@@ -25,6 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/cart")
 public class CartBasketController {
   public record LineBody(@NotNull UUID productId, @Min(1) @Max(Cart.MAX_QTY) int qty) {}
+
+  @Schema(name = "BasketBody")
 
   public record Body(@NotNull @Size(max = Cart.MAX_LINES) List<@Valid LineBody> items, String couponCode,
                      CoinRedemption.Mode coinMode, @Min(0) @Max(100) Integer percent) {}

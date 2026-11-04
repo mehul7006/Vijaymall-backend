@@ -142,5 +142,23 @@ class ShopStaffReportServiceTest {
   void aShopSettingBuiltTheOldWayHasNoPromise() {
     assertThat(shop("Vijay", "24ABCDE1234F1Z5", "24", "u@upi", "VSM", "2").promise()).isEmpty();
   }
-}
 
+  @Test void report_creditLines_andRepaymentsInCashGoIntoTheDrawer() {
+    var repo = mock(PosReportRepository.class);
+    var service = new PosReportService(repo, clock);
+    when(repo.sales(any(), any(), eq(null))).thenReturn(new PosReportRepository.Totals(4, 40000, 34000, 3000, 3000, 0));
+    when(repo.returns(any(), any(), eq(null))).thenReturn(new PosReportRepository.ReturnTotals(1, 2000));
+    when(repo.paidByMode(any(), any(), eq(null))).thenReturn(Map.of("CASH", 20000L, "UPI", 5000L, "CREDIT", 15000L));
+    when(repo.refundedByMode(any(), any(), eq(null))).thenReturn(Map.of("CASH", 500L));
+    when(repo.creditReturned(any(), any(), eq(null))).thenReturn(1500L);
+    when(repo.creditRecoveredByMode(any(), any(), eq(null))).thenReturn(Map.of("CASH", 3000L, "UPI", 1000L));
+    var r = service.day(LocalDate.of(2026, 10, 27), null);
+    assertThat(r.creditGivenPaise()).isEqualTo(15000);
+    assertThat(r.creditReturnedPaise()).isEqualTo(1500);
+    assertThat(r.creditRecoveredPaise()).isEqualTo(4000);
+    assertThat(r.creditRecoveredByMode()).containsEntry("CASH", 3000L).containsEntry("UPI", 1000L).containsEntry("CARD", 0L);
+    assertThat(r.paidByMode()).doesNotContainKey("CREDIT"); // credit is owed, not money received
+    assertThat(r.cashExpectedPaise()).isEqualTo(22500); // 20000 + 3000 repaid in cash - 500 refunded in cash
+    assertThat(r.salesPaise()).isEqualTo(40000);
+  }
+}

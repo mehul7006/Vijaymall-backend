@@ -1,28 +1,30 @@
 package com.vijay.mall.order.domain;
 
+import java.util.EnumSet;
 import java.util.Set;
 
-/** Order life cycle. Moves not listed here are rejected. */
+/**
+ * Order life cycle. Staff may move an open order to any other status, in any order. Three statuses are closed:
+ * a delivered or picked-up order has already paid out its coins, and a cancelled one has already given back its
+ * stock, coupon use, coins and money, so none of them can be changed again. PAYMENT_PENDING is set by the system
+ * when an online payment starts and cannot be chosen by hand.
+ */
 public enum OrderStatus {
   PAYMENT_PENDING, PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP, CANCELLED;
 
+  /** Statuses this one may move to. {@code f} is kept for callers; the rules no longer depend on it. */
   public Set<OrderStatus> next(Fulfilment f) {
-    return switch (this) {
-      case PAYMENT_PENDING -> Set.of(PLACED, CANCELLED);
-      case PLACED -> Set.of(CONFIRMED, CANCELLED);
-      case CONFIRMED -> Set.of(PACKED, CANCELLED);
-      case PACKED -> f == Fulfilment.DELIVERY
-          ? Set.of(OUT_FOR_DELIVERY, CANCELLED)
-          : Set.of(READY_FOR_PICKUP, CANCELLED);
-      case OUT_FOR_DELIVERY -> Set.of(DELIVERED);
-      case READY_FOR_PICKUP -> Set.of(PICKED_UP);
-      case DELIVERED, PICKED_UP, CANCELLED -> Set.of();
-    };
+    if (isFinal()) return Set.of();
+    Set<OrderStatus> all = EnumSet.allOf(OrderStatus.class);
+    all.remove(this);
+    all.remove(PAYMENT_PENDING);
+    return all;
   }
 
   public boolean canMoveTo(OrderStatus target, Fulfilment f) { return next(f).contains(target); }
 
-  public boolean isFinal() { return next(Fulfilment.DELIVERY).isEmpty(); }
+  /** Delivered, picked up or cancelled: nothing can change any more. */
+  public boolean isFinal() { return this == DELIVERED || this == PICKED_UP || this == CANCELLED; }
 
   /** Customers may cancel only before the shop starts packing. */
   public boolean customerCanCancel() { return this == PAYMENT_PENDING || this == PLACED || this == CONFIRMED; }

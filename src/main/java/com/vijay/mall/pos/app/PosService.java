@@ -81,11 +81,13 @@ public class PosService {
   private final JsonMapper json;
   private final TransactionTemplate tx;
   private final Clock clock;
+  private final CreditService credit;
 
   public PosService(PosCatalogService catalog, QuoteService quotes, InventoryService inventory, WalletService wallet,
                     PromotionService promotions, UserRepository users, ShopService shop, PosSaleRepository sales,
                     PosHoldRepository holds, InvoiceCounterRepository counters, AuditService audit, JsonMapper json,
-                    TransactionTemplate tx, Clock clock) {
+                    TransactionTemplate tx, Clock clock, CreditService credit) {
+    this.credit = credit;
     this.catalog = catalog;
     this.quotes = quotes;
     this.inventory = inventory;
@@ -188,12 +190,16 @@ public class PosService {
     Quote q = quotes.quoteLines(customerId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
     BillCalculator.Bill bill = BillCalculator.build(priced.drafts(), q.couponDiscountPaise() + q.coinDiscountPaise());
     List<Pay> pays = in.payments() == null ? List.of() : in.payments();
+    List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     long change;
     try {
-      change = PaymentRules.change(pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList(),
-          bill.totalPaise(), in.cashTenderedPaise());
+      change = PaymentRules.change(payLines, bill.totalPaise(), in.cashTenderedPaise());
     } catch (IllegalArgumentException e) {
       throw ApiException.validation("payments", e.getMessage());
+    }
+    long onCredit = PaymentRules.creditAmount(payLines);
+    if (onCredit > 0 && customerId == null) {
+      throw ApiException.validation("customerMobile", "customer mobile is needed to sell on credit");
     }
 
     UUID saleId = UUID.randomUUID();
@@ -214,10 +220,11 @@ public class PosService {
     List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), bill.totalPaise(), bill.tax().taxable(), bill.tax().cgst(),
-        bill.tax().sgst(), earned, in.cashTenderedPaise(), change, now, items, payments), idemKey);
+        bill.tax().sgst(), earned, in.cashTenderedPaise(), change, now, items, payments, PaymentRules.classify(payLines)), idemKey);
+    if (onCredit > 0) credit.chargeSale(customerId, onCredit, saleId, invoiceNo, cashierId, now);
     audit.log(cashierId, "SALE", "pos_sale", saleId, invoiceNo + " total=" + bill.totalPaise());
-    log.info("POS sale invoice={} cashier={} total={} lines={} payments={} coinsUsed={} coinsEarned={}", invoiceNo, cashierId,
-        bill.totalPaise(), items.size(), payments.size(), q.coinsUsed(), earned);
+    log.info("POS sale invoice={} cashier={} total={} lines={} payments={} onCredit={} coinsUsed={} coinsEarned={}", invoiceNo,
+        cashierId, bill.totalPaise(), items.size(), payments.size(), onCredit, q.coinsUsed(), earned);
     return saleId;
   }
 

@@ -22,4 +22,7 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
 
   @Query("select u.id from UserEntity u where u.role = 'ADMIN' and u.status = 'ACTIVE'")
   List<UUID> activeAdminIds();
+
+  @Query("select u.id from UserEntity u where u.role in ('ADMIN', 'CASHIER') and u.status = 'ACTIVE'")
+  List<UUID> activeStaffIds();
 }

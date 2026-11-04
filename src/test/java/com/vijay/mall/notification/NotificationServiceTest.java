@@ -36,8 +36,8 @@ class NotificationServiceTest {
   private static OutboxMessage msg(String type, String payload) { return new OutboxMessage(UUID.randomUUID(), type, payload); }
 
   @Test
-  void orderPlacedNotifiesTheCustomerAndEveryAdmin() {
-    when(profiles.adminIds()).thenReturn(List.of(admin));
+  void orderPlacedNotifiesTheCustomerAndEveryStaffMember() {
+    when(profiles.staffIds()).thenReturn(List.of(admin));
     when(profiles.deviceTokens(customer)).thenReturn(List.of("c-token"));
     when(profiles.deviceTokens(admin)).thenReturn(List.of("a1", "a2"));
     service.on(msg("ORDER_PLACED", "{\"orderNo\":\"VM-7\",\"userId\":\"" + customer + "\"}"));
@@ -50,7 +50,7 @@ class NotificationServiceTest {
 
   @Test
   void usersWithoutDevicesGetTheInAppNotificationButNoPush() {
-    when(profiles.adminIds()).thenReturn(List.of());
+    when(profiles.staffIds()).thenReturn(List.of());
     when(profiles.deviceTokens(customer)).thenReturn(List.of());
     service.on(msg("ORDER_PLACED", "{\"orderNo\":\"VM-7\",\"userId\":\"" + customer + "\"}"));
     verify(repo).insert(customer, "Order placed", "Your order VM-7 has been placed.", "ORDER", "VM-7", NOW);
@@ -63,7 +63,7 @@ class NotificationServiceTest {
     service.on(msg("ORDER_STATUS", "{\"orderNo\":\"VM-9\",\"userId\":\"" + customer + "\",\"status\":\"OUT_FOR_DELIVERY\"}"));
     verify(repo).insert(customer, "Order update", "Order VM-9 is now out for delivery.", "ORDER", "VM-9", NOW);
     verify(push).send(List.of("t"), "Order update", "Order VM-9 is now out for delivery.");
-    verify(profiles, never()).adminIds();
+    verify(profiles, never()).staffIds();
   }
 
   @Test

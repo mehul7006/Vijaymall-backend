@@ -48,9 +48,12 @@ public class PosReturnService {
   private final AuditService audit;
   private final TransactionTemplate tx;
   private final Clock clock;
+  private final CreditService credit;
 
   public PosReturnService(PosSaleRepository sales, InventoryService inventory, WalletService wallet, ShopService shop,
-                          InvoiceCounterRepository counters, AuditService audit, TransactionTemplate tx, Clock clock) {
+                          InvoiceCounterRepository counters, AuditService audit, TransactionTemplate tx, Clock clock,
+                          CreditService credit) {
+    this.credit = credit;
     this.sales = sales;
     this.inventory = inventory;
     this.wallet = wallet;
@@ -103,17 +106,25 @@ public class PosReturnService {
     int restore = sale.customerId() == null ? 0
         : ReturnMath.coinsDelta(sale.coinsUsed(), cumulativeGross, sale.subtotalPaise(), prior.coinsRestored());
 
-    List<Pay> refunds = in.refunds() == null || in.refunds().isEmpty() ? List.of(new Pay("CASH", refundTotal, null)) : in.refunds();
-    if (refundTotal == 0) refunds = List.of();
+    Instant now = clock.instant();
+    // Goods bought on credit come back first against what the customer still owes; only the rest is paid out.
+    long creditOnBill = sale.creditPaise();
+    long creditAdjust = sale.customerId() == null || creditOnBill == 0 ? 0
+        : credit.returnAdjustment(sale.customerId(), saleId, creditOnBill, refundTotal, now);
+    long payOut = refundTotal - creditAdjust;
+
+    List<Pay> refunds = in.refunds() == null || in.refunds().isEmpty() ? List.of(new Pay("CASH", payOut, null)) : in.refunds();
+    if (payOut == 0) refunds = List.of();
     try {
       PaymentRules.checkRefund(refunds.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList(),
-          refundTotal);
+          payOut);
     } catch (IllegalArgumentException e) {
-      throw ApiException.validation("refunds", e.getMessage());
+      throw ApiException.validation("refunds", creditAdjust > 0
+          ? e.getMessage() + " (Rs " + com.vijay.mall.pos.domain.Money.plain(creditAdjust) + " of this return reduces the customer's credit)"
+          : e.getMessage());
     }
 
     UUID returnId = UUID.randomUUID();
-    Instant now = clock.instant();
     items.forEach(i -> {
       if (!sales.addReturned(i.saleItemId(), i.qty())) {
         throw ApiException.conflict("RETURN_EXCEEDS_SOLD", "More than what is left to return", Map.of("saleItemId", i.saleItemId().toString()));
@@ -131,10 +142,11 @@ public class PosReturnService {
     long sgst = items.stream().mapToLong(ReturnItemRecord::sgstPaise).sum();
     List<PaymentRecord> refundRecords = refunds.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
     sales.insertReturn(new ReturnRecord(returnId, noteNo, saleId, cashierId, in.reason() == null ? "" : in.reason().strip(),
-        refundTotal, taxable, cgst, sgst, clawed, restore, now, items, refundRecords), idemKey);
+        refundTotal, taxable, cgst, sgst, clawed, restore, now, items, refundRecords, creditAdjust), idemKey);
+    if (creditAdjust > 0) credit.recordReturn(sale.customerId(), saleId, returnId, noteNo, creditAdjust, cashierId, now);
     audit.log(cashierId, "RETURN", "pos_return", returnId, noteNo + " bill=" + sale.invoiceNo() + " refund=" + refundTotal);
-    log.info("POS return note={} bill={} cashier={} refund={} coinsClawed={} coinsRestored={}", noteNo, sale.invoiceNo(), cashierId,
-        refundTotal, clawed, restore);
+    log.info("POS return note={} bill={} cashier={} refund={} creditReduced={} coinsClawed={} coinsRestored={}", noteNo,
+        sale.invoiceNo(), cashierId, refundTotal, creditAdjust, clawed, restore);
     return returnId;
   }
 

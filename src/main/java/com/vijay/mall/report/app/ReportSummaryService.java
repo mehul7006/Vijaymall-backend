@@ -33,7 +33,8 @@ public class ReportSummaryService {
 
   public record Summary(LocalDate from, LocalDate to, long salesPaise, long orders, long onlineSalesPaise,
                         long onlineOrders, long posSalesPaise, long posBills, long posRefundsPaise, long coinsIssued,
-                        List<DayRow> byDay, List<TopProduct> topProducts) {}
+                        List<DayRow> byDay, List<TopProduct> topProducts, long creditGivenPaise,
+                        long creditRecoveredPaise, long outstandingCreditPaise) {}
 
   public record Range(LocalDate from, LocalDate to) {}
 
@@ -49,7 +50,7 @@ public class ReportSummaryService {
   public ReportSummaryService(Clock clock) { this.clock = clock; }
 
   /** Pure: picks the dates. An explicit from wins; otherwise period (week 7 days, month 30, quarter 90) ending today. */
-  static Range range(String period, LocalDate from, LocalDate to, LocalDate today) {
+  public static Range range(String period, LocalDate from, LocalDate to, LocalDate today) {
     LocalDate end = to == null ? today : to;
     LocalDate start = from;
     if (start == null) {
@@ -96,7 +97,8 @@ public class ReportSummaryService {
     long refunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM pos_return WHERE created_at >= :f AND created_at < :t", f, t);
     long coins = scalar("SELECT COALESCE(SUM(coins), 0) FROM coin_ledger WHERE kind = 'EARN' AND created_at >= :f AND created_at < :t", f, t);
     return new Summary(r.from(), r.to(), onSales + posSales, onOrders + posBills, onSales, onOrders, posSales, posBills,
-        refunds, coins, days, topProducts(f, t));
+        refunds, coins, days, topProducts(f, t), creditSum("SALE", true, f, t), creditSum("PAYMENT", false, f, t),
+        ((Number) em.createNativeQuery("SELECT COALESCE(SUM(balance_paise), 0) FROM credit_account").getSingleResult()).longValue());
   }
 
   @SuppressWarnings("unchecked")
@@ -128,6 +130,13 @@ public class ReportSummaryService {
       merged.merge(id, add, (a, b) -> new TopProduct(a.productId(), a.name(), a.qty() + b.qty(), a.salesPaise() + b.salesPaise()));
     }
     return merged.values().stream().sorted(Comparator.comparingLong(TopProduct::salesPaise).reversed()).limit(10).toList();
+  }
+
+  /** Credit moved by one kind of ledger entry in the period: money put on accounts (up) or taken off (down). */
+  private long creditSum(String kind, boolean up, Instant f, Instant t) {
+    String sum = up ? "SUM(delta_paise)" : "SUM(-delta_paise)";
+    return scalar("SELECT COALESCE(" + sum + ", 0) FROM credit_ledger WHERE kind = '" + kind
+        + "' AND created_at >= :f AND created_at < :t", f, t);
   }
 
   private long scalar(String sql, Instant f, Instant t) {

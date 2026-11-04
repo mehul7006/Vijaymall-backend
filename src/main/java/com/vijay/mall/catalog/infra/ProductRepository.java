@@ -6,6 +6,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.TypedQuery;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,9 @@ public class ProductRepository {
         e.productGroupId == null ? e.id : e.productGroupId, e.rating, e.reviewCount);
   }
 
+  /** The variant name ("Mango") and display order of a product within its group. */
+  public record VariantInfo(String name, int order) {}
+
   public Optional<ProductData> find(UUID id) { return jpa.findById(id).map(ProductRepository::toDomain); }
 
   public List<ProductData> findAll(List<UUID> ids) {
@@ -45,8 +49,35 @@ public class ProductRepository {
   /** Same search; {@code includePosOnly} also returns counter-only items (loose/weighed goods) which online shoppers never see. */
   public Page<ProductData> search(String q, UUID categoryId, boolean hotOnly, boolean onlyActive, boolean includePosOnly,
                                   Instant now, int page, int size) {
-    StringBuilder where = new StringBuilder("where 1 = 1 ");
+    return run(q, categoryId, hotOnly, onlyActive, includePosOnly, false, now, page, size);
+  }
+
+  /** The customer shop list: active, not counter-only, and with stock on hand. */
+  public Page<ProductData> searchInStock(String q, UUID categoryId, boolean hotOnly, Instant now, int page, int size) {
+    return run(q, categoryId, hotOnly, true, false, true, now, page, size);
+  }
+
+  private Page<ProductData> run(String q, UUID categoryId, boolean hotOnly, boolean onlyActive, boolean includePosOnly,
+                                boolean inStockOnly, Instant now, int page, int size) {
     Map<String, Object> params = new HashMap<>();
+    StringBuilder where = conditions(q, categoryId, hotOnly, onlyActive, includePosOnly, inStockOnly, now, params);
+    TypedQuery<Long> count = em.createQuery("select count(p) from ProductEntity p " + where, Long.class);
+    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + "order by p.nameEn", ProductEntity.class);
+    params.forEach((k, v) -> {
+      count.setParameter(k, v);
+      list.setParameter(k, v);
+    });
+    list.setFirstResult((int) ((long) page * size)).setMaxResults(size);
+    List<ProductData> items = list.getResultList().stream().map(ProductRepository::toDomain).toList();
+    return new Page<>(items, page, size, count.getSingleResult());
+  }
+
+  /** The WHERE clause shared by the product list and the product-group list; fills {@code params}. */
+  private static StringBuilder conditions(String q, UUID categoryId, boolean hotOnly, boolean onlyActive,
+                                          boolean includePosOnly, boolean inStockOnly, Instant now,
+                                          Map<String, Object> params) {
+    StringBuilder where = new StringBuilder("where 1 = 1 ");
+    if (inStockOnly) where.append("and exists (select 1 from InventoryEntity i where i.productId = p.id and i.qtyOnHand > 0) ");
     if (onlyActive) where.append("and p.active = true ");
     if (!includePosOnly) where.append("and p.posOnly = false ");
     if (q != null && !q.isBlank()) {
@@ -61,15 +92,82 @@ public class ProductRepository {
       where.append("and p.hotSale = true and (p.hotStart is null or p.hotStart <= :now) and (p.hotEnd is null or p.hotEnd >= :now) ");
       params.put("now", now);
     }
-    TypedQuery<Long> count = em.createQuery("select count(p) from ProductEntity p " + where, Long.class);
-    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + "order by p.nameEn", ProductEntity.class);
+    return where;
+  }
+
+  /**
+   * One page of product groups for customers: the group ids of the visible (active, not counter-only) products that match.
+   * A group matches when any of its variants does
+   * (and, with inStockOnly, has stock).
+   */
+  public Page<UUID> searchGroups(String q, UUID categoryId, boolean hotOnly, boolean inStockOnly, Instant now, int page,
+                                 int size) {
+    Map<String, Object> params = new HashMap<>();
+    StringBuilder where = conditions(q, categoryId, hotOnly, true, false, inStockOnly, now, params);
+    TypedQuery<Long> count = em.createQuery("select count(distinct p.productGroupId) from ProductEntity p " + where, Long.class);
+    TypedQuery<UUID> list = em.createQuery("select p.productGroupId from ProductEntity p " + where
+        + "group by p.productGroupId order by min(p.nameEn), p.productGroupId", UUID.class);
     params.forEach((k, v) -> {
       count.setParameter(k, v);
       list.setParameter(k, v);
     });
     list.setFirstResult((int) ((long) page * size)).setMaxResults(size);
-    List<ProductData> items = list.getResultList().stream().map(ProductRepository::toDomain).toList();
-    return new Page<>(items, page, size, count.getSingleResult());
+    return new Page<>(list.getResultList(), page, size, count.getSingleResult());
+  }
+
+  /** Visible (active, not counter-only) variants of these groups, each group's variants in display order. */
+  @Transactional(readOnly = true)
+  public List<ProductData> visibleMembers(Collection<UUID> groupIds) {
+    if (groupIds.isEmpty()) return List.of();
+    return em.createQuery("select p from ProductEntity p where p.productGroupId in :g and p.active = true and p.posOnly = false "
+            + "order by p.variantOrder, p.pricePaise, p.id", ProductEntity.class)
+        .setParameter("g", groupIds).getResultList().stream().map(ProductRepository::toDomain).toList();
+  }
+
+  /** Every variant, active or not, of the group that holds this id (the id may be the group id or any variant). */
+  @Transactional(readOnly = true)
+  public List<ProductData> allMembersOf(UUID idOrGroupId) {
+    return em.createQuery("select p from ProductEntity p where p.productGroupId = :id or p.productGroupId = "
+            + "(select x.productGroupId from ProductEntity x where x.id = :id) order by p.variantOrder, p.pricePaise, p.id",
+            ProductEntity.class)
+        .setParameter("id", idOrGroupId).getResultList().stream().map(ProductRepository::toDomain).toList();
+  }
+
+  @Transactional(readOnly = true)
+  public Map<UUID, VariantInfo> variantInfo(Collection<UUID> ids) {
+    if (ids.isEmpty()) return Map.of();
+    return jpa.findAllById(ids).stream().collect(java.util.stream.Collectors.toMap(e -> e.id,
+        e -> new VariantInfo(e.variantName == null ? "" : e.variantName, e.variantOrder)));
+  }
+
+  @Transactional
+  public void setVariant(UUID id, String name, int order) {
+    jpa.findById(id).ifPresent(e -> {
+      e.variantName = name == null ? "" : name;
+      e.variantOrder = order;
+    });
+  }
+
+  /** Writes the details every variant of a product shares onto all of them. Returns how many rows changed. */
+  @Transactional
+  public int updateShared(UUID groupId, UUID categoryId, String nameEn, String nameGu, String description, boolean hotSale,
+                          Instant hotStart, Instant hotEnd, boolean earns, boolean redeemable, Boolean active, Instant now) {
+    List<ProductEntity> rows = em.createQuery("select p from ProductEntity p where p.productGroupId = :g", ProductEntity.class)
+        .setParameter("g", groupId).getResultList();
+    rows.forEach(e -> {
+      e.categoryId = categoryId;
+      e.nameEn = nameEn;
+      e.nameGu = nameGu;
+      e.description = description;
+      e.hotSale = hotSale;
+      e.hotStart = hotStart;
+      e.hotEnd = hotEnd;
+      e.earnsCoins = earns;
+      e.coinRedeemable = redeemable;
+      if (active != null) e.active = active;
+      e.updatedAt = now;
+    });
+    return rows.size();
   }
 
   @Transactional

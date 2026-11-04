@@ -131,6 +131,9 @@ class ProfileServiceTest {
     service.registerDevice(uid, "tok", "ANDROID");
     verify(devices).upsert(uid, "tok", "ANDROID", NOW);
     assertThat(service.adminIds()).containsExactly(admin);
+    UUID cashier = UUID.randomUUID();
+    when(users.staffIds()).thenReturn(List.of(admin, cashier));
+    assertThat(service.staffIds()).containsExactly(admin, cashier);
     assertThat(service.deviceTokens(uid)).containsExactly("t1");
   }
 

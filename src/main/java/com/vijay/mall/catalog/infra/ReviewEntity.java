@@ -11,6 +11,7 @@ import java.util.UUID;
 class ReviewEntity extends BaseEntity {
   UUID productId;
   UUID userId;
+  UUID orderId;
   int rating;
   String comment;
   Instant createdAt;

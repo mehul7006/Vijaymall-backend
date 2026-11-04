@@ -48,7 +48,9 @@ public class OrderRepository {
 
   /** One line of an order list; the customer's name is added by the service, which knows the identity module. */
   public record SummaryRow(UUID id, UUID userId, String orderNo, String status, String fulfilment, long totalPaise,
-                           int itemCount, Instant placedAt) {}
+                           int itemCount, Instant placedAt, long subtotalPaise, String couponCode,
+                           long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
+                           String paymentMethod, String paymentStatus) {}
 
   private final OrderJpa orders;
   private final OrderItemJpa items;
@@ -176,6 +178,13 @@ public class OrderRepository {
   @Transactional
   public void setCancelReason(UUID id, String reason) { orders.findById(id).ifPresent(e -> e.cancelReason = reason); }
 
+  /** The person's latest delivered or picked-up order that contains the product. */
+  public Optional<UUID> latestCompletedOrderWith(UUID userId, UUID productId) {
+    return em.createQuery("select o.id from OrderEntity o, OrderItemEntity i where i.orderId = o.id and i.productId = :p "
+            + "and o.userId = :u and o.status in ('DELIVERED', 'PICKED_UP') order by o.placedAt desc", UUID.class)
+        .setParameter("p", productId).setParameter("u", userId).setMaxResults(1).getResultList().stream().findFirst();
+  }
+
   /** Orders the person has placed that were not cancelled; used for "first order only" coupons. */
   public long activeOrderCount(UUID userId) { return orders.countByUserIdAndStatusNot(userId, "CANCELLED"); }
 
@@ -197,7 +206,8 @@ public class OrderRepository {
         .collect(java.util.stream.Collectors.toMap(r -> (UUID) r[0], r -> ((Number) r[1]).intValue()));
     List<SummaryRow> rows = page.getContent().stream()
         .map(e -> new SummaryRow(e.id, e.userId, e.orderNo, e.status, e.fulfilment, e.totalPaise,
-            counts.getOrDefault(e.id, 0), e.placedAt)).toList();
+            counts.getOrDefault(e.id, 0), e.placedAt, e.subtotalPaise, e.couponCode, e.couponDiscountPaise, e.coinsUsed,
+            e.coinDiscountPaise, e.deliveryFeePaise, e.paymentMethod, e.paymentStatus)).toList();
     return new Page<>(rows, pageNo, size, page.getTotalElements());
   }
 

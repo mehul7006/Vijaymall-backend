@@ -97,12 +97,12 @@ class CatalogServiceTest {
   @ParameterizedTest
   @CsvSource({"-5,-5,0,1", "0,0,0,1", "3,1,3,1", "2,20,2,20", "0,50,0,50", "0,51,0,50", "0,5000,0,50"})
   void listClampsPageAndSizeBeforeSearching(int page, int size, int expectedPage, int expectedSize) {
-    when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+    when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
         .thenReturn(new Page<>(List.of(), expectedPage, expectedSize, 0));
 
     Page<Product> out = service.list("rice", cat, true, page, size);
 
-    verify(products).search("rice", cat, true, true, NOW, expectedPage, expectedSize);
+    verify(products).searchInStock("rice", cat, true, NOW, expectedPage, expectedSize);
     assertThat(out.items()).isEmpty();
     assertThat(out.page()).isEqualTo(expectedPage);
     assertThat(out.size()).isEqualTo(expectedSize);
@@ -112,7 +112,7 @@ class CatalogServiceTest {
   void listShowsCustomerFieldsAndOnlyReportsHotSaleInsideItsWindow() {
     UUID live = UUID.randomUUID(), expired = UUID.randomUUID(), future = UUID.randomUUID(), flagOff = UUID.randomUUID();
     UUID startsNow = UUID.randomUUID(), endsNow = UUID.randomUUID(), empty = UUID.randomUUID(), plenty = UUID.randomUUID();
-    when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(
+    when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(
         data(live, true, true, NOW.minusSeconds(60), NOW.plusSeconds(60)),
         data(expired, true, true, NOW.minusSeconds(60), NOW.minusSeconds(1)),
         data(future, true, true, NOW.plusSeconds(1), null),
@@ -160,10 +160,20 @@ class CatalogServiceTest {
   }
 
   @Test
+  void shopListHidesOutOfStockUnlessAskedToInclude() {
+    when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    service.list(null, null, false, 0, 20);
+    verify(products).searchInStock(null, null, false, NOW, 0, 20);
+    service.list(null, null, false, true, 0, 20);
+    verify(products).search(null, null, false, true, NOW, 0, 20);
+  }
+
+  @Test
   void hotSaleReturnsLiveBannersAndFirstTwentyHotProducts() {
     HotBanner banner = new HotBanner(UUID.randomUUID(), "Diwali", "", null, null, null, true);
     when(banners.live(NOW)).thenReturn(List.of(banner));
-    when(products.search(null, null, true, true, NOW, 0, 20))
+    when(products.searchInStock(null, null, true, NOW, 0, 20))
         .thenReturn(new Page<>(List.of(data(pid, true, true, null, null)), 0, 20, 1));
 
     CatalogService.HotSale hs = service.hotSale();
