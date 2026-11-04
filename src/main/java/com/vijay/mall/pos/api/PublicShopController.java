@@ -10,7 +10,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/shop-settings")
 public class PublicShopController {
-  public record PublicShop(String shopName, String phone, String address, String promise) {}
+  /** details is the longer "about the shop" text; every field is the admin's shop setting, nothing is kept in the app. */
+  public record PublicShop(String shopName, String phone, String address, String promise, String details) {
+    public PublicShop(String shopName, String phone, String address, String promise) {
+      this(shopName, phone, address, promise, "");
+    }
+  }
 
   private final ShopService shop;
 
@@ -19,6 +24,7 @@ public class PublicShopController {
   @GetMapping
   public PublicShop get() {
     ShopSetting s = shop.get();
-    return new PublicShop(s.shopName(), s.phone(), s.address(), s.promise() == null ? "" : s.promise());
+    return new PublicShop(s.shopName(), s.phone(), s.address(), s.promise() == null ? "" : s.promise(),
+        s.details() == null ? "" : s.details());
   }
 }

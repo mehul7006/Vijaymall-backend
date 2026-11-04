@@ -35,8 +35,14 @@ public class PromotionService {
     return ApiException.unprocessable("COUPON_INVALID", "This coupon cannot be used", Map.of("reason", reason));
   }
 
-  /** What a coupon does to a cart: the discount, and whether coins may still be spent in the same order. */
-  public record Applied(long discountPaise, boolean worksWithCoins) {}
+  /**
+   * What a coupon does to a cart: the discount, whether coins may still be spent in the same order, and how the
+   * discount falls on each cart line (same order as the lines; lines outside the coupon's categories get 0).
+   * perLine is empty when the caller does not need the split.
+   */
+  public record Applied(long discountPaise, boolean worksWithCoins, List<Long> perLine) {
+    public Applied(long discountPaise, boolean worksWithCoins) { this(discountPaise, worksWithCoins, List.of()); }
+  }
 
   /** Discount in paise for a code on a priced cart; throws COUPON_INVALID with a reason when not usable. */
   public long discountFor(String code, UUID userId, List<PricedLine> lines, long subtotalPaise) {
@@ -54,7 +60,9 @@ public class PromotionService {
     int prior = c.firstOrderOnly() ? priorOrders.getAsInt() : 0;
     var ctx = new CouponContext(c, clock.instant(), subtotalPaise, lines, uses, prior);
     CouponRules.firstViolation(CouponRules.STANDARD, ctx).ifPresent(r -> { throw invalid(r); });
-    return new Applied(CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise)), c.worksWithCoins());
+    long discount = CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise));
+    List<Long> perLine = java.util.Arrays.stream(CouponMath.perLine(c, lines, discount)).boxed().toList();
+    return new Applied(discount, c.worksWithCoins(), perLine);
   }
 
   /**
@@ -119,7 +127,7 @@ public class PromotionService {
   private static Coupon normalized(Coupon c) {
     return new Coupon(c.id(), normalize(c.code()), c.kind(), c.value(), c.minOrderPaise(), c.maxDiscountPaise(),
         c.categoryId(), c.perUserLimit(), c.totalLimit(), c.usedCount(), c.startAt(), c.endAt(), c.active(),
-        c.worksWithCoins(), c.firstOrderOnly());
+        c.worksWithCoins(), c.firstOrderOnly(), c.categoryIds());
   }
 
   private static void check(Coupon c) {

@@ -16,4 +16,7 @@ interface PosReturnJpa extends JpaRepository<PosReturnEntity, UUID> {
   Optional<PosReturnEntity> findByIdemKey(String idemKey);
 
   List<PosReturnEntity> findBySaleIdOrderByCreatedAt(UUID saleId);
+
+  @Query("select r.id, r.creditNoteNo from PosReturnEntity r where r.id in :ids")
+  List<Object[]> creditNoteNumbers(@Param("ids") Collection<UUID> ids);
 }

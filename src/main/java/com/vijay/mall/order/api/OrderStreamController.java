@@ -12,6 +12,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * Live order updates as Server-Sent Events. Events: "ready" once connected, "order" for every placed order or status
  * change ({orderId, orderNo, status, previousStatus, at}); comment lines are keep-alives. After an "order" event the
  * app can refresh that order, and after a reconnect it should reload the list once.
+ * "wallet" ({userId, reason, delta, at}) goes only to that customer's streams when their coin balance changes, and
+ * "stock" ({productIds, reason, at}) goes to every stream when stock moves; on either, refetch the coin balance or the
+ * product / stock screens, so nothing needs a re-login.
  */
 @RestController
 public class OrderStreamController {

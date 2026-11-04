@@ -10,6 +10,9 @@ public interface PaymentGateway {
 
   record Created(String providerOrderId, PaymentSession session) {}
 
+  /** False when the provider's keys are not set, so the method cannot take a payment yet. Cash-like providers need none. */
+  default boolean configured() { return true; }
+
   /** Short lowercase name used in URLs and config, e.g. "razorpay". */
   String provider();
 

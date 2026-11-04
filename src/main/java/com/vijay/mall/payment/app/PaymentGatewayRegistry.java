@@ -27,6 +27,12 @@ public class PaymentGatewayRegistry {
     return g;
   }
 
+  /** True when the ONLINE provider exists and has its keys, so customers can really pay with it. */
+  public boolean onlineConfigured() {
+    PaymentGateway g = byName.get(onlineProvider);
+    return g != null && g.configured();
+  }
+
   /** The provider used for method ONLINE. */
   public PaymentGateway online() {
     PaymentGateway g = byName.get(onlineProvider);

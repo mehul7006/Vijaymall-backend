@@ -59,7 +59,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Counter billing: price a basket, take payment, keep bills, hold baskets, print receipts. */
 @Service
-public class PosService {
+public class PosService implements com.vijay.mall.common.ReferenceLookup {
   private static final Logger log = LoggerFactory.getLogger(PosService.class);
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
   private static final int MAX_UNITS = 9_999;
@@ -114,9 +114,24 @@ public class PosService {
     Optional<User> customer = mobile == null ? Optional.empty() : users.findByMobile(mobile);
     UUID userId = customer.map(User::id).orElse(mobile == null ? null : UUID.randomUUID());
     Quote q = quotes.quoteLines(userId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
-    BillCalculator.Bill bill = BillCalculator.build(priced.drafts(), q.couponDiscountPaise() + q.coinDiscountPaise());
+    BillCalculator.Bill bill = bill(priced.drafts(), q);
     int balance = customer.map(u -> wallet.balance(u.id())).orElse(0);
     return view(bill, q, mobile == null ? 0 : q.coinsToEarn(), balance);
+  }
+
+  /** Invoice numbers of counter bills and credit note numbers of returns, for screens that only hold the id. */
+  @Override
+  public Map<UUID, String> numbers(java.util.Collection<UUID> ids) { return sales.documentNumbers(ids); }
+
+  /**
+   * The GST bill for a quote. The coupon discount goes only on the lines the coupon covers (the quote says which);
+   * when the quote carries no per-line split the whole discount is spread over every line.
+   */
+  private static BillCalculator.Bill bill(List<BillCalculator.Draft> drafts, Quote q) {
+    long[] share = q.lines().stream().mapToLong(Quote.Line::couponDiscountPaise).toArray();
+    boolean split = share.length == drafts.size() && java.util.Arrays.stream(share).sum() == q.couponDiscountPaise();
+    return split ? BillCalculator.build(drafts, share, q.coinDiscountPaise())
+        : BillCalculator.build(drafts, q.couponDiscountPaise() + q.coinDiscountPaise());
   }
 
   private static BillView view(BillCalculator.Bill b, Quote q, long coinsToEarn, int balance) {
@@ -188,7 +203,7 @@ public class PosService {
     UUID customerId = customer == null ? null : customer.id();
 
     Quote q = quotes.quoteLines(customerId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
-    BillCalculator.Bill bill = BillCalculator.build(priced.drafts(), q.couponDiscountPaise() + q.coinDiscountPaise());
+    BillCalculator.Bill bill = bill(priced.drafts(), q);
     List<Pay> pays = in.payments() == null ? List.of() : in.payments();
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     long change;

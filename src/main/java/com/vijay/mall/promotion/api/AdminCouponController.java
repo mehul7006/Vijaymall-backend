@@ -27,12 +27,22 @@ public class AdminCouponController {
   @Schema(name = "CouponBody")
   public record Body(@NotBlank String code, @NotBlank String kind, @Min(1) long value, Long minOrderPaise,
                      Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
-                     Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly) {
+                     Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly,
+                     List<UUID> categoryIds) {
+    /** Without categoryIds: the single categoryId (or every category when that is null too), as before. */
+    public Body(String code, String kind, long value, Long minOrderPaise, Long maxDiscountPaise, UUID categoryId,
+                Integer perUserLimit, Integer totalLimit, Instant startAt, Instant endAt, Boolean active,
+                Boolean worksWithCoins, Boolean firstOrderOnly) {
+      this(code, kind, value, minOrderPaise, maxDiscountPaise, categoryId, perUserLimit, totalLimit, startAt, endAt,
+          active, worksWithCoins, firstOrderOnly, null);
+    }
+
+    /** categoryIds limits the coupon to those categories (several allowed); empty or missing means every category. */
     Coupon toCoupon() {
       return new Coupon(null, code, kind, value, minOrderPaise == null ? 0 : minOrderPaise,
           maxDiscountPaise == null ? 0 : maxDiscountPaise, categoryId, perUserLimit == null ? 0 : perUserLimit,
           totalLimit == null ? 0 : totalLimit, 0, startAt, endAt, active == null || active,
-          worksWithCoins == null || worksWithCoins, Boolean.TRUE.equals(firstOrderOnly));
+          worksWithCoins == null || worksWithCoins, Boolean.TRUE.equals(firstOrderOnly), categoryIds);
     }
   }
 

@@ -43,9 +43,13 @@ public class CatalogService {
     }
   }
 
-  /** One row of the admin stock report. packLabel is the pack size (or unit); cashierId is whoever made the change. */
+  /**
+   * One row of the admin stock report. packLabel is the pack size (or unit); cashierId is whoever made the change.
+   * refId is the order, counter bill or return behind the change and ref its number as people read it (the same
+   * VSM-1001 the customer sees); both are null for a manual adjustment.
+   */
   public record StockMovementView(UUID id, UUID productId, String name, String packLabel, int delta, String reason,
-                                  Instant at, UUID cashierId) {}
+                                  Instant at, UUID cashierId, UUID refId, String ref) {}
 
   public record HotSale(List<HotBanner> banners, List<Product> products) {}
 
@@ -81,15 +85,28 @@ public class CatalogService {
   private final InventoryService inventory;
   private final AuditService audit;
   private final Clock clock;
+  private final com.vijay.mall.common.ReferenceNumbers references;
+  private final UnitService units;
 
+  /** Without a unit list, any unit text is accepted as before (plain unit tests). */
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
-                        InventoryService inventory, AuditService audit, Clock clock) {
+                        InventoryService inventory, AuditService audit, Clock clock,
+                        com.vijay.mall.common.ReferenceNumbers references) {
+    this(products, categories, banners, inventory, audit, clock, references, null);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
+                        InventoryService inventory, AuditService audit, Clock clock,
+                        com.vijay.mall.common.ReferenceNumbers references, UnitService units) {
+    this.units = units;
     this.products = products;
     this.categories = categories;
     this.banners = banners;
     this.inventory = inventory;
     this.audit = audit;
     this.clock = clock;
+    this.references = references;
   }
 
   // ---------- customer side ----------
@@ -258,10 +275,12 @@ public class CatalogService {
     Page<com.vijay.mall.inventory.infra.InventoryRepository.Movement> rows = inventory.movements(productId, page, size);
     Map<UUID, ProductData> byId = products.findAll(rows.items().stream().map(m -> m.productId()).distinct().toList())
         .stream().collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
+    Map<UUID, String> numbers = references.of(rows.items().stream().map(m -> m.refId()).filter(java.util.Objects::nonNull)
+        .distinct().toList());
     List<StockMovementView> items = rows.items().stream().map(m -> {
       ProductData p = byId.get(m.productId());
       return new StockMovementView(m.id(), m.productId(), p == null ? "?" : p.nameEn(), p == null ? "" : p.unitLabel(),
-          m.delta(), m.reason(), m.at(), m.actorId());
+          m.delta(), m.reason(), m.at(), m.actorId(), m.refId(), m.refId() == null ? null : numbers.get(m.refId()));
     }).toList();
     return new Page<>(items, rows.page(), rows.size(), rows.total());
   }
@@ -280,11 +299,17 @@ public class CatalogService {
     return new Page<>(items, page.page(), page.size(), page.total());
   }
 
+  /** The unit to store: checked against the admin's unit list when there is one, else the text as given. */
+  private String unit(String given, String current) {
+    if (units != null) return units.canonicalOrKeep(given, current);
+    return nz(given, current == null ? "pc" : current);
+  }
+
   @Transactional
   public AdminProduct create(ProductInput in, UUID actor) {
     validate(in);
     UUID id = products.insert(in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
-        in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
+        in.pricePaise(), unit(in.unit(), null), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     inventory.create(id, Math.max(0, in.qtyOnHand()), in.lowThreshold() <= 0 ? 5 : in.lowThreshold());
@@ -297,7 +322,7 @@ public class CatalogService {
     validate(in);
     AdminProduct before = adminGet(id);
     products.update(id, in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
-        in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
+        in.pricePaise(), unit(in.unit(), before.unit()), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     int delta = in.qtyOnHand() - before.qtyOnHand();

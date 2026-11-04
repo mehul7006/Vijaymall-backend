@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +25,23 @@ public class InventoryService {
 
   private final InventoryRepository repo;
   private final Clock clock;
+  private final ApplicationEventPublisher events;
 
-  public InventoryService(InventoryRepository repo, Clock clock) {
+  /** Without a publisher no live events are sent (used by plain unit tests). */
+  public InventoryService(InventoryRepository repo, Clock clock) { this(repo, clock, null); }
+
+  @Autowired
+  public InventoryService(InventoryRepository repo, Clock clock, ApplicationEventPublisher events) {
     this.repo = repo;
     this.clock = clock;
+    this.events = events;
+  }
+
+  /** Tells open screens that stock moved, once the surrounding transaction commits. */
+  private void changed(List<UUID> productIds, String reason) {
+    if (events != null && !productIds.isEmpty()) {
+      events.publishEvent(new com.vijay.mall.common.live.StockChanged(productIds, reason, clock.instant()));
+    }
   }
 
   @Transactional
@@ -49,6 +64,7 @@ public class InventoryService {
       log.info("Out of stock order={} items={}", orderId, failures);
       throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
     }
+    changed(items.stream().map(Item::productId).distinct().toList(), reason);
   }
 
   /** Takes one line's stock and records the movement; returns a failure description when there is not enough. */
@@ -72,6 +88,7 @@ public class InventoryService {
       repo.add(it.productId(), it.qty(), clock.instant());
       repo.movement(it.productId(), it.qty(), reason, orderId, null, clock.instant());
     });
+    changed(items.stream().map(Item::productId).distinct().toList(), reason);
   }
 
   /** Admin restock or correction. Throws if the result would be below zero. */
@@ -81,6 +98,7 @@ public class InventoryService {
       throw ApiException.validation("delta", "stock cannot go below zero");
     }
     repo.movement(productId, delta, reason, null, actorId, clock.instant());
+    changed(List.of(productId), reason);
     return repo.quantity(productId);
   }
 

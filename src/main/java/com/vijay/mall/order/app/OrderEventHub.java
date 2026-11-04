@@ -75,6 +75,23 @@ public class OrderEventHub {
     });
   }
 
+  /** A coin balance moved: only that customer's own streams hear it, so the coins screen updates without re-login. */
+  @TransactionalEventListener(fallbackExecution = true)
+  public void on(com.vijay.mall.common.live.WalletChanged e) {
+    sender.execute(() -> customers.getOrDefault(e.userId(), List.of()).forEach(em -> deliver(em,
+        SseEmitter.event().name("wallet").data(e, MediaType.APPLICATION_JSON))));
+  }
+
+  /** Stock moved: every open stream hears it so catalogue, cart and stock-history screens refetch. */
+  @TransactionalEventListener(fallbackExecution = true)
+  public void on(com.vijay.mall.common.live.StockChanged e) {
+    sender.execute(() -> {
+      SseEmitter.SseEventBuilder b = SseEmitter.event().name("stock").data(e, MediaType.APPLICATION_JSON);
+      customers.values().forEach(list -> list.forEach(em -> deliver(em, b)));
+      staff.forEach(em -> deliver(em, b));
+    });
+  }
+
   private static SseEmitter.SseEventBuilder event(Event data) {
     return SseEmitter.event().id(data.orderId() + ":" + data.status()).name("order").data(data, MediaType.APPLICATION_JSON);
   }

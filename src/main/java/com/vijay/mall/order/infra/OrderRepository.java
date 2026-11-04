@@ -40,7 +40,12 @@ public class OrderRepository {
                          String addressSnapshot, Instant expiresAt, Instant now, String deliverySlot) {}
 
   public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
-                        boolean redeemable, String nameGu, String unitLabel) {
+                        boolean redeemable, String nameGu, String unitLabel, long couponDiscount) {
+    public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
+                   boolean redeemable, String nameGu, String unitLabel) {
+      this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, nameGu, unitLabel, 0);
+    }
+
     public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns, boolean redeemable) {
       this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, name, "");
     }
@@ -56,13 +61,16 @@ public class OrderRepository {
   private final OrderItemJpa items;
   private final OrderHistoryJpa history;
 
+  private final com.vijay.mall.common.ShopIdentity shop;
+
   @PersistenceContext
   private EntityManager em;
 
-  OrderRepository(OrderJpa orders, OrderItemJpa items, OrderHistoryJpa history) {
+  OrderRepository(OrderJpa orders, OrderItemJpa items, OrderHistoryJpa history, com.vijay.mall.common.ShopIdentity shop) {
     this.orders = orders;
     this.items = items;
     this.history = history;
+    this.shop = shop;
   }
 
   private static Row toRow(OrderEntity e) {
@@ -74,7 +82,9 @@ public class OrderRepository {
 
   public String nextOrderNo() {
     Number n = (Number) em.createNativeQuery("select nextval('order_no_seq')").getSingleResult();
-    return "VSM-" + n.longValue();
+    // The number starts with the prefix from the shop settings, the same one counter bills use.
+    String prefix = shop.identity().orderPrefix();
+    return (prefix == null || prefix.isBlank() ? "VSM" : prefix) + "-" + n.longValue();
   }
 
   public Optional<Row> find(UUID id) { return orders.findById(id).map(OrderRepository::toRow); }
@@ -123,6 +133,7 @@ public class OrderRepository {
     e.unitPricePaise = i.unitPrice();
     e.qty = i.qty();
     e.lineTotalPaise = i.lineTotal();
+    e.couponDiscountPaise = i.couponDiscount();
     e.earnsCoins = i.earns();
     e.coinRedeemable = i.redeemable();
     items.save(e);
@@ -144,7 +155,7 @@ public class OrderRepository {
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
         .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
-            i.unitLabel)).toList();
+            i.unitLabel, i.couponDiscountPaise)).toList();
   }
 
   public List<OrderViews.Step> timeline(UUID orderId) {
@@ -215,9 +226,17 @@ public class OrderRepository {
     return summaries(orders.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"))), page, size);
   }
 
-  public Page<SummaryRow> adminList(String status, int page, int size) {
+  public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
+
+  /** Orders newest first, optionally of one status and/or whose order number contains q (so staff can type "1001"). */
+  public Page<SummaryRow> adminList(String status, String q, int page, int size) {
     PageRequest req = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"));
-    var result = (status == null || status.isBlank()) ? orders.findAll(req) : orders.findByStatus(status, req);
+    boolean anyStatus = status == null || status.isBlank();
+    boolean anyNumber = q == null || q.isBlank();
+    var result = anyStatus
+        ? (anyNumber ? orders.findAll(req) : orders.findByOrderNoContainingIgnoreCase(q.trim(), req))
+        : (anyNumber ? orders.findByStatus(status, req)
+            : orders.findByStatusAndOrderNoContainingIgnoreCase(status, q.trim(), req));
     return summaries(result, page, size);
   }
 }

@@ -43,4 +43,17 @@ class OrderEventHubTest {
     assertThat(hub.customerStreams(alice)).isEqualTo(1);
     assertThat(hub.staffStreams()).isEqualTo(1);
   }
+
+  @Test
+  void walletAndStockEventsReachOpenStreamsAndNoOneElse() {
+    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
+    hub.subscribeCustomer(alice);
+    hub.subscribeCustomer(bob);
+    hub.subscribeStaff();
+    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
+    assertThat(hub.customerStreams(alice)).isEqualTo(1);
+    assertThat(hub.staffStreams()).isEqualTo(1);
+  }
 }

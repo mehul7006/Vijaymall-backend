@@ -14,6 +14,7 @@ class ShopSettingEntity {
   String address;
   String phone;
   String promise;
+  String details;
   String gstin;
   String stateCode;
   String upiId;

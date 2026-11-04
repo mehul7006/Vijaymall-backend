@@ -18,6 +18,10 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
 
   Page<OrderEntity> findByStatus(String status, Pageable page);
 
+  Page<OrderEntity> findByOrderNoContainingIgnoreCase(String orderNo, Pageable page);
+
+  Page<OrderEntity> findByStatusAndOrderNoContainingIgnoreCase(String status, String orderNo, Pageable page);
+
   long countByUserIdAndStatusNot(UUID userId, String status);
 
   @Query("select o from OrderEntity o where o.status = 'PAYMENT_PENDING' and o.expiresAt < :now order by o.expiresAt")

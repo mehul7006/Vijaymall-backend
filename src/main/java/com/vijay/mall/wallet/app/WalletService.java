@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,12 +31,28 @@ public class WalletService {
   private final AuditService audit;
   private final Clock clock;
   private final TransactionTemplate tx;
+  private final ApplicationEventPublisher events;
 
+  /** Without a publisher no live events are sent (used by plain unit tests). */
   public WalletService(WalletRepository repo, AuditService audit, Clock clock, TransactionTemplate tx) {
+    this(repo, audit, clock, tx, null);
+  }
+
+  @Autowired
+  public WalletService(WalletRepository repo, AuditService audit, Clock clock, TransactionTemplate tx,
+                       ApplicationEventPublisher events) {
+    this.events = events;
     this.tx = tx;
     this.repo = repo;
     this.audit = audit;
     this.clock = clock;
+  }
+
+  /** Tells open screens the balance moved, once the surrounding transaction commits. */
+  private void changed(UUID userId, String reason, int delta) {
+    if (events != null && delta != 0) {
+      events.publishEvent(new com.vijay.mall.common.live.WalletChanged(userId, reason, delta, clock.instant()));
+    }
   }
 
   public CoinSettings settings() { return repo.settings(); }
@@ -65,6 +83,7 @@ public class WalletService {
     }
     repo.addBalance(userId, -coins);
     log.info("Coins redeemed user={} order={} coins={}", userId, orderId, coins);
+    changed(userId, "REDEEM", -coins);
   }
 
   /** Credits earned coins once per order (idempotent). */
@@ -77,6 +96,7 @@ public class WalletService {
     if (repo.insertLedger(UUID.randomUUID(), userId, "EARN", coins, coins, expires, orderId, null, "earn:" + orderId, now)) {
       repo.addBalance(userId, coins);
       log.info("Coins credited user={} order={} coins={}", userId, orderId, coins);
+      changed(userId, "EARN", coins);
     }
   }
 
@@ -102,6 +122,7 @@ public class WalletService {
     }
     repo.addBalance(userId, total);
     log.info("Coins reversed user={} order={} coins={}", userId, orderId, total);
+    changed(userId, "REVERSE", total);
   }
 
   /**
@@ -124,6 +145,7 @@ public class WalletService {
     });
     repo.addBalance(userId, -take);
     log.info("Coins clawed back user={} return={} coins={}", userId, returnId, take);
+    changed(userId, "CLAWBACK", -take);
     return take;
   }
 
@@ -137,6 +159,7 @@ public class WalletService {
         "restore:" + returnId, now)) {
       repo.addBalance(userId, coins);
       log.info("Coins restored user={} return={} coins={}", userId, returnId, coins);
+      changed(userId, "RESTORE", coins);
     }
   }
 
@@ -154,7 +177,9 @@ public class WalletService {
     if (repo.insertLedger(UUID.randomUUID(), e.userId(), "EXPIRE", -remaining, null, null, null, null, "expire:" + e.id(), now)) {
       repo.zeroLot(e.id());
       log.info("Coins expired user={} lot={} coins={}", e.userId(), e.id(), remaining);
-      repo.addBalance(e.userId(), -Math.min(remaining, repo.balance(e.userId())));
+      int taken = Math.min(remaining, repo.balance(e.userId()));
+      repo.addBalance(e.userId(), -taken);
+      changed(e.userId(), "EXPIRE", -taken);
     }
   }
 
