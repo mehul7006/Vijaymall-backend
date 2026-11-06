@@ -23,6 +23,14 @@ public class PromotionService {
   private final AuditService audit;
   private final Clock clock;
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
+  private void changed() { if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.COUPONS); }
+
   public PromotionService(CouponRepository coupons, AuditService audit, Clock clock) {
     this.coupons = coupons;
     this.audit = audit;
@@ -103,6 +111,7 @@ public class PromotionService {
     if (coupons.findByCode(normalize(in.code())).isPresent()) throw ApiException.validation("code", "code already exists");
     UUID id = coupons.insert(normalized(in));
     audit.log(actor, "CREATE", "coupon", id, in.code());
+    changed();
     return coupons.find(id).orElseThrow();
   }
 
@@ -114,6 +123,7 @@ public class PromotionService {
         .ifPresent(x -> { throw ApiException.validation("code", "code already exists"); });
     coupons.update(id, normalized(in));
     audit.log(actor, "UPDATE", "coupon", id, in.code());
+    changed();
     return coupons.find(id).orElseThrow();
   }
 
@@ -122,6 +132,7 @@ public class PromotionService {
     coupons.find(id).orElseThrow(() -> ApiException.notFound("Coupon"));
     if (coupons.redemptionCount(id) > 0) coupons.deactivate(id); else coupons.delete(id);
     audit.log(actor, "DELETE", "coupon", id, null);
+    changed();
   }
 
   private static Coupon normalized(Coupon c) {

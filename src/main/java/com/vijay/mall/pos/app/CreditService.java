@@ -55,6 +55,14 @@ public class CreditService {
   private final TransactionTemplate tx;
   private final Clock clock;
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
+  private void changed(UUID customerId, String reason, long delta) { if (live != null) live.credit(customerId, reason, delta); }
+
   public CreditService(CreditRepository credit, UserRepository users, InvoiceCounterRepository counters, ShopService shop,
                        AuditService audit, TransactionTemplate tx, Clock clock) {
     this.credit = credit;
@@ -108,6 +116,7 @@ public class CreditService {
               "availablePaise", CreditMath.available(a.limitPaise(), a.balancePaise()), "requestedPaise", amountPaise));
     }
     credit.append(customerId, "SALE", amountPaise, invoiceNo, saleId, null, null, "", cashierId, now);
+    changed(customerId, "SALE", amountPaise);
   }
 
   // ---------- goods coming back ----------
@@ -120,6 +129,7 @@ public class CreditService {
   public void recordReturn(UUID customerId, UUID saleId, UUID returnId, String creditNoteNo, long amountPaise,
                            UUID cashierId, Instant now) {
     credit.append(customerId, "RETURN", -amountPaise, creditNoteNo, saleId, returnId, null, "", cashierId, now);
+    changed(customerId, "RETURN", -amountPaise);
   }
 
   // ---------- repayment ----------
@@ -157,6 +167,7 @@ public class CreditService {
     String receiptNo = InvoiceNumbers.format(shop.get().invoicePrefix() + "-CR", fy, counters.next("CREDIT_RECEIPT", fy));
     UUID id = credit.insertRepayment(UUID.randomUUID(), receiptNo, idemKey, u.id(), cashierId, total, text, now, parts);
     credit.append(u.id(), "PAYMENT", -total, receiptNo, null, null, id, text, cashierId, now);
+    changed(u.id(), "PAYMENT", -total);
     audit.log(cashierId, "CREDIT_PAYMENT", "credit_payment", id, receiptNo + " amount=" + total);
     return id;
   }
@@ -175,6 +186,7 @@ public class CreditService {
     if (limitPaise < 0) throw ApiException.validation("limitPaise", "must not be negative");
     users.findById(customerId).orElseThrow(() -> ApiException.notFound("Customer"));
     credit.setLimit(customerId, limitPaise, clock.instant());
+    changed(customerId, "LIMIT", 0);
     audit.log(actor, "CREDIT_LIMIT", "credit_account", customerId, "limit=" + limitPaise);
     return account(customerId);
   }
@@ -205,6 +217,7 @@ public class CreditService {
     }
     String text = noteOf(note);
     credit.append(customerId, "ADJUST", deltaPaise, null, null, null, null, text, actor, now);
+    changed(customerId, "ADJUST", deltaPaise);
     audit.log(actor, "CREDIT_ADJUST", "credit_account", customerId, "delta=" + deltaPaise + " " + text);
     return account(customerId);
   }

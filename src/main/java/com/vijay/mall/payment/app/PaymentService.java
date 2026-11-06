@@ -150,6 +150,12 @@ public class PaymentService {
   // ---------- admin ----------
   public List<PaymentRepository.Setting> allMethods() { return repo.settings(); }
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
   /** Both methods with their switch and whether they are set up, for the admin screen. */
   public List<AdminMethod> adminMethods() {
     return repo.settings().stream().map(s -> new AdminMethod(s.code(), s.enabled(), usable(s.code()))).toList();
@@ -175,6 +181,7 @@ public class PaymentService {
       throw ApiException.validation("methods", "keep at least one payment method on");
     }
     for (PaymentRepository.Setting s : in) repo.setEnabled(s.code(), s.enabled());
+    if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.PAYMENT_METHODS);
     audit.log(actor, "UPDATE", "payment_setting", null, in.toString());
     return repo.settings();
   }

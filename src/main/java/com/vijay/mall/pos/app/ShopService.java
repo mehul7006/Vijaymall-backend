@@ -29,6 +29,12 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
   public ShopSetting get() { return repo.get(); }
 
   /** The shop's name, phone, address and number prefix, read from the settings each time so an edit shows at once. */
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
   @Override
   public Info identity() {
     ShopSetting s = repo.get();
@@ -47,6 +53,7 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
     if (in.details() != null && in.details().length() > 500) throw ApiException.validation("details", "at most 500 characters");
     repo.save(in, clock.instant());
     audit.log(actor, "UPDATE", "shop_setting", 1, in.shopName());
+    if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.SHOP);
     return repo.get();
   }
 }

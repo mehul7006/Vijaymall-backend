@@ -233,11 +233,20 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
       repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
     } else if (OrderStatus.CANCELLED.name().equals(row.status())) {
       // paid after we expired the order: give the money back
-      if (payments.refund(row.id(), "paid after expiry")) repo.setPaymentStatus(row.id(), "REFUNDED", clock.instant());
+      if (payments.refund(row.id(), "paid after expiry")) {
+        repo.setPaymentStatus(row.id(), "REFUNDED", clock.instant());
+        touched(row);
+      }
     } else {
       // staff moved the order on before the payment arrived: the order stays where it is, the payment is recorded
       repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
+      touched(row);
     }
+  }
+
+  /** The order's status did not change but something on it did (its payment): tell the open screens to refresh it. */
+  private void touched(OrderRepository.Row row) {
+    events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), row.status(), row.status(), clock.instant()));
   }
 
   @EventListener

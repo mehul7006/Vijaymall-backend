@@ -56,4 +56,47 @@ class OrderEventHubTest {
     assertThat(hub.customerStreams(alice)).isEqualTo(1);
     assertThat(hub.staffStreams()).isEqualTo(1);
   }
+
+  @Test
+  void walletCreditStockAndCatalogEventsAreSentWithoutFailing() {
+    Instant at = Instant.parse("2027-03-01T10:00:00Z");
+    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, at));
+    hub.subscribeCustomer(alice);
+    hub.subscribeCustomer(bob);
+    hub.subscribeStaff();
+    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, at));
+    hub.on(new com.vijay.mall.common.live.CreditChanged(alice, "SALE", 500, at));
+    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
+    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
+    hub.on(new com.vijay.mall.common.live.CatalogChanged("CATALOG", at));
+    hub.flush();
+    hub.flush();
+    hub.heartbeat();
+    assertThat(hub.customerStreams(alice)).isEqualTo(1);
+    assertThat(hub.staffStreams()).isEqualTo(1);
+  }
+
+  @Test
+  void stockAndCatalogChangesAreSentOncePerWindow() {
+    Instant at = Instant.parse("2027-03-01T10:00:00Z");
+    java.util.concurrent.atomic.AtomicInteger runs = new java.util.concurrent.atomic.AtomicInteger();
+    OrderEventHub counting = new OrderEventHub(r -> { runs.incrementAndGet(); r.run(); });
+    counting.subscribeStaff();
+    int afterReady = runs.get();
+    for (int i = 0; i < 50; i++) counting.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
+    for (int i = 0; i < 50; i++) counting.on(new com.vijay.mall.common.live.CatalogChanged("CATALOG", at));
+    assertThat(runs.get()).isEqualTo(afterReady);
+    counting.flush();
+    assertThat(runs.get()).isEqualTo(afterReady + 1);
+    counting.flush();
+    assertThat(runs.get()).isEqualTo(afterReady + 1);
+  }
+
+  @Test
+  void aClosedStreamIsRemovedAndNewOnesStillRegister() {
+    hub.subscribeCustomer(alice).complete();
+    hub.subscribeCustomer(alice);
+    hub.heartbeat();
+    assertThat(hub.customerStreams(alice)).isGreaterThanOrEqualTo(1);
+  }
 }

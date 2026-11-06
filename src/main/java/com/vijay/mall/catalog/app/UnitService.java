@@ -17,6 +17,14 @@ public class UnitService {
   private final UnitRepository units;
   private final AuditService audit;
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
+  private void changed() { if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.UNITS); }
+
   public UnitService(UnitRepository units, AuditService audit) {
     this.units = units;
     this.audit = audit;
@@ -53,6 +61,7 @@ public class UnitService {
     if (units.findIgnoreCase(u.code()).isPresent()) throw ApiException.conflict("UNIT_EXISTS", "That unit already exists", java.util.Map.of());
     UnitOfMeasure saved = units.insert(u);
     audit.log(actor, "CREATE", "unit", saved.code(), saved.code() + " / " + saved.nameEn());
+    changed();
     return saved;
   }
 
@@ -76,6 +85,8 @@ public class UnitService {
     }
     UnitOfMeasure saved = units.update(u.code(), u).orElseThrow(() -> ApiException.notFound("Unit"));
     audit.log(actor, "UPDATE", "unit", saved.code(), from + " -> " + saved.code());
+    changed();
+    if (live != null && !from.equals(saved.code())) live.catalog(); // products using the unit now show its new code
     return saved;
   }
 
@@ -89,6 +100,7 @@ public class UnitService {
     }
     units.delete(u.code());
     audit.log(actor, "DELETE", "unit", u.code(), u.code());
+    changed();
   }
 
   private static UnitOfMeasure clean(UnitOfMeasure in, String code) {
