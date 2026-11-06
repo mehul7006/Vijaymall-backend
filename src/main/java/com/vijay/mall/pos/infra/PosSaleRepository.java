@@ -152,6 +152,15 @@ public class PosSaleRepository {
     return sales.findByIdemKey(idemKey).map(e -> assemble(List.of(e)).get(0));
   }
 
+  /** Invoice numbers of counter bills and credit note numbers of returns, for the ids given. */
+  public java.util.Map<UUID, String> documentNumbers(java.util.Collection<UUID> ids) {
+    java.util.Map<UUID, String> out = new java.util.HashMap<>();
+    if (ids.isEmpty()) return out;
+    sales.invoiceNumbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
+    returns.creditNoteNumbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
+    return out;
+  }
+
   public Optional<SaleRecord> findByInvoiceNo(String invoiceNo) {
     return sales.findByInvoiceNo(invoiceNo).map(e -> assemble(List.of(e)).get(0));
   }

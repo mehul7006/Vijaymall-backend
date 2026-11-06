@@ -38,10 +38,11 @@ public class PaymentController {
   }
 
   @GetMapping("/admin/payment-methods")
-  public List<PaymentRepository.Setting> adminMethods() { return payments.allMethods(); }
+  public List<PaymentService.AdminMethod> adminMethods() { return payments.adminMethods(); }
 
   @PutMapping("/admin/payment-methods")
-  public List<PaymentRepository.Setting> save(@RequestBody List<PaymentRepository.Setting> in) {
-    return payments.saveMethods(in, CurrentUser.id());
+  public List<PaymentService.AdminMethod> save(@RequestBody List<PaymentRepository.Setting> in) {
+    payments.saveMethods(in, CurrentUser.id());
+    return payments.adminMethods();
   }
 }

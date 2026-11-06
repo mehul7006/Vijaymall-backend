@@ -32,13 +32,24 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminPosController {
   public record ShopBody(@NotBlank String shopName, String address, String phone, String gstin, String stateCode,
                          String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
-                         WeighedMode weighedMode, @Size(max = 200) String promise) {
+                         WeighedMode weighedMode, @Size(max = 200) String promise, @Size(max = 500) String details) {
+    public ShopBody(String shopName, String address, String phone, String gstin, String stateCode, String upiId,
+                    String invoicePrefix, String receiptFooter, String weighedPrefix, WeighedMode weighedMode,
+                    String promise) {
+      this(shopName, address, phone, gstin, stateCode, upiId, invoicePrefix, receiptFooter, weighedPrefix, weighedMode,
+          promise, null);
+    }
+
     /** keepPromise is used when the request leaves promise out, so saving the form does not blank it. */
-    ShopSetting toSetting(String keepPromise) {
+    ShopSetting toSetting(String keepPromise) { return toSetting(keepPromise, null); }
+
+    /** keepDetails works the same way for the "about the shop" text. */
+    ShopSetting toSetting(String keepPromise, String keepDetails) {
       return new ShopSetting(shopName.strip(), nz(address, ""), nz(phone, ""), nz(gstin, "").strip().toUpperCase(),
           nz(stateCode, "24"), nz(upiId, "").strip(), nz(invoicePrefix, "VSM").strip().toUpperCase(),
           nz(receiptFooter, "Thank you! Visit again."), nz(weighedPrefix, "2"),
-          weighedMode == null ? WeighedMode.WEIGHT_GRAMS : weighedMode, promise == null ? keepPromise : promise.strip());
+          weighedMode == null ? WeighedMode.WEIGHT_GRAMS : weighedMode, promise == null ? keepPromise : promise.strip(),
+          details == null ? (keepDetails == null ? "" : keepDetails) : details.strip());
     }
   }
 
@@ -69,7 +80,10 @@ public class AdminPosController {
   public ShopSetting getShop() { return shop.get(); }
 
   @PutMapping("/shop-settings")
-  public ShopSetting saveShop(@Valid @RequestBody ShopBody b) { return shop.save(b.toSetting(shop.get().promise()), CurrentUser.id()); }
+  public ShopSetting saveShop(@Valid @RequestBody ShopBody b) {
+    ShopSetting current = shop.get();
+    return shop.save(b.toSetting(current.promise(), current.details()), CurrentUser.id());
+  }
 
   @GetMapping("/products/{id}/pos")
   public PosAttributes attributes(@PathVariable UUID id) { return catalog.attributes(id); }

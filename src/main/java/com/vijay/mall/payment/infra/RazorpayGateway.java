@@ -35,6 +35,12 @@ public class RazorpayGateway implements PaymentGateway {
   @Override public String provider() { return "razorpay"; }
 
   @Override
+  public boolean configured() {
+    return cfg.razorpayKeyId() != null && !cfg.razorpayKeyId().isBlank()
+        && cfg.razorpayKeySecret() != null && !cfg.razorpayKeySecret().isBlank();
+  }
+
+  @Override
   public Created create(CreateRequest r) {
     requireKeys();
     Map<String, Object> body = Map.of("amount", r.amountPaise(), "currency", "INR", "receipt", r.orderNo());

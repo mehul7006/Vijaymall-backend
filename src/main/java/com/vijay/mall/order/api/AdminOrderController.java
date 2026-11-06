@@ -27,9 +27,10 @@ public class AdminOrderController {
 
   @GetMapping
   public Page<OrderViews.AdminSummary> list(@RequestParam(required = false) String status,
+                                            @RequestParam(required = false) String q,
                                             @RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "20") int size) {
-    return orders.adminList(status, page, size);
+    return orders.adminList(status, q, page, size);
   }
 
   @GetMapping("/{id}")

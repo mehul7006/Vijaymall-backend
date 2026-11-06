@@ -70,7 +70,7 @@ class ControllerComponentTest {
     validator.afterPropertiesSet();
     mvc = MockMvcBuilders.standaloneSetup(new CartController(quotes), new OrderController(orders),
             new AdminOrderController(orders), new PaymentController(payments),
-            new WalletController(wallet, ids -> Map.of(), Clock.fixed(Instant.parse("2026-11-01T10:00:00Z"), ZoneOffset.UTC)))
+            new WalletController(wallet, new com.vijay.mall.common.ReferenceNumbers(List.of()), Clock.fixed(Instant.parse("2026-11-01T10:00:00Z"), ZoneOffset.UTC)))
         .setControllerAdvice(new GlobalExceptionHandler()).setValidator(validator).build();
     TestAuth.login(user, "CUSTOMER");
   }

@@ -16,7 +16,15 @@ public final class PosRecords {
 
     public record ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
                               String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
-                              WeighedMode weighedMode, String promise) {
+                              WeighedMode weighedMode, String promise, String details) {
+        /** A shop setting with no "about the shop" text. */
+        public ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
+                           String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
+                           WeighedMode weighedMode, String promise) {
+            this(shopName, address, phone, gstin, stateCode, upiId, invoicePrefix, receiptFooter, weighedPrefix,
+                weighedMode, promise, "");
+        }
+
         /** A shop setting with no customer-facing promise line. */
         public ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
                            String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,

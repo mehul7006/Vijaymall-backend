@@ -44,7 +44,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Order use cases: place, move through statuses, cancel, expire. Talks to other modules only through their services. */
 @Service
-public class OrderService implements OrderNumberLookup, PurchaseLookup {
+public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vijay.mall.common.ReferenceLookup {
   private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
   /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
@@ -140,7 +140,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
 
     for (Quote.Line l : q.lines()) {
       repo.insertItem(orderId, new OrderRepository.NewItem(l.productId(), l.name(), l.unitPricePaise(), l.qty(),
-          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel()));
+          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel(), l.couponDiscountPaise()));
     }
     repo.insertHistory(orderId, null, status, userId, null, now);
 
@@ -233,11 +233,20 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
       repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
     } else if (OrderStatus.CANCELLED.name().equals(row.status())) {
       // paid after we expired the order: give the money back
-      if (payments.refund(row.id(), "paid after expiry")) repo.setPaymentStatus(row.id(), "REFUNDED", clock.instant());
+      if (payments.refund(row.id(), "paid after expiry")) {
+        repo.setPaymentStatus(row.id(), "REFUNDED", clock.instant());
+        touched(row);
+      }
     } else {
       // staff moved the order on before the payment arrived: the order stays where it is, the payment is recorded
       repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
+      touched(row);
     }
+  }
+
+  /** The order's status did not change but something on it did (its payment): tell the open screens to refresh it. */
+  private void touched(OrderRepository.Row row) {
+    events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), row.status(), row.status(), clock.instant()));
   }
 
   @EventListener
@@ -274,8 +283,11 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
         p.page(), p.size(), p.total());
   }
 
-  public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) {
-    Page<OrderRepository.SummaryRow> p = repo.adminList(status, Math.max(0, page), Page.clampSize(size));
+  public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
+
+  /** q filters by order number (part of it is enough). */
+  public Page<OrderViews.AdminSummary> adminList(String status, String q, int page, int size) {
+    Page<OrderRepository.SummaryRow> p = repo.adminList(status, q, Math.max(0, page), Page.clampSize(size));
     Map<UUID, User> customers = profiles.users(p.items().stream().map(OrderRepository.SummaryRow::userId).distinct().toList());
     return new Page<>(p.items().stream().map(r -> {
       User u = customers.get(r.userId());
@@ -295,6 +307,10 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
   @Override
   public Map<UUID, String> orderNumbers(java.util.Collection<UUID> orderIds) { return repo.numbers(orderIds); }
 
+  /** Order numbers, for screens that only hold the order id (stock history, coin ledger). */
+  @Override
+  public Map<UUID, String> numbers(java.util.Collection<UUID> ids) { return repo.numbers(ids); }
+
   @Transactional(readOnly = true)
   public OrderViews.AdminView adminGet(UUID orderId) {
     return adminView(repo.find(orderId).orElseThrow(() -> ApiException.notFound("Order")));
@@ -310,7 +326,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup {
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
         repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
         r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
-        r.deliverySlot(), r.cancelReason());
+        r.deliverySlot(), r.cancelReason(), wallet.balance(r.userId()));
   }
 
   private String toJson(Address a) {

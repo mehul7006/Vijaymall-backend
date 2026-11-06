@@ -45,13 +45,19 @@ public class PaymentService {
     this.clock = clock;
   }
 
+  /** What the admin sees: the switch, and whether the method could actually work (ONLINE needs its provider keys). */
+  public record AdminMethod(String code, boolean enabled, boolean configured) {}
+
+  /** Methods customers may pick: switched on by the admin and, for ONLINE, set up with provider keys. */
   public List<PaymentRepository.Setting> enabledMethods() {
-    return repo.settings().stream().filter(PaymentRepository.Setting::enabled).toList();
+    return repo.settings().stream().filter(PaymentRepository.Setting::enabled).filter(s -> usable(s.code())).toList();
   }
 
   public void requireEnabled(String method) {
-    if (!repo.enabled(method)) throw ApiException.validation("paymentMethod", method + " is not available");
+    if (!repo.enabled(method) || !usable(method)) throw ApiException.validation("paymentMethod", method + " is not available");
   }
+
+  private boolean usable(String code) { return !"ONLINE".equals(code) || registry.onlineConfigured(); }
 
   /** Starts an online payment; returns empty for COD or a zero total. */
   @Transactional
@@ -144,12 +150,38 @@ public class PaymentService {
   // ---------- admin ----------
   public List<PaymentRepository.Setting> allMethods() { return repo.settings(); }
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
+  /** Both methods with their switch and whether they are set up, for the admin screen. */
+  public List<AdminMethod> adminMethods() {
+    return repo.settings().stream().map(s -> new AdminMethod(s.code(), s.enabled(), usable(s.code()))).toList();
+  }
+
+  /**
+   * Switches methods on or off. Online payment cannot be switched on until the provider keys are set, and at least one
+   * method must stay on so customers can always check out.
+   */
   @Transactional
   public List<PaymentRepository.Setting> saveMethods(List<PaymentRepository.Setting> in, UUID actor) {
+    Map<String, Boolean> result = new java.util.LinkedHashMap<>();
+    repo.settings().forEach(s -> result.put(s.code(), s.enabled()));
     for (PaymentRepository.Setting s : in) {
       if (!List.of("COD", "ONLINE").contains(s.code())) throw ApiException.validation("code", "unknown method");
-      repo.setEnabled(s.code(), s.enabled());
+      if (s.enabled() && !usable(s.code())) {
+        throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PAYMENT_NOT_CONFIGURED",
+            "Online payment cannot be switched on until the payment provider keys are set");
+      }
+      result.put(s.code(), s.enabled());
     }
+    if (result.values().stream().noneMatch(Boolean::booleanValue)) {
+      throw ApiException.validation("methods", "keep at least one payment method on");
+    }
+    for (PaymentRepository.Setting s : in) repo.setEnabled(s.code(), s.enabled());
+    if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.PAYMENT_METHODS);
     audit.log(actor, "UPDATE", "payment_setting", null, in.toString());
     return repo.settings();
   }

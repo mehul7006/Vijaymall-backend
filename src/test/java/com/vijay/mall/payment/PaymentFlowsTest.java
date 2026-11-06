@@ -89,6 +89,32 @@ class PaymentFlowsTest {
     verify(audit).log(eq(admin), eq("UPDATE"), eq("payment_setting"), any(), anyString());
   }
 
+  @Test
+  void onlineIsHiddenAndRefusedWhileTheProviderIsNotConfigured() {
+    PaymentGateway unconfigured = mock(PaymentGateway.class);
+    when(unconfigured.provider()).thenReturn("fake");
+    when(unconfigured.configured()).thenReturn(false);
+    var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(unconfigured), props("fake")), events, audit,
+        Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
+    when(repo.settings()).thenReturn(List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("ONLINE", true)));
+    when(repo.enabled("ONLINE")).thenReturn(true);
+    assertThat(svc.enabledMethods()).containsExactly(new PaymentRepository.Setting("COD", true));
+    assertThatThrownBy(() -> svc.requireEnabled("ONLINE")).isInstanceOf(ApiException.class);
+    assertThat(svc.adminMethods()).containsExactly(new PaymentService.AdminMethod("COD", true, true),
+        new PaymentService.AdminMethod("ONLINE", true, false));
+    assertThatThrownBy(() -> svc.saveMethods(List.of(new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID()))
+        .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("PAYMENT_NOT_CONFIGURED"));
+    verify(repo, never()).setEnabled(anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+  }
+
+  @Test
+  void atLeastOneMethodMustStayOn() {
+    when(repo.settings()).thenReturn(List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("ONLINE", false)));
+    assertThatThrownBy(() -> service.saveMethods(List.of(new PaymentRepository.Setting("COD", false)), UUID.randomUUID()))
+        .isInstanceOf(ApiException.class);
+    verify(repo, never()).setEnabled(anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+  }
+
   // ---------- start / session ----------
   @Test
   void startRecordsACreatedPaymentAndReturnsTheSession() {

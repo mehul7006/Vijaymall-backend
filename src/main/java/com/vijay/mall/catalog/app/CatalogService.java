@@ -43,9 +43,13 @@ public class CatalogService {
     }
   }
 
-  /** One row of the admin stock report. packLabel is the pack size (or unit); cashierId is whoever made the change. */
+  /**
+   * One row of the admin stock report. packLabel is the pack size (or unit); cashierId is whoever made the change.
+   * refId is the order, counter bill or return behind the change and ref its number as people read it (the same
+   * VSM-1001 the customer sees); both are null for a manual adjustment.
+   */
   public record StockMovementView(UUID id, UUID productId, String name, String packLabel, int delta, String reason,
-                                  Instant at, UUID cashierId) {}
+                                  Instant at, UUID cashierId, UUID refId, String ref) {}
 
   public record HotSale(List<HotBanner> banners, List<Product> products) {}
 
@@ -81,15 +85,36 @@ public class CatalogService {
   private final InventoryService inventory;
   private final AuditService audit;
   private final Clock clock;
+  private final com.vijay.mall.common.ReferenceNumbers references;
+  private final UnitService units;
 
+  private com.vijay.mall.common.live.LiveEvents live;
+
+  /** Optional: tells open app screens about changes (not provided in plain unit tests). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+
+  private void changed() { if (live != null) live.catalog(); }
+
+  /** Without a unit list, any unit text is accepted as before (plain unit tests). */
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
-                        InventoryService inventory, AuditService audit, Clock clock) {
+                        InventoryService inventory, AuditService audit, Clock clock,
+                        com.vijay.mall.common.ReferenceNumbers references) {
+    this(products, categories, banners, inventory, audit, clock, references, null);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
+                        InventoryService inventory, AuditService audit, Clock clock,
+                        com.vijay.mall.common.ReferenceNumbers references, UnitService units) {
+    this.units = units;
     this.products = products;
     this.categories = categories;
     this.banners = banners;
     this.inventory = inventory;
     this.audit = audit;
     this.clock = clock;
+    this.references = references;
   }
 
   // ---------- customer side ----------
@@ -244,6 +269,7 @@ public class CatalogService {
   public void setPosOnly(UUID id, boolean posOnly) {
     adminGet(id);
     products.setPosOnly(id, posOnly);
+    changed();
   }
 
   // ---------- admin side ----------
@@ -258,10 +284,12 @@ public class CatalogService {
     Page<com.vijay.mall.inventory.infra.InventoryRepository.Movement> rows = inventory.movements(productId, page, size);
     Map<UUID, ProductData> byId = products.findAll(rows.items().stream().map(m -> m.productId()).distinct().toList())
         .stream().collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
+    Map<UUID, String> numbers = references.of(rows.items().stream().map(m -> m.refId()).filter(java.util.Objects::nonNull)
+        .distinct().toList());
     List<StockMovementView> items = rows.items().stream().map(m -> {
       ProductData p = byId.get(m.productId());
       return new StockMovementView(m.id(), m.productId(), p == null ? "?" : p.nameEn(), p == null ? "" : p.unitLabel(),
-          m.delta(), m.reason(), m.at(), m.actorId());
+          m.delta(), m.reason(), m.at(), m.actorId(), m.refId(), m.refId() == null ? null : numbers.get(m.refId()));
     }).toList();
     return new Page<>(items, rows.page(), rows.size(), rows.total());
   }
@@ -280,15 +308,22 @@ public class CatalogService {
     return new Page<>(items, page.page(), page.size(), page.total());
   }
 
+  /** The unit to store: checked against the admin's unit list when there is one, else the text as given. */
+  private String unit(String given, String current) {
+    if (units != null) return units.canonicalOrKeep(given, current);
+    return nz(given, current == null ? "pc" : current);
+  }
+
   @Transactional
   public AdminProduct create(ProductInput in, UUID actor) {
     validate(in);
     UUID id = products.insert(in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
-        in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
+        in.pricePaise(), unit(in.unit(), null), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     inventory.create(id, Math.max(0, in.qtyOnHand()), in.lowThreshold() <= 0 ? 5 : in.lowThreshold());
     audit.log(actor, "CREATE", "product", id, in.nameEn() + " @ " + in.pricePaise());
+    changed();
     return adminGet(id);
   }
 
@@ -297,13 +332,14 @@ public class CatalogService {
     validate(in);
     AdminProduct before = adminGet(id);
     products.update(id, in.categoryId(), in.nameEn(), in.nameGu(), nz(in.description()), in.mrpPaise(),
-        in.pricePaise(), nz(in.unit(), "pc"), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
+        in.pricePaise(), unit(in.unit(), before.unit()), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     int delta = in.qtyOnHand() - before.qtyOnHand();
     if (delta != 0 && in.qtyOnHand() >= 0) inventory.adjust(id, delta, "ADJUST", actor);
     if (in.lowThreshold() > 0) inventory.setLowThreshold(id, in.lowThreshold());
     audit.log(actor, "UPDATE", "product", id, "price " + before.pricePaise() + " -> " + in.pricePaise());
+    changed();
     return adminGet(id);
   }
 
@@ -319,12 +355,14 @@ public class CatalogService {
   public AdminProduct setImage(UUID id, String url) {
     adminGet(id);
     products.setImage(id, url, clock.instant());
+    changed();
     return adminGet(id);
   }
 
   @Transactional
   public Category createCategory(String nameEn, String nameGu, int sort, boolean active) {
     UUID id = categories.insert(nameEn, nameGu, sort, active);
+    changed();
     return categories.find(id).orElseThrow();
   }
 
@@ -332,6 +370,7 @@ public class CatalogService {
   public Category updateCategory(UUID id, String nameEn, String nameGu, int sort, boolean active) {
     categories.find(id).orElseThrow(() -> ApiException.notFound("Category"));
     categories.update(id, nameEn, nameGu, sort, active);
+    changed();
     return categories.find(id).orElseThrow();
   }
 
@@ -340,6 +379,7 @@ public class CatalogService {
   @Transactional
   public HotBanner createBanner(String title, String sub, String img, Instant start, Instant end, boolean active) {
     UUID id = banners.insert(title, nz(sub), img, start, end, active);
+    changed();
     return banners.find(id).orElseThrow();
   }
 
@@ -347,11 +387,15 @@ public class CatalogService {
   public HotBanner updateBanner(UUID id, String title, String sub, String img, Instant start, Instant end, boolean active) {
     banners.find(id).orElseThrow(() -> ApiException.notFound("Banner"));
     banners.update(id, title, nz(sub), img, start, end, active);
+    changed();
     return banners.find(id).orElseThrow();
   }
 
   @Transactional
-  public void deleteBanner(UUID id) { banners.delete(id); }
+  public void deleteBanner(UUID id) {
+    banners.delete(id);
+    changed();
+  }
 
   /** Every variant of a product, active or not, with stock numbers. The id may be the group id or any variant's id. */
   @Transactional(readOnly = true)
@@ -391,6 +435,7 @@ public class CatalogService {
     products.setVariant(id, variantName == null ? current.name() : variantName.trim(),
         variantOrder == null ? current.order() : variantOrder);
     audit.log(actor, "UPDATE", "product", id, "variant " + (variantName == null ? current.name() : variantName.trim()));
+    changed();
     return adminGet(id);
   }
 
@@ -407,6 +452,7 @@ public class CatalogService {
         in.hotStart(), in.hotEnd(), in.earnsCoins() == null || in.earnsCoins(), in.coinRedeemable() == null || in.coinRedeemable(),
         in.active(), clock.instant());
     audit.log(actor, "UPDATE", "product_group", group, in.nameEn());
+    changed();
     return adminVariants(group);
   }
 

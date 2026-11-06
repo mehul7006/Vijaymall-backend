@@ -26,6 +26,7 @@ public class CouponStep implements QuoteStep {
     PromotionService.Applied applied = promotions.apply(code, c.userId, c.lines, c.subtotal,
         () -> c.userId == null ? 0 : (int) orders.activeOrderCount(c.userId));
     c.couponDiscount = Math.min(applied.discountPaise(), c.subtotal);
+    c.couponByLine = applied.perLine() == null ? java.util.List.of() : applied.perLine();
     c.couponBlocksCoins = !applied.worksWithCoins();
   }
 }

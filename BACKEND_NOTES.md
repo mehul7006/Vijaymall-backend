@@ -106,3 +106,27 @@ product stays if any variant has stock, and only its in-stock variants are liste
 (`/products/{id}`, `/product-groups/{id}`) still works and shows `inStock: false`, so wishlist, order history and shared
 links keep working. Pass `includeOutOfStock=true` on the two list endpoints to get everything. Admin and POS lists are
 unchanged. A product disappears from the list when the last unit is sold, so the app should refresh lists after an order.
+
+## Feedback round: coupons, order numbers, live updates, units, payment switch, shop details
+
+Migration `V9__units_coupon_categories_shop_details.sql`. The credit migration was renamed `V7` → `V8` because two
+`V7` files existed (a database that already applied the credit file as V7 needs `flyway repair`).
+
+- **Coupons per category.** A coupon can cover several categories (`categoryIds` on the admin body, `PublicCoupon`; `categoryId`
+  still works and is the first of the list; empty = every category). Only lines of those categories are discounted, the
+  minimum order is checked against those lines, and the discount is split over them to the paise
+  (`order_item.coupon_discount_paise`, `Quote.couponByCategory`, per-line `couponDiscountPaise`). The counter (POS) uses the same split.
+- **Order numbers.** Customer, admin, wallet ledger and stock history all show the same `orderNo` (or invoice / credit-note number for
+  counter sales, via `ReferenceNumbers`). Stock movements gained `ref` (the number) next to `refId`. The prefix comes from the shop
+  setting `invoicePrefix`. Admin order list accepts `q` to search by number. If a screen still shows a different number it is
+  reading `id` instead of `orderNo`.
+- **Live updates (no re-login).** The order SSE stream also sends `wallet` (that customer only: `{userId, reason, delta, at}`) and
+  `stock` (everyone: `{productIds, reason, at}`) after commit; refetch coins / stock on them. Order responses carry `coinBalance`.
+- **Units.** `GET /units` (public, active units), admin `GET|POST /admin/units`, `PUT|DELETE /admin/units/{code}`
+  (`code, nameEn, nameGu, soldBy UNIT|WEIGHT, sortOrder, active`). Product `unit` must be an active unit (case-insensitive, stored in the
+  unit's spelling). Renaming a code updates every product; a unit used by products can only be switched off.
+- **Online payment switch.** `GET /payment-methods` lists only methods the admin switched on and, for ONLINE, whose provider keys are set.
+  Admin `GET|PUT /admin/payment-methods` returns `{code, enabled, configured}`; ONLINE cannot be switched on until configured
+  (`422 PAYMENT_NOT_CONFIGURED`) and at least one method must stay on.
+- **Shop details.** `shop_setting.details` (admin `PUT /admin/shop-settings`, public `GET /shop-settings`). Order number prefix and the
+  sign-in e-mail name now come from the shop settings.

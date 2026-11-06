@@ -19,6 +19,9 @@ interface PosSaleJpa extends JpaRepository<PosSaleEntity, UUID> {
 
   List<PosSaleEntity> findTop200ByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(Instant from, Instant to);
 
+  @Query("select s.id, s.invoiceNo from PosSaleEntity s where s.id in :ids")
+  List<Object[]> invoiceNumbers(@Param("ids") java.util.Collection<UUID> ids);
+
   /** Serialises two returns against one bill. */
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select s from PosSaleEntity s where s.id = :id")

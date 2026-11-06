@@ -3,7 +3,7 @@ package com.vijay.mall.wallet.api;
 import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.security.CurrentUser;
-import com.vijay.mall.wallet.app.OrderNumberLookup;
+import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.wallet.app.WalletService;
 import com.vijay.mall.wallet.domain.CoinSettings;
 import com.vijay.mall.wallet.domain.StoredRule;
@@ -30,12 +30,12 @@ public class WalletController {
   public record LedgerView(UUID id, String kind, int coins, String orderNo, Instant createdAt, Instant expiresAt) {}
 
   private final WalletService wallet;
-  private final OrderNumberLookup orders;
+  private final ReferenceNumbers references;
   private final Clock clock;
 
-  public WalletController(WalletService wallet, OrderNumberLookup orders, Clock clock) {
+  public WalletController(WalletService wallet, ReferenceNumbers references, Clock clock) {
     this.wallet = wallet;
-    this.orders = orders;
+    this.references = references;
     this.clock = clock;
   }
 
@@ -53,7 +53,8 @@ public class WalletController {
   public Page<LedgerView> ledger(@RequestParam(defaultValue = "0") int page,
                                  @RequestParam(defaultValue = "20") int size) {
     Page<WalletRepository.LedgerRow> p = wallet.ledger(CurrentUser.id(), page, size);
-    Map<UUID, String> numbers = orders.orderNumbers(p.items().stream().map(WalletRepository.LedgerRow::orderId)
+    // orderId can also be a counter bill or a return, so every kind of number is looked up
+    Map<UUID, String> numbers = references.of(p.items().stream().map(WalletRepository.LedgerRow::orderId)
         .filter(Objects::nonNull).distinct().toList());
     List<LedgerView> items = p.items().stream().map(r -> new LedgerView(r.id(), r.kind(), r.coins(),
         r.orderId() == null ? null : numbers.get(r.orderId()), r.createdAt(), r.expiresAt())).toList();

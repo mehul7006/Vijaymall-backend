@@ -2,7 +2,7 @@
 
 Customers can buy on **credit** (udhar) or pay a bill **partly on credit** ("hybrid"). This exists only at the
 shop counter (`/pos/**`). Online checkout still accepts only `COD` and `ONLINE`; `CREDIT` or `HYBRID` there is refused with
-"credit and hybrid payment are only available at the shop counter". Migration: `V7__credit.sql`.
+"credit and hybrid payment are only available at the shop counter". Migration: `V8__credit.sql` (was V7, which clashed with `V7__variants_and_verified_reviews.sql`).
 
 ## How it works
 

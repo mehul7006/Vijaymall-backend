@@ -110,7 +110,7 @@ public class SecurityConfig {
             // Guests may browse the catalog (SecurityIT.catalogIsPublic). Writing a review still needs a sign-in.
             .requestMatchers(HttpMethod.GET, "/api/v1/categories", "/api/v1/products", "/api/v1/products/*",
                 "/api/v1/products/*/reviews", "/api/v1/hot-sale", "/api/v1/shop-settings", "/api/v1/coupons",
-                "/api/v1/product-groups", "/api/v1/product-groups/*", "/api/v1/product-groups/*/reviews").permitAll()
+                "/api/v1/product-groups", "/api/v1/product-groups/*", "/api/v1/product-groups/*/reviews", "/api/v1/units").permitAll()
             // Counter staff (CASHIER) work the orders too; everything else under /admin stays admin-only.
             .requestMatchers("/api/v1/admin/orders", "/api/v1/admin/orders/**").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

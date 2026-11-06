@@ -3,7 +3,12 @@ package com.vijay.mall.promotion.infra;
 import com.vijay.mall.promotion.domain.Coupon;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
@@ -13,18 +18,45 @@ import org.springframework.transaction.annotation.Transactional;
 public class CouponRepository {
   private final CouponJpa coupons;
   private final RedemptionJpa redemptions;
+  private final CouponCategoryJpa categories;
 
   @PersistenceContext
   private EntityManager em;
 
-  CouponRepository(CouponJpa coupons, RedemptionJpa redemptions) {
+  CouponRepository(CouponJpa coupons, RedemptionJpa redemptions, CouponCategoryJpa categories) {
     this.coupons = coupons;
     this.redemptions = redemptions;
+    this.categories = categories;
   }
 
-  private static Coupon toDomain(CouponEntity e) {
+  private static Coupon toDomain(CouponEntity e, Map<UUID, List<UUID>> categoriesByCoupon) {
+    List<UUID> ids = new ArrayList<>(categoriesByCoupon.getOrDefault(e.id, List.of()));
+    ids.sort(Comparator.naturalOrder());
+    if (e.categoryId != null && ids.remove(e.categoryId)) ids.add(0, e.categoryId); // keep the first category first
     return new Coupon(e.id, e.code, e.kind, e.amount, e.minOrderPaise, e.maxDiscountPaise, e.categoryId, e.perUserLimit,
-        e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active, e.worksWithCoins, e.firstOrderOnly);
+        e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active, e.worksWithCoins, e.firstOrderOnly, ids);
+  }
+
+  private List<Coupon> toDomains(List<CouponEntity> list) {
+    if (list.isEmpty()) return List.of();
+    Map<UUID, List<UUID>> byCoupon = new HashMap<>();
+    categories.findByCouponIdIn(list.stream().map(e -> e.id).toList())
+        .forEach(r -> byCoupon.computeIfAbsent(r.couponId, k -> new ArrayList<>()).add(r.categoryId));
+    return list.stream().map(e -> toDomain(e, byCoupon)).toList();
+  }
+
+  private Optional<Coupon> toDomain(Optional<CouponEntity> e) {
+    return e.map(x -> toDomains(List.of(x)).get(0));
+  }
+
+  private void replaceCategories(UUID couponId, Collection<UUID> ids) {
+    categories.deleteAllFor(couponId);
+    for (UUID categoryId : ids) {
+      CouponCategoryEntity row = new CouponCategoryEntity();
+      row.couponId = couponId;
+      row.categoryId = categoryId;
+      categories.save(row);
+    }
   }
 
   private static void fill(CouponEntity e, Coupon c) {
@@ -43,15 +75,13 @@ public class CouponRepository {
     e.firstOrderOnly = c.firstOrderOnly();
   }
 
-  public List<Coupon> all() { return coupons.findAllByOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList(); }
+  public List<Coupon> all() { return toDomains(coupons.findAllByOrderByCodeAsc()); }
 
-  public List<Coupon> allActive() {
-    return coupons.findAllByActiveTrueOrderByCodeAsc().stream().map(CouponRepository::toDomain).toList();
-  }
+  public List<Coupon> allActive() { return toDomains(coupons.findAllByActiveTrueOrderByCodeAsc()); }
 
-  public Optional<Coupon> find(UUID id) { return coupons.findById(id).map(CouponRepository::toDomain); }
+  public Optional<Coupon> find(UUID id) { return toDomain(coupons.findById(id)); }
 
-  public Optional<Coupon> findByCode(String code) { return coupons.findByCode(code).map(CouponRepository::toDomain); }
+  public Optional<Coupon> findByCode(String code) { return toDomain(coupons.findByCode(code)); }
 
   @Transactional
   public UUID insert(Coupon c) {
@@ -59,11 +89,18 @@ public class CouponRepository {
     e.id = UUID.randomUUID();
     e.usedCount = 0;
     fill(e, c);
-    return coupons.save(e).id;
+    UUID id = coupons.save(e).id;
+    replaceCategories(id, c.categoryIds());
+    return id;
   }
 
   @Transactional
-  public void update(UUID id, Coupon c) { coupons.findById(id).ifPresent(e -> fill(e, c)); }
+  public void update(UUID id, Coupon c) {
+    coupons.findById(id).ifPresent(e -> {
+      fill(e, c);
+      replaceCategories(id, c.categoryIds());
+    });
+  }
 
   public int userUses(UUID couponId, UUID userId) {
     return (int) redemptions.countByCouponIdAndUserIdAndReleasedFalse(couponId, userId);

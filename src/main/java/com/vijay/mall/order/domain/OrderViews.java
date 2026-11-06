@@ -15,7 +15,13 @@ public final class OrderViews {
   /** One order line as it was at order time, so it still reads right after the product is edited. */
   @Schema(name = "OrderItem")
   public record Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise, String nameGu,
-                     String unitLabel) {
+                     String unitLabel, long couponDiscountPaise) {
+    /** couponDiscountPaise is this line's share of the order's coupon discount. */
+    public Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise, String nameGu,
+                String unitLabel) {
+      this(productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, 0);
+    }
+
     public Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise) {
       this(productId, name, qty, unitPricePaise, lineTotalPaise, name, "");
     }
@@ -39,7 +45,18 @@ public final class OrderViews {
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
                      long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
-                     List<Step> timeline, Instant placedAt, String slot, String cancelReason) {
+                     List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance) {
+    /** Without the customer's current coin balance. */
+    public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
+                String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
+                long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
+                long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
+                List<Step> timeline, Instant placedAt, String slot, String cancelReason) {
+      this(id, orderNo, status, fulfilment, paymentMethod, paymentStatus, items, subtotalPaise, couponCode,
+          couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise, coinsEarned, address,
+          paymentSession, timeline, placedAt, slot, cancelReason, null);
+    }
+
     public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                 String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                 long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
@@ -47,7 +64,7 @@ public final class OrderViews {
                 List<Step> timeline, Instant placedAt) {
       this(id, orderNo, status, fulfilment, paymentMethod, paymentStatus, items, subtotalPaise, couponCode,
           couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise, coinsEarned, address,
-          paymentSession, timeline, placedAt, null, null);
+          paymentSession, timeline, placedAt, null, null, null);
     }
   }
 
