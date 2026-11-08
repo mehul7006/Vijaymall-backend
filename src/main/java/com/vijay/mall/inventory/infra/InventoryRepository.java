@@ -78,6 +78,9 @@ public class InventoryRepository {
     return new com.vijay.mall.common.Page<>(rows, page, size, result.getTotalElements());
   }
 
+  /** How many products are at or below their own alert level. */
+  public long countLow() { return jpa.countLow(); }
+
   /** Products at or below their own threshold, emptiest first. The caller filters inactive products. */
   public List<Stock> lowStock(int limit) {
     return jpa.lowStock(PageRequest.of(0, limit)).stream().map(e -> new Stock(e.productId, e.qtyOnHand, e.lowThreshold)).toList();

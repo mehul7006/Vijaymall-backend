@@ -60,8 +60,11 @@ class ErrorHandlingIT extends IntegrationTestBase {
   }
 
   @Test
-  void unknownImageIs404AndHealthIsPublic() {
+  void unknownImageIs404AndHealthIsOnThePrivatePortOnly() {
     assertThat(get("/img/does-not-exist.jpg", null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-    assertThat(get("/actuator/health", null).getStatusCode()).isEqualTo(HttpStatus.OK);
+    var health = org.springframework.web.client.RestClient.builder().baseUrl("http://localhost:" + managementPort)
+        .defaultStatusHandler(_ -> true, (_, _) -> { }).build().get().uri("/actuator/health").retrieve().toEntity(String.class);
+    assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(get("/actuator/health", null).getStatusCode()).as("not on the public port any more").isEqualTo(HttpStatus.NOT_FOUND);
   }
 }

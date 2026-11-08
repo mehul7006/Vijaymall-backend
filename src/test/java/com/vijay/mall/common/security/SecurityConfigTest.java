@@ -12,6 +12,18 @@ class SecurityConfigTest {
   }
 
   @Test
+  void blockedStaffAreRefusedAtOnceButCustomersAreNotLookedUp() {
+    var users = org.mockito.Mockito.mock(com.vijay.mall.identity.infra.UserRepository.class);
+    var id = java.util.UUID.randomUUID();
+    org.mockito.Mockito.when(users.isBlocked(id)).thenReturn(true);
+    assertThat(SecurityConfig.isBlockedStaff("CASHIER", id.toString(), users)).isTrue();
+    assertThat(SecurityConfig.isBlockedStaff("ADMIN", id.toString(), users)).isTrue();
+    assertThat(SecurityConfig.isBlockedStaff("CUSTOMER", id.toString(), users)).isFalse();
+    assertThat(SecurityConfig.isBlockedStaff("CASHIER", "not-a-uuid", users)).isFalse();
+    org.mockito.Mockito.verify(users, org.mockito.Mockito.never()).isBlocked(org.mockito.ArgumentMatchers.argThat(u -> !u.equals(id)));
+  }
+
+  @Test
   void keyFromAThirtyTwoCharacterSecretIsHmacSha256() {
     var key = new SecurityConfig().jwtSecretKey(props("0123456789012345678901234567890a"));
     assertThat(key.getAlgorithm()).isEqualTo("HmacSHA256");

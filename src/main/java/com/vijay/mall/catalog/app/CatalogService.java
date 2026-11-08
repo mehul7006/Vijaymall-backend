@@ -58,7 +58,14 @@ public class CatalogService {
    * label is the text to show next to the price: the pack size, or the unit when there is no pack size.
    */
   public record Variant(UUID id, String variantName, String packSize, String unit, String label, long mrpPaise,
-                        long pricePaise, String imageUrl, boolean inStock, int qtyAvailable) {}
+                        long pricePaise, String imageUrl, boolean inStock, int qtyAvailable,
+                        com.vijay.mall.common.FlashPricing.Offer flash) {
+    /** A variant not on a flash sale. */
+    public Variant(UUID id, String variantName, String packSize, String unit, String label, long mrpPaise,
+                   long pricePaise, String imageUrl, boolean inStock, int qtyAvailable) {
+      this(id, variantName, packSize, unit, label, mrpPaise, pricePaise, imageUrl, inStock, qtyAvailable, null);
+    }
+  }
 
   /**
    * One product with all its variants, the way a shop shows it: a single card, a variant picker, one rating.
@@ -69,7 +76,16 @@ public class CatalogService {
   public record ProductGroup(UUID groupId, UUID defaultVariantId, UUID categoryId, String nameEn, String nameGu,
                              String description, String imageUrl, boolean hotSale, boolean earnsCoins,
                              boolean coinRedeemable, double rating, int reviewCount, long fromPricePaise, boolean inStock,
-                             List<Variant> variants) {}
+                             List<Variant> variants, com.vijay.mall.common.FlashPricing.Offer flash) {
+    /** A product not on a flash sale. */
+    public ProductGroup(UUID groupId, UUID defaultVariantId, UUID categoryId, String nameEn, String nameGu,
+                        String description, String imageUrl, boolean hotSale, boolean earnsCoins,
+                        boolean coinRedeemable, double rating, int reviewCount, long fromPricePaise, boolean inStock,
+                        List<Variant> variants) {
+      this(groupId, defaultVariantId, categoryId, nameEn, nameGu, description, imageUrl, hotSale, earnsCoins, coinRedeemable, rating,
+          reviewCount, fromPricePaise, inStock, variants, null);
+    }
+  }
 
   /** A new variant of an existing product. It copies the shared details from that product. */
   public record VariantInput(String variantName, String packSize, String unit, long mrpPaise, long pricePaise,
@@ -96,6 +112,33 @@ public class CatalogService {
 
   private void changed() { if (live != null) live.catalog(); }
 
+  private com.vijay.mall.common.FlashPricing flash;
+
+  /** Optional (plain unit tests run without it): shows the flash sale price on products. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setFlash(com.vijay.mall.common.FlashPricing flash) { this.flash = flash; }
+
+  private List<Product> flashed(List<Product> list) {
+    if (flash == null || list.isEmpty()) return list;
+    Map<UUID, Long> prices = new LinkedHashMap<>();
+    list.forEach(p -> prices.put(p.id(), p.pricePaise()));
+    Map<UUID, com.vijay.mall.common.FlashPricing.Offer> offers = flash.offers(prices);
+    return offers.isEmpty() ? list : list.stream().map(p -> offers.containsKey(p.id()) ? p.withFlash(offers.get(p.id())) : p).toList();
+  }
+
+  private ProductGroup flashed(ProductGroup g) {
+    if (flash == null) return g;
+    Map<UUID, Long> prices = new LinkedHashMap<>();
+    g.variants().forEach(v -> prices.put(v.id(), v.pricePaise()));
+    Map<UUID, com.vijay.mall.common.FlashPricing.Offer> offers = flash.offers(prices);
+    if (offers.isEmpty()) return g;
+    List<Variant> vs = g.variants().stream().map(v -> new Variant(v.id(), v.variantName(), v.packSize(), v.unit(), v.label(), v.mrpPaise(),
+        v.pricePaise(), v.imageUrl(), v.inStock(), v.qtyAvailable(), offers.get(v.id()))).toList();
+    var first = vs.stream().filter(v -> v.flash() != null).findFirst().map(Variant::flash).orElse(null);
+    return new ProductGroup(g.groupId(), g.defaultVariantId(), g.categoryId(), g.nameEn(), g.nameGu(), g.description(), g.imageUrl(), g.hotSale(),
+        g.earnsCoins(), g.coinRedeemable(), g.rating(), g.reviewCount(), g.fromPricePaise(), g.inStock(), vs, first);
+  }
+
   /** Without a unit list, any unit text is accepted as before (plain unit tests). */
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
                         InventoryService inventory, AuditService audit, Clock clock,
@@ -120,7 +163,22 @@ public class CatalogService {
   // ---------- customer side ----------
   public java.util.Map<UUID, String> names(java.util.Collection<UUID> ids) { return products.names(ids); }
 
-  public List<Category> categories() { return categories.listActive(); }
+  /** When any product last changed (the offline till compares this with the copy it holds). */
+  public java.time.Instant lastChange() { return products.lastChange(); }
+
+  /** Names of products still on sale; stock alerts ignore retired products. */
+  public java.util.Map<UUID, String> activeNames(java.util.Collection<UUID> ids) { return products.activeNames(ids); }
+
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it): the category list rarely changes and is read on every screen. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
+  public List<Category> categories() {
+    return caches == null ? categories.listActive()
+        : caches.get(com.vijay.mall.common.cache.AppCaches.Name.CATEGORIES, "active", categories::listActive);
+  }
 
   /** The shop list. Products with no stock are left out; use the overload to include them. */
   public Page<Product> list(String q, UUID categoryId, boolean hot, int page, int size) {
@@ -133,20 +191,23 @@ public class CatalogService {
     int sz = Page.clampSize(size);
     Page<AdminProduct> p = withStock(includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
         : products.searchInStock(q, categoryId, hot, now, pg, sz));
-    return new Page<>(p.items().stream().map(a -> a.toCustomer(now)).toList(), p.page(), p.size(), p.total());
+    return new Page<>(flashed(p.items().stream().map(a -> a.toCustomer(now)).toList()), p.page(), p.size(), p.total());
   }
 
   public Product get(UUID id) {
     AdminProduct p = one(id);
     if (!p.active() || products.isPosOnly(id)) throw ApiException.notFound("Product");
-    return p.toCustomer(clock.instant());
+    return flashed(List.of(p.toCustomer(clock.instant()))).get(0);
   }
 
   public HotSale hotSale() {
     Instant now = clock.instant();
-    List<Product> list = withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
-        .map(a -> a.toCustomer(now)).toList();
-    return new HotSale(banners.live(now), list);
+    List<Product> list = flashed(withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
+        .map(a -> a.toCustomer(now)).toList());
+    // all banners are cached (they change rarely); which ones are on right now depends on the clock, so that is decided here
+    List<HotBanner> all = caches == null ? banners.all() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.BANNERS, "all", banners::all);
+    return new HotSale(all.stream().filter(b -> b.active() && (b.startAt() == null || !b.startAt().isAfter(now))
+        && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list);
   }
 
   /** Products with their variants, one entry per product. A product matches when any of its variants does. */
@@ -169,7 +230,7 @@ public class CatalogService {
     Map<UUID, List<ProductData>> byGroup = rows.stream()
         .collect(Collectors.groupingBy(ProductData::productGroupId, LinkedHashMap::new, Collectors.toList()));
     List<ProductGroup> items = ids.items().stream().filter(byGroup::containsKey)
-        .map(g -> toGroup(byGroup.get(g), stocks, info, now)).toList();
+        .map(g -> flashed(toGroup(byGroup.get(g), stocks, info, now))).toList();
     return new Page<>(items, ids.page(), ids.size(), ids.total());
   }
 
@@ -182,7 +243,7 @@ public class CatalogService {
     if (rows.isEmpty()) throw ApiException.notFound("Product");
     var stocks = inventory.stocks(rows.stream().map(ProductData::id).toList());
     var info = products.variantInfo(rows.stream().map(ProductData::id).toList());
-    return toGroup(rows, stocks, info, now);
+    return flashed(toGroup(rows, stocks, info, now));
   }
 
   /** Ids of the visible variants of the product that holds this id; used to read the reviews of all variants together. */
@@ -246,9 +307,9 @@ public class CatalogService {
     java.util.Set<UUID> counterOnly = products.posOnlyAmong(ids);
     Map<UUID, ProductData> byId = products.findAll(ids).stream()
         .collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
-    return ids.stream().map(byId::get)
+    return flashed(ids.stream().map(byId::get)
         .filter(p -> p != null && p.active() && !counterOnly.contains(p.id()))
-        .map(p -> p.withStock(stocks.get(p.id()).qty(), stocks.get(p.id()).low()).toCustomer(now)).toList();
+        .map(p -> p.withStock(stocks.get(p.id()).qty(), stocks.get(p.id()).low()).toCustomer(now)).toList());
   }
 
   /** Review average and count, written by the review service after every change. */

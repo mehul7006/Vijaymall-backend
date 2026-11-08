@@ -256,9 +256,11 @@ class OrderApiIT extends IntegrationTestBase {
   @Test
   void dashboardCountsTodaysOrders() {
     String admin = adminToken();
+    post("/api/v1/admin/cache/refresh/dashboard", admin, null);
     long before = ((Number) get("/api/v1/admin/dashboard", admin).getBody().get("ordersToday")).longValue();
     String t = token(freshEmail());
     place(t, cart(product(t, "Potato Chips"), 1, Map.of()));
+    post("/api/v1/admin/cache/refresh/dashboard", admin, null); // the dashboard is cached for 30 s; an admin can force fresh figures
     var d = get("/api/v1/admin/dashboard", admin).getBody();
     assertThat(((Number) d.get("ordersToday")).longValue()).isEqualTo(before + 1);
     assertThat(((Number) d.get("salesTodayPaise")).longValue()).isPositive();

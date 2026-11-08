@@ -28,6 +28,13 @@ public class OtpService {
   private final RateLimiter limiter;
   private final int ipPerHour;
   private final SecureRandom random = new SecureRandom();
+  private int perEmailHour = 5;
+
+  /** Codes one e-mail address may ask for per hour (production keeps 5; tests that sign in all day raise it). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setPerEmailHour(@org.springframework.beans.factory.annotation.Value("${app.rate-limit.otp-per-email-hour:5}") int n) {
+    this.perEmailHour = n;
+  }
 
   public OtpService(OtpRepository repo, OtpSender sender, AppProps props, Clock clock, RateLimiter limiter,
                     @org.springframework.beans.factory.annotation.Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
@@ -54,7 +61,7 @@ public class OtpService {
   @Transactional
   public void send(String rawEmail, String ip) {
     String email = normalize(rawEmail);
-    limiter.check("otp-email:" + email, 5, 3600);
+    limiter.check("otp-email:" + email, perEmailHour, 3600);
     limiter.check("otp-ip:" + ip, ipPerHour, 3600);
     String code = fixedCode().orElseGet(() -> String.format("%05d", random.nextInt(100000)));
     Instant now = clock.instant();

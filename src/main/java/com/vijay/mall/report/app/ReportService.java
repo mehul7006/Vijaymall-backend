@@ -45,9 +45,19 @@ public class ReportService {
     this.clock = clock;
   }
 
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it): the dashboard adds up the whole day, so it is kept for 30 seconds. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
   @Transactional(readOnly = true)
   public Dashboard dashboard() {
     LocalDate today = clock.instant().atZone(SHOP).toLocalDate();
+    return caches == null ? compute(today) : caches.get(com.vijay.mall.common.cache.AppCaches.Name.DASHBOARD, today, () -> compute(today));
+  }
+
+  private Dashboard compute(LocalDate today) {
     var from = today.minusDays(6).atStartOfDay(SHOP).toInstant();
     var dayStart = today.atStartOfDay(SHOP).toInstant();
 
@@ -71,13 +81,27 @@ public class ReportService {
                 + "WHERE placed_at >= :f AND " + COUNTED + " GROUP BY 1")
         .setParameter("f", from).getResultList();
     Map<LocalDate, Long> byDay = rows.stream().collect(Collectors.toMap(
-        r -> ((LocalDate) r[0]), r -> ((Number) r[1]).longValue()));
+        r -> toLocalDate(r[0]), r -> ((Number) r[1]).longValue()));
     return IntStream.rangeClosed(0, 6).mapToObj(i -> today.minusDays(6 - i))
         .map(d -> new Day(d, byDay.getOrDefault(d, 0L))).toList();
   }
 
-  private List<LowItem> lowStock() {
-    List<InventoryRepository.Stock> low = inventory.lowStock(10);
+  /** A native date column comes back as LocalDate or java.sql.Date depending on the driver and Hibernate mapping. */
+  private static LocalDate toLocalDate(Object o) {
+    return switch (o) {
+      case LocalDate d -> d;
+      case java.sql.Date d -> d.toLocalDate();
+      case java.util.Date d -> new java.sql.Date(d.getTime()).toLocalDate();
+      default -> LocalDate.parse(o.toString().substring(0, 10));
+    };
+  }
+
+  private List<LowItem> lowStock() { return lowStock(10); }
+
+  /** Active products at or below their stock alert level, emptiest first (retired products are left out). */
+  @Transactional(readOnly = true)
+  public List<LowItem> lowStock(int limit) {
+    List<InventoryRepository.Stock> low = inventory.lowStock(Math.max(1, Math.min(limit, 200)));
     Map<UUID, String> names = catalog.names(low.stream().map(InventoryRepository.Stock::productId).toList());
     return low.stream().map(s -> new LowItem(s.productId(), names.getOrDefault(s.productId(), "?"), s.qty())).toList();
   }

@@ -66,7 +66,8 @@ class CatalogServiceTest {
     banners = mock(BannerRepository.class);
     inventory = mock(InventoryService.class);
     audit = mock(AuditService.class);
-    service = new CatalogService(products, categories, banners, inventory, audit, Clock.fixed(NOW, ZoneOffset.UTC));
+    service = new CatalogService(products, categories, banners, inventory, audit, Clock.fixed(NOW, ZoneOffset.UTC),
+        mock(com.vijay.mall.common.ReferenceNumbers.class));
     when(inventory.stocks(any())).thenAnswer(inv -> {
       Map<UUID, Stock> out = new HashMap<>();
       for (UUID id : (Collection<UUID>) inv.getArgument(0)) out.put(id, stock.getOrDefault(id, new Stock(id, 0, 5)));
@@ -172,7 +173,7 @@ class CatalogServiceTest {
   @Test
   void hotSaleReturnsLiveBannersAndFirstTwentyHotProducts() {
     HotBanner banner = new HotBanner(UUID.randomUUID(), "Diwali", "", null, null, null, true);
-    when(banners.live(NOW)).thenReturn(List.of(banner));
+    when(banners.all()).thenReturn(List.of(banner));
     when(products.searchInStock(null, null, true, NOW, 0, 20))
         .thenReturn(new Page<>(List.of(data(pid, true, true, null, null)), 0, 20, 1));
 
@@ -391,7 +392,7 @@ class CatalogServiceTest {
 
     service.update(pid, input(7000, 6500, null, null, 4, 3), actor);
 
-    verify(products).update(eq(pid), eq(cat), eq("Atta"), eq("આટો"), eq(""), eq(7000L), eq(6500L), eq("pc"), eq(""), eq(true),
+    verify(products).update(eq(pid), eq(cat), eq("Atta"), eq("આટો"), eq(""), eq(7000L), eq(6500L), eq("kg"), eq(""), eq(true),
         eq(false), isNull(), isNull(), eq(true), eq(true), eq(NOW));
     verify(inventory).adjust(pid, -6, "ADJUST", actor);
     verify(inventory).setLowThreshold(pid, 3);

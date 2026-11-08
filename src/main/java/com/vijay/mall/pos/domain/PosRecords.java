@@ -48,7 +48,33 @@ public final class PosRecords {
                              long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
                              long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
                              int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
-                             List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType) {
+                             List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType,
+                             long manualDiscountPaise, String manualDiscountReason, UUID manualDiscountApprover,
+                             long roundOffPaise) {
+        /** A bill that was not rounded. */
+        public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
+                          long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                          long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                          int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
+                          List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType,
+                          long manualDiscountPaise, String manualDiscountReason, UUID manualDiscountApprover) {
+            this(id, invoiceNo, cashierId, customerId, customerMobile, subtotalPaise, couponCode, couponDiscountPaise,
+                coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise, coinsEarned,
+                tenderedPaise, changePaise, createdAt, items, payments, paymentType, manualDiscountPaise, manualDiscountReason,
+                manualDiscountApprover, 0);
+        }
+
+        /** A bill with no manual discount. */
+        public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
+                          long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                          long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                          int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
+                          List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType) {
+            this(id, invoiceNo, cashierId, customerId, customerMobile, subtotalPaise, couponCode, couponDiscountPaise,
+                coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise, coinsEarned,
+                tenderedPaise, changePaise, createdAt, items, payments, paymentType, 0, "", null);
+        }
+
         /** A bill whose payment type is worked out from its payments. */
         public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
                           long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,

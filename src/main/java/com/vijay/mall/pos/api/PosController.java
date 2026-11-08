@@ -50,8 +50,9 @@ public class PosController {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
   }
 
-  public record SaleBody(@NotNull @Valid CartBody cart, List<Pay> payments, Long cashTenderedPaise) {
-    SaleInput toInput() { return new SaleInput(cart.toCart(), payments, cashTenderedPaise); }
+  public record SaleBody(@NotNull @Valid CartBody cart, List<Pay> payments, Long cashTenderedPaise,
+                         PosViews.ManualDiscount manualDiscount) {
+    SaleInput toInput() { return new SaleInput(cart.toCart(), payments, cashTenderedPaise, manualDiscount); }
   }
 
   public record HoldBody(String label, @NotNull @Valid CartBody cart) {}
@@ -95,7 +96,7 @@ public class PosController {
   @PostMapping("/sales")
   @ResponseStatus(HttpStatus.CREATED)
   public SaleRecord sale(@RequestHeader("Idempotency-Key") String key, @Valid @RequestBody SaleBody body) {
-    return pos.sale(CurrentUser.id(), key, body.toInput());
+    return pos.sale(CurrentUser.id(), CurrentUser.isAdmin(), key, body.toInput());
   }
 
   @GetMapping("/sales")
@@ -116,7 +117,7 @@ public class PosController {
   @ResponseStatus(HttpStatus.CREATED)
   public ReturnRecord refund(@PathVariable UUID id, @RequestHeader("Idempotency-Key") String key,
                              @Valid @RequestBody ReturnBody body) {
-    return returns.refund(CurrentUser.id(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds()));
+    return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds()));
   }
 
   @GetMapping("/sales/{id}/returns")

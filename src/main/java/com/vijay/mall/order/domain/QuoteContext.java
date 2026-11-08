@@ -44,7 +44,9 @@ public final class QuoteContext {
     for (int i = 0; i < lines.size(); i++) {
       PricedLine l = lines.get(i);
       out.add(new Quote.Line(l.productId(), l.name(), l.qty(), l.unitPricePaise(), l.lineTotalPaise(), l.coinRedeemable(),
-          l.earnsCoins(), l.nameGu(), l.unitLabel(), l.categoryId(), couponShare(i)));
+          l.earnsCoins(), l.nameGu(), l.unitLabel(), l.categoryId(), couponShare(i), l.flashSaleId(),
+          l.flashSaleId() == null ? l.unitPricePaise() : l.listUnitPricePaise(),
+          l.flashSaleId() == null ? 0 : (l.listUnitPricePaise() - l.unitPricePaise()) * l.qty()));
     }
     return new Quote(out, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount, deliveryFee, total,
         coinsToEarn, List.copyOf(warnings), couponByCategory());

@@ -245,6 +245,15 @@ public class ProductRepository {
 
   public boolean isPosOnly(UUID id) { return jpa.findById(id).map(e -> e.posOnly).orElse(false); }
 
+  /** When any product (price, name, active...) last changed; null for an empty shop. */
+  public Instant lastChange() { return jpa.lastChange(); }
+
+  /** English names of the products that are still on sale, keyed by id (retired products are left out). */
+  @Transactional(readOnly = true)
+  public Map<UUID, String> activeNames(java.util.Collection<UUID> ids) {
+    return jpa.findAllById(ids).stream().filter(e -> e.active).collect(java.util.stream.Collectors.toMap(e -> e.id, e -> e.nameEn));
+  }
+
   /** English names for the given products, keyed by id. */
   @Transactional(readOnly = true)
   public Map<UUID, String> names(java.util.Collection<UUID> ids) {

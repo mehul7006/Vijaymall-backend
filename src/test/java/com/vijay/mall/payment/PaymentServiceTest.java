@@ -96,7 +96,8 @@ class PaymentServiceTest {
   void capturedWithWrongAmountIsNotAccepted() {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     service.handleWebhook("fake", body("e2", "captured", "fake_" + orderId, 4999), Map.of("x-fake-signature", "ok"));
-    verify(repo).setStatus(eq(paymentId), eq("FAILED"), any(), eq("amount mismatch"), any());
+    verify(repo).setStatus(eq(paymentId), eq("MISMATCH"), any(), eq("amount mismatch"), any());
+    verify(repo).insertRefund(eq(paymentId), eq(4999L), eq("PENDING"), any(), eq("amount mismatch"), any());
     verify(events, never()).publishEvent(any(Object.class));
   }
 
@@ -117,10 +118,28 @@ class PaymentServiceTest {
   }
 
   @Test
-  void failedEventPublishesFailure() {
+  void failedAttemptKeepsThePaymentOpenForARetry() {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     service.handleWebhook("fake", body("e5", "failed", "fake_" + orderId, 0), Map.of("x-fake-signature", "ok"));
-    verify(events).publishEvent(new PaymentEvents.PaymentFailed(orderId, "declined"));
+    verify(repo).setStatus(eq(paymentId), eq("CREATED"), any(), eq("declined"), any());
+    verify(events, never()).publishEvent(any(Object.class));
+  }
+
+  @Test
+  void aCaptureAfterAFailedAttemptIsStillHonoured() {
+    when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
+    service.handleWebhook("fake", body("e5", "failed", "fake_" + orderId, 0), Map.of("x-fake-signature", "ok"));
+    service.handleWebhook("fake", body("e6", "captured", "fake_" + orderId, 5000), Map.of("x-fake-signature", "ok"));
+    verify(events).publishEvent(new PaymentEvents.PaymentCaptured(orderId, "pay_e6"));
+  }
+
+  @Test
+  void aCaptureOfTheWrongAmountIsQueuedForRefund() {
+    when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
+    service.handleWebhook("fake", body("e7", "captured", "fake_" + orderId, 4900), Map.of("x-fake-signature", "ok"));
+    verify(repo).setStatus(eq(paymentId), eq("MISMATCH"), eq("pay_e7"), any(), any());
+    verify(repo).insertRefund(eq(paymentId), eq(4900L), eq("PENDING"), any(), eq("amount mismatch"), any());
+    verify(events, never()).publishEvent(any(Object.class));
   }
 
   @Test
@@ -129,8 +148,8 @@ class PaymentServiceTest {
     assertFalse(service.refund(orderId, "x"));
     when(repo.latestForOrder(orderId)).thenReturn(Optional.of(payment("CAPTURED", 5000)));
     assertTrue(service.refund(orderId, "cancelled"));
-    assertEquals(List.of("pay_1:5000"), gateway.refunds);
-    verify(repo).insertRefund(eq(paymentId), eq(5000L), eq("ISSUED"), eq("refund_pay_1"), eq("cancelled"), any());
+    assertEquals(List.of(), gateway.refunds, "the provider is not called inside the cancel");
+    verify(repo).insertRefund(eq(paymentId), eq(5000L), eq("PENDING"), any(), eq("cancelled"), any());
     verify(repo).setStatus(eq(paymentId), eq("REFUNDED"), any(), any(), any());
   }
 

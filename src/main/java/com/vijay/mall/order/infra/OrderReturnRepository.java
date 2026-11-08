@@ -1,0 +1,87 @@
+package com.vijay.mall.order.infra;
+
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+@Repository
+public class OrderReturnRepository {
+  /** A line of a return: which order line, how many pieces, what was refunded for them, and whether they went back on the shelf. */
+  public record Line(UUID orderItemId, int qty, long refundPaise, boolean restocked) {}
+
+  public record Return(UUID id, UUID orderId, String reason, long refundPaise, String refundMode, int coinsClawedBack,
+                       int coinsRestored, UUID createdBy, Instant createdAt, List<Line> lines) {}
+
+  /** What earlier returns of one order already moved, so a new return only moves its own share. */
+  public record Totals(long refundPaise, int coinsClawedBack, int coinsRestored) {}
+
+  private final OrderReturnJpa returns;
+  private final OrderReturnItemJpa lines;
+  private final OrderItemJpa orderItems;
+
+  OrderReturnRepository(OrderReturnJpa returns, OrderReturnItemJpa lines, OrderItemJpa orderItems) {
+    this.returns = returns;
+    this.lines = lines;
+    this.orderItems = orderItems;
+  }
+
+  private List<Return> withLines(List<OrderReturnEntity> found) {
+    Map<UUID, List<Line>> byReturn = found.isEmpty() ? Map.of() : lines.findByReturnIdIn(found.stream().map(r -> r.id).toList()).stream()
+        .collect(Collectors.groupingBy(l -> l.returnId, Collectors.mapping(
+            l -> new Line(l.orderItemId, l.qty, l.refundPaise, l.restocked), Collectors.toList())));
+    return found.stream().map(r -> new Return(r.id, r.orderId, r.reason, r.refundPaise, r.refundMode, r.coinsClawedBack,
+        r.coinsRestored, r.createdBy, r.createdAt, byReturn.getOrDefault(r.id, List.of()))).toList();
+  }
+
+  public Optional<Return> findByIdem(String key) {
+    return returns.findByIdemKey(key).map(r -> withLines(List.of(r)).get(0));
+  }
+
+  public Optional<Return> find(UUID id) { return returns.findById(id).map(r -> withLines(List.of(r)).get(0)); }
+
+  public List<Return> forOrder(UUID orderId) { return withLines(returns.findByOrderIdOrderByCreatedAtAsc(orderId)); }
+
+  public Totals totals(UUID orderId) {
+    Object[] t = returns.totalsFor(orderId).get(0);
+    return new Totals(((Number) t[0]).longValue(), ((Number) t[1]).intValue(), ((Number) t[2]).intValue());
+  }
+
+  /** False when another return took the pieces first (the line would end up with more returned than sold). */
+  @Transactional
+  public boolean addReturned(UUID orderItemId, int qty) { return orderItems.addReturned(orderItemId, qty) == 1; }
+
+  /** Flushes at once so a repeated idempotency key fails here, inside the caller's transaction. */
+  @Transactional
+  public UUID insert(UUID id, UUID orderId, String idemKey, String reason, long refundPaise, String refundMode, int clawed, int restored,
+                     UUID actor, Collection<Line> items, Instant now) {
+    OrderReturnEntity e = new OrderReturnEntity();
+    e.id = id;
+    e.orderId = orderId;
+    e.idemKey = idemKey;
+    e.reason = reason;
+    e.refundPaise = refundPaise;
+    e.refundMode = refundMode;
+    e.coinsClawedBack = clawed;
+    e.coinsRestored = restored;
+    e.createdBy = actor;
+    e.createdAt = now;
+    returns.saveAndFlush(e);
+    for (Line l : items) {
+      OrderReturnItemEntity i = new OrderReturnItemEntity();
+      i.id = UUID.randomUUID();
+      i.returnId = e.id;
+      i.orderItemId = l.orderItemId();
+      i.qty = l.qty();
+      i.refundPaise = l.refundPaise();
+      i.restocked = l.restocked();
+      lines.save(i);
+    }
+    return e.id;
+  }
+}

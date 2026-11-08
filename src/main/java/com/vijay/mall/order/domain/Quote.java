@@ -28,7 +28,17 @@ public record Quote(List<Line> lines, long subtotalPaise, String couponCode, lon
   @Schema(name = "QuoteLine")
   public record Line(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise,
                      boolean coinRedeemable, boolean earnsCoins, String nameGu, String unitLabel, UUID categoryId,
-                     long couponDiscountPaise) {
+                     long couponDiscountPaise, UUID flashSaleId, long listPricePaise, long flashDiscountPaise) {
+    /**
+     * A line that is not on a flash sale. For a flash sale line, flashSaleId is set, listPricePaise is the normal unit price and
+     * flashDiscountPaise what the sale takes off the whole line; otherwise listPricePaise equals unitPricePaise and the discount is 0.
+     */
+    public Line(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise,
+                boolean coinRedeemable, boolean earnsCoins, String nameGu, String unitLabel, UUID categoryId,
+                long couponDiscountPaise) {
+      this(productId, name, qty, unitPricePaise, lineTotalPaise, coinRedeemable, earnsCoins, nameGu, unitLabel, categoryId,
+          couponDiscountPaise, null, unitPricePaise, 0);
+    }
     /** A line with no category or coupon share. */
     public Line(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise,
                 boolean coinRedeemable, boolean earnsCoins, String nameGu, String unitLabel) {

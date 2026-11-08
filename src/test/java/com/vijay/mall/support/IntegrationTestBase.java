@@ -35,9 +35,14 @@ public abstract class IntegrationTestBase {
     r.add("spring.datasource.password", PG::getPassword);
     r.add("app.rate-limit.otp-per-ip-hour", () -> 100000); // every test logs in from the same address
     r.add("app.rate-limit.api-per-minute", () -> 100000);
+    r.add("app.rate-limit.otp-per-email-hour", () -> 100000); // the admin signs in again in nearly every test
+    r.add("app.rate-limit.otp-per-mobile-hour", () -> 100000);
+    r.add("management.server.port", () -> 0); // metrics and health on a random private port, so several test contexts can coexist
   }
 
   @LocalServerPort int port;
+
+  @org.springframework.boot.test.web.server.LocalManagementPort protected int managementPort;
 
   @org.springframework.beans.factory.annotation.Autowired protected org.springframework.jdbc.core.JdbcTemplate jdbc;
 
@@ -59,8 +64,24 @@ public abstract class IntegrationTestBase {
       if (token != null) h.setBearerAuth(token);
       if (idempotencyKey != null) h.set("Idempotency-Key", idempotencyKey);
     });
-    return (body == null ? spec : spec.contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body))
-        .retrieve().toEntity(Map.class);
+    var raw = (body == null ? spec : spec.contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body))
+        .retrieve().toEntity(String.class);
+    return new ResponseEntity<>(parse(raw.getBody()), raw.getHeaders(), raw.getStatusCode());
+  }
+
+  private static final tools.jackson.databind.json.JsonMapper MAPPER = tools.jackson.databind.json.JsonMapper.builder().build();
+
+  /** A JSON object becomes a Map, a JSON array becomes {"_array": [...]} (so status checks work on list endpoints), anything else null. */
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  private static Map parse(String text) {
+    if (text == null || text.isBlank()) return null;
+    try {
+      var node = MAPPER.readTree(text);
+      if (node.isArray()) return Map.of("_array", MAPPER.convertValue(node, List.class));
+      return node.isObject() ? MAPPER.convertValue(node, Map.class) : null;
+    } catch (RuntimeException e) {
+      return null;
+    }
   }
 
   @SuppressWarnings("rawtypes")

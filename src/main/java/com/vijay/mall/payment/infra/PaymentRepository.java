@@ -15,6 +15,10 @@ public class PaymentRepository {
 
   public record Setting(String code, boolean enabled) {}
 
+  /** A refund waiting to be sent to the provider. */
+  public record PendingRefund(UUID id, UUID paymentId, String provider, String providerRef, long amountPaise, String reason,
+                              int attempts) {}
+
   private final PaymentJpa payments;
   private final PaymentEventJpa events;
   private final RefundJpa refunds;
@@ -84,6 +88,62 @@ public class PaymentRepository {
     return true;
   }
 
+  /** A refund as the admin sees it. */
+  public record RefundRow(UUID id, UUID paymentId, UUID orderId, long amountPaise, String status, int attempts, String lastError,
+                          String reason, Instant createdAt) {}
+
+  /** Refunds not failed, so far, for one payment: what has been or will be paid back. */
+  public long refundedSoFar(UUID paymentId) { return refunds.committedTo(paymentId); }
+
+  /** Newest first; status null means every refund. */
+  public com.vijay.mall.common.Page<RefundRow> refundPage(String status, int page, int size) {
+    PageRequest req = PageRequest.of(page, size);
+    var r = status == null ? refunds.findAllByOrderByCreatedAtDesc(req) : refunds.findByStatusOrderByCreatedAtDesc(status, req);
+    List<RefundRow> rows = r.getContent().stream().map(x -> new RefundRow(x.id, x.paymentId,
+        payments.findById(x.paymentId).map(p -> p.orderId).orElse(null), x.amountPaise, x.status, x.attempts, x.lastError, x.reason,
+        x.createdAt)).toList();
+    return new com.vijay.mall.common.Page<>(rows, page, size, r.getTotalElements());
+  }
+
+  /** How many refunds are in this state (PENDING, PROCESSING, ISSUED, FAILED). */
+  public long countRefunds(String status) { return refunds.countByStatus(status); }
+
+  @Transactional
+  public boolean requeueFailedRefund(UUID id, Instant now) { return refunds.requeueFailed(id, now) == 1; }
+
+  /** Refunds queued by an order cancel or a bad payment, oldest first. */
+  public List<PendingRefund> pendingRefunds(int limit) {
+    return refunds.pending(PageRequest.of(0, limit)).stream().flatMap(r -> payments.findById(r.paymentId).stream()
+        .map(p -> new PendingRefund(r.id, p.id, p.provider, p.providerRef, r.amountPaise, r.reason, r.attempts))).toList();
+  }
+
+  @Transactional
+  public boolean claimRefund(UUID id, Instant now) { return refunds.claim(id, now) == 1; }
+
+  @Transactional
+  public int requeueStuckRefunds(Instant before, Instant now) { return refunds.requeueStuck(before, now); }
+
+  @Transactional
+  public void refundIssued(UUID id, String providerRef, Instant now) {
+    refunds.findById(id).ifPresent(r -> {
+      r.status = "ISSUED";
+      r.providerRef = providerRef;
+      r.lastError = null;
+      r.updatedAt = now;
+    });
+  }
+
+  /** Back to the queue for another try, or FAILED (needs a human) once the tries run out. */
+  @Transactional
+  public void refundFailed(UUID id, String error, int maxAttempts, Instant now) {
+    refunds.findById(id).ifPresent(r -> {
+      r.attempts++;
+      r.status = r.attempts >= maxAttempts ? "FAILED" : "PENDING";
+      r.lastError = error == null ? null : error.substring(0, Math.min(error.length(), 500));
+      r.updatedAt = now;
+    });
+  }
+
   @Transactional
   public void insertRefund(UUID paymentId, long amount, String status, String ref, String reason, Instant now) {
     RefundEntity e = new RefundEntity();
@@ -94,6 +154,7 @@ public class PaymentRepository {
     e.providerRef = ref;
     e.reason = reason;
     e.createdAt = now;
+    e.updatedAt = now;
     refunds.save(e);
   }
 

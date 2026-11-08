@@ -86,4 +86,57 @@ class NotificationServiceTest {
     service.on(msg("ORDER_STATUS", "{\"orderNo\":\"1\",\"userId\":\"" + customer + "\",\"status\":\"PACKED\"}"));
     verify(repo).insert(eq(customer), any(), any(), any(), any(), any());
   }
+
+  // ---------- stock alerts ----------
+  private final com.vijay.mall.catalog.app.CatalogService catalog = mock(com.vijay.mall.catalog.app.CatalogService.class);
+  private final com.vijay.mall.inventory.app.InventoryService inventory = mock(com.vijay.mall.inventory.app.InventoryService.class);
+  private final UUID rice = UUID.randomUUID();
+  private final UUID dal = UUID.randomUUID();
+
+  @Test
+  void lowStockTellsEveryStaffMemberWhichProductsAreLow() {
+    service.setStockSources(catalog, inventory);
+    when(profiles.staffIds()).thenReturn(List.of(admin));
+    when(catalog.activeNames(any())).thenReturn(java.util.Map.of(rice, "Rice", dal, "Dal"));
+    service.on(msg("LOW_STOCK", "{\"items\":[{\"productId\":\"" + rice + "\",\"qty\":3,\"low\":5},{\"productId\":\""
+        + dal + "\",\"qty\":4,\"low\":5}]}"));
+    verify(repo).insert(admin, "Low stock", "Rice: 3 left, Dal: 4 left", "STOCK", rice.toString(), NOW);
+  }
+
+  @Test
+  void runningOutIsCalledOutOfStockAndLongListsAreShortened() {
+    service.setStockSources(catalog, inventory);
+    when(profiles.staffIds()).thenReturn(List.of(admin));
+    var ids = java.util.stream.IntStream.range(0, 5).mapToObj(i -> UUID.randomUUID()).toList();
+    var names = new java.util.LinkedHashMap<UUID, String>();
+    ids.forEach(id -> names.put(id, "P" + names.size()));
+    when(catalog.activeNames(any())).thenReturn(names);
+    String items = ids.stream().map(id -> "{\"productId\":\"" + id + "\",\"qty\":" + (id.equals(ids.get(0)) ? 0 : 2) + ",\"low\":5}")
+        .collect(java.util.stream.Collectors.joining(","));
+    service.on(msg("LOW_STOCK", "{\"items\":[" + items + "]}"));
+    verify(repo).insert(admin, "Out of stock", "P0: 0 left, P1: 2 left, P2: 2 left (+2 more)", "STOCK", ids.get(0).toString(), NOW);
+  }
+
+  @Test
+  void retiredProductsDoNotRaiseAlerts() {
+    service.setStockSources(catalog, inventory);
+    when(catalog.activeNames(any())).thenReturn(java.util.Map.of());
+    service.on(msg("LOW_STOCK", "{\"items\":[{\"productId\":\"" + rice + "\",\"qty\":0,\"low\":5}]}"));
+    verifyNoInteractions(repo, push);
+  }
+
+  @Test
+  void morningDigestListsWhatIsStillLowAndStaysQuietWhenNothingIs() {
+    service.setStockSources(catalog, inventory);
+    when(profiles.staffIds()).thenReturn(List.of(admin));
+    when(inventory.lowStock(200)).thenReturn(List.of());
+    service.lowStockDigest();
+    verifyNoInteractions(repo);
+
+    when(inventory.lowStock(200)).thenReturn(List.of(new com.vijay.mall.inventory.infra.InventoryRepository.Stock(rice, 0, 5),
+        new com.vijay.mall.inventory.infra.InventoryRepository.Stock(dal, 2, 5)));
+    when(catalog.activeNames(any())).thenReturn(java.util.Map.of(rice, "Rice", dal, "Dal"));
+    service.lowStockDigest();
+    verify(repo).insert(admin, "2 products need restocking", "Rice: 0 left, Dal: 2 left", "STOCK", null, NOW);
+  }
 }

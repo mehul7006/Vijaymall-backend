@@ -35,10 +35,17 @@ public class RequestLogFilter extends OncePerRequestFilter {
     } finally {
       long ms = (System.nanoTime() - start) / 1_000_000;
       int status = res.getStatus();
+      // The message stays readable for people; the key/value pairs become separate fields in the JSON log, so Grafana/Loki
+      // can filter and chart on status, duration, user... without parsing text.
       String line = "{} {} -> {} in {}ms ip={}";
-      Object[] args = {req.getMethod(), req.getRequestURI(), status, ms, RateLimitFilter.clientIp(req)};
-      if (status >= 500 || ms >= SLOW_MS) log.warn(line, args);
-      else log.info(line, args);
+      String ip = RateLimitFilter.clientIp(req);
+      var event = status >= 500 || ms >= SLOW_MS ? log.atWarn() : log.atInfo();
+      event = event.setMessage(line).addArgument(req.getMethod()).addArgument(req.getRequestURI()).addArgument(status)
+          .addArgument(ms).addArgument(ip).addKeyValue("http.method", req.getMethod()).addKeyValue("http.path", req.getRequestURI())
+          .addKeyValue("http.status", status).addKeyValue("durationMs", ms).addKeyValue("clientIp", ip);
+      Object user = req.getAttribute(UserMdcFilter.USER);
+      if (user != null) event = event.addKeyValue("userId", user).addKeyValue("role", req.getAttribute(UserMdcFilter.ROLE));
+      event.log();
     }
   }
 }

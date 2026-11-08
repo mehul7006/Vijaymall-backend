@@ -1,7 +1,8 @@
 logging:
   level:
-    root: INFO
-    com.vijay.mall: INFO
+    # Change at runtime with LOG_LEVEL_ROOT / LOG_LEVEL_APP (for example DEBUG while chasing a problem), no rebuild needed.
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.vijay.mall: ${LOG_LEVEL_APP:INFO}
     access: INFO
   structured:
     format:
@@ -11,9 +12,16 @@ logging:
     name: ${LOG_DIR:./logs}/mall.log
   logback:
     rollingpolicy:
+      # Rolled every day (the %d date) and also when a day's file passes 20MB (%i = 0, 1, 2 ... within the day), then gzipped.
+      # Spring Boot property names: logging.logback.rollingpolicy.* (file-name-pattern, max-file-size, max-history, total-size-cap).
+      file-name-pattern: ${LOG_DIR:./logs}/mall.%d{yyyy-MM-dd}.%i.log.gz
       max-file-size: 20MB
-      max-history: 30
-      total-size-cap: 1GB
+      # Days of rotated files to keep: 7, 15 or 30. The admin can change it at run time (config screen, LogSettingsApplier).
+      max-history: ${LOG_RETENTION_DAYS:30}
+      # A safety net only; it must be bigger than what the retention days need, or it would delete files before the days are up.
+      # 30 days x about 100MB a day = about 3GB before gzip (far less after it), so 5GB leaves room for busy days.
+      total-size-cap: 5GB
+      clean-history-on-start: true
 springdoc:
   swagger-ui:
     enabled: false

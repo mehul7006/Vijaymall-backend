@@ -48,10 +48,15 @@ class DevDataSeederTest {
     when(catalog.categories()).thenReturn(List.of());
     when(catalog.createCategory(anyString(), anyString(), anyInt(), anyBoolean()))
         .thenAnswer(i -> new Category(UUID.randomUUID(), i.getArgument(0), i.getArgument(1), null, i.getArgument(2)));
+    when(catalog.create(any(), any())).thenAnswer(i -> {
+      var product = mock(com.vijay.mall.catalog.domain.AdminProduct.class);
+      when(product.id()).thenReturn(UUID.randomUUID());
+      return product;
+    });
     seeder.run();
     verify(catalog, times(5)).createCategory(anyString(), anyString(), anyInt(), anyBoolean());
     var products = ArgumentCaptor.forClass(CatalogService.ProductInput.class);
-    verify(catalog, times(12)).create(products.capture(), any());
+    verify(catalog, times(13)).create(products.capture(), any());
     assertThat(products.getAllValues()).extracting(CatalogService.ProductInput::nameEn)
         .contains("Basmati Rice", "Toothpaste", "Potato Chips", "Digestive Biscuits", "Bath Soap");
     assertThat(products.getAllValues()).allSatisfy(p -> assertThat(p.pricePaise()).isLessThanOrEqualTo(p.mrpPaise()));

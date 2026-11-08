@@ -14,6 +14,7 @@ class UserEntity extends BaseEntity {
   String name;
   String mobile;
   boolean mobileVerified;
+  String approvalPinHash;
   String role;
   String status;
   String source = "APP";

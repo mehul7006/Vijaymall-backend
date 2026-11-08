@@ -40,8 +40,9 @@ public class UserRepository {
   public void updateProfile(UUID id, String name, String mobile, Instant now) {
     jpa.findById(id).ifPresent(e -> {
       e.name = name;
-      // A verified number is only ever replaced by another number, never blanked by a name-only update.
-      if (!(e.mobileVerified && mobile == null)) {
+      // A verified number is only ever replaced by another number, never blanked by a name-only update. An account with no
+      // e-mail keeps its number too: blanking it would leave the account with no way to sign in (and break the contact rule).
+      if (!((e.mobileVerified || e.email == null) && mobile == null)) {
         if (!java.util.Objects.equals(e.mobile, mobile)) e.mobileVerified = false;
         e.mobile = mobile;
       }
@@ -133,6 +134,45 @@ public class UserRepository {
   public List<User> byRole(String role) {
     return jpa.findByRoleOrderByCreatedAtDesc(role).stream().map(UserRepository::toDomain).toList();
   }
+
+  /**
+   * Strips everything that identifies a customer but keeps the row, so bills and orders (which the shop must keep for
+   * tax records) still point at a valid, nameless account that can no longer sign in.
+   */
+  @Transactional
+  public void anonymize(UUID id, Instant now) {
+    jpa.findById(id).ifPresent(e -> {
+      e.email = "deleted-" + id + "@deleted.invalid";
+      e.name = null;
+      e.mobile = null;
+      e.mobileVerified = false;
+      e.status = "BLOCKED";
+      e.updatedAt = now;
+    });
+  }
+
+  /** What the admin sees about a customer beyond the public profile. */
+  public record Detail(User user, String status, boolean mobileVerified, String source, Instant createdAt) {}
+
+  public Optional<Detail> detail(UUID id) {
+    return jpa.findById(id).map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt));
+  }
+
+  /** Customers (not staff, not deleted accounts), newest first; q matches part of the name, e-mail or mobile number. */
+  public com.vijay.mall.common.Page<Detail> searchCustomers(String q, int page, int size) {
+    String text = q == null ? "" : q.strip().toLowerCase();
+    var found = jpa.searchCustomers(text, "%" + text.replace("%", "").replace("_", "") + "%", org.springframework.data.domain.PageRequest.of(page, size));
+    return new com.vijay.mall.common.Page<>(found.getContent().stream()
+        .map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt)).toList(), page, size, found.getTotalElements());
+  }
+
+  /** An active admin and the hash of their manager-approval PIN. */
+  public record AdminPin(UUID id, String hash) {}
+
+  @Transactional
+  public void setApprovalPin(UUID id, String hash) { jpa.findById(id).ifPresent(e -> e.approvalPinHash = hash); }
+
+  public List<AdminPin> adminPins() { return jpa.adminsWithPin().stream().map(e -> new AdminPin(e.id, e.approvalPinHash)).toList(); }
 
   @Transactional
   public void setStatus(UUID id, String status) { jpa.findById(id).ifPresent(e -> e.status = status); }

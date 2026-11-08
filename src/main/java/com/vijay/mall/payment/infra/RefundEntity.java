@@ -15,6 +15,9 @@ class RefundEntity extends BaseEntity {
   String providerRef;
   String reason;
   Instant createdAt;
+  int attempts;
+  String lastError;
+  Instant updatedAt;
 
   protected RefundEntity() {}
 }

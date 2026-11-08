@@ -22,4 +22,8 @@ interface AddressJpa extends JpaRepository<AddressEntity, UUID> {
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query("delete from AddressEntity a where a.id = :id and a.userId = :user")
   int deleteOwned(@Param("id") UUID id, @Param("user") UUID user);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query("delete from AddressEntity a where a.userId = :user")
+  int deleteAllOf(@Param("user") UUID user);
 }

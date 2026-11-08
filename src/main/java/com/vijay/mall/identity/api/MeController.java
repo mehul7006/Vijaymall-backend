@@ -30,8 +30,17 @@ public class MeController {
   public record DeviceInput(@NotBlank String fcmToken, @NotBlank String platform) {}
 
   private final ProfileService profile;
+  private final com.vijay.mall.identity.app.AccountDeletionService deletion;
 
-  public MeController(ProfileService profile) { this.profile = profile; }
+  public MeController(ProfileService profile, com.vijay.mall.identity.app.AccountDeletionService deletion) {
+    this.profile = profile;
+    this.deletion = deletion;
+  }
+
+  /** Erases the signed-in customer's personal data. Refused while orders are open or credit is owed. */
+  @DeleteMapping
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void deleteAccount() { deletion.deleteAccount(CurrentUser.id()); }
 
   @GetMapping
   public User me() { return profile.get(CurrentUser.id()); }

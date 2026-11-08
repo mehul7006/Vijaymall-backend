@@ -52,6 +52,10 @@ public class PosSaleRepository {
     e.couponDiscountPaise = s.couponDiscountPaise();
     e.coinsUsed = s.coinsUsed();
     e.coinDiscountPaise = s.coinDiscountPaise();
+    e.manualDiscountPaise = s.manualDiscountPaise();
+    e.roundOffPaise = s.roundOffPaise();
+    e.manualDiscountReason = s.manualDiscountReason() == null ? "" : s.manualDiscountReason();
+    e.manualDiscountApprover = s.manualDiscountApprover();
     e.totalPaise = s.totalPaise();
     e.taxablePaise = s.taxablePaise();
     e.cgstPaise = s.cgstPaise();
@@ -184,7 +188,8 @@ public class PosSaleRepository {
     return list.stream().map(s -> new SaleRecord(s.id, s.invoiceNo, s.cashierId, s.customerId, s.customerMobile,
         s.subtotalPaise, s.couponCode, s.couponDiscountPaise, s.coinsUsed, s.coinDiscountPaise, s.totalPaise,
         s.taxablePaise, s.cgstPaise, s.sgstPaise, s.coinsEarned, s.tenderedPaise, s.changePaise, s.createdAt,
-        lines.getOrDefault(s.id, List.of()), pays.getOrDefault(s.id, List.of()), s.paymentType)).toList();
+        lines.getOrDefault(s.id, List.of()), pays.getOrDefault(s.id, List.of()), s.paymentType,
+        s.manualDiscountPaise, s.manualDiscountReason == null ? "" : s.manualDiscountReason, s.manualDiscountApprover, s.roundOffPaise)).toList();
   }
 
   private static SaleItemRecord toItem(PosSaleItemEntity i) {

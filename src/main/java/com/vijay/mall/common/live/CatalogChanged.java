@@ -12,4 +12,6 @@ public record CatalogChanged(String area, Instant at) {
   public static final String UNITS = "UNITS";
   public static final String SHOP = "SHOP";
   public static final String PAYMENT_METHODS = "PAYMENT_METHODS";
+  /** Flash sales (created, changed, started, ended): the app refetches the sale list and the product prices. */
+  public static final String FLASH = "FLASH";
 }

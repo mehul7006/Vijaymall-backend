@@ -92,7 +92,7 @@ class OtpServiceTest {
 
   @Test
   void missingOtpSettingsMeanRandomCodes() {
-    var props = new AppProps(null, null, null, null, null, null);
+    var props = new AppProps(null, new AppProps.Otp("console", "test-pepper-test-pepper", null, "x@y.z"), null, null, null, null);
     new OtpService(repo, sender, props, clock, limiter, 20).send("a@b.com", "ip");
     var code = org.mockito.ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq("a@b.com"), code.capture());

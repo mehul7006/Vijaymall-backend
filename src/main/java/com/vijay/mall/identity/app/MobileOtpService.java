@@ -30,6 +30,10 @@ public class MobileOtpService {
   private final RateLimiter limiter;
   private final int ipPerHour;
   private final SecureRandom random = new SecureRandom();
+  private int perMobileHour = 5;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setPerMobileHour(@Value("${app.rate-limit.otp-per-mobile-hour:5}") int n) { this.perMobileHour = n; }
 
   public MobileOtpService(OtpRepository repo, SmsOtpSender sender, AppProps props, Clock clock, RateLimiter limiter,
                           @Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
@@ -54,7 +58,7 @@ public class MobileOtpService {
   public void send(String rawMobile, String ip) {
     String mobile = require(rawMobile);
     // SMS costs money: a tight limit per number and the same per-address budget as email codes.
-    limiter.check("otp-mobile:" + mobile, 5, 3600);
+    limiter.check("otp-mobile:" + mobile, perMobileHour, 3600);
     limiter.check("otp-ip:" + ip, ipPerHour, 3600);
     String fixed = props.otp().fixedCode();
     String code = (fixed != null && !fixed.isBlank()) ? fixed : String.format("%05d", random.nextInt(100000));

@@ -36,12 +36,59 @@ class OrderCancelIT extends IntegrationTestBase {
     int before = stock(admin, pid);
 
     String id = place(cust, pid, 2);
-    assertThat(stock(admin, pid)).isEqualTo(before - 2);
+    assertThat(stock(admin, pid)).as("a placed order takes no stock yet").isEqualTo(before);
+    post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CONFIRMED"));
+    assertThat(stock(admin, pid)).as("confirming takes it").isEqualTo(before - 2);
 
     var res = post("/api/v1/orders/" + id + "/cancel", cust, null);
     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(res.getBody().get("status")).isEqualTo("CANCELLED");
     assertThat(stock(admin, pid)).isEqualTo(before);
+  }
+
+  @Test
+  void cancellingBeforeConfirmationNeverTouchesStock() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    Object pid = productByName(cust, "Potato Chips").get("id");
+    int before = stock(admin, pid);
+    String id = place(cust, pid, 2);
+    assertThat(post("/api/v1/orders/" + id + "/cancel", cust, null).getBody().get("status")).isEqualTo("CANCELLED");
+    assertThat(stock(admin, pid)).isEqualTo(before);
+  }
+
+  @Test
+  void rejectingAnOrderExplainsWhyAndGivesStockBack() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    Object pid = productByName(cust, "Potato Chips").get("id");
+    int before = stock(admin, pid);
+    String id = place(cust, pid, 2);
+    post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CONFIRMED"));
+
+    assertThat(post("/api/v1/admin/orders/" + id + "/reject", admin, Map.of("reason", "")).getStatusCode().is4xxClientError()).isTrue();
+    var res = post("/api/v1/admin/orders/" + id + "/reject", admin, Map.of("reason", "sold out at the counter"));
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(res.getBody()).containsEntry("status", "CANCELLED");
+    assertThat(res.getBody().get("cancelReason").toString()).contains("sold out at the counter");
+    assertThat(stock(admin, pid)).isEqualTo(before);
+    assertThat(post("/api/v1/admin/orders/" + id + "/reject", admin, Map.of("reason", "again")).getStatusCode().is4xxClientError())
+        .as("a closed order cannot be rejected twice").isTrue();
+  }
+
+  @Test
+  void confirmingFailsWhenTheShelfWasEmptiedAtTheCounter() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    Object pid = productByName(cust, "Potato Chips").get("id");
+    String id = place(cust, pid, 2);
+    jdbc.update("update inventory set qty_on_hand = 1 where product_id = ?::uuid", pid.toString());
+    var res = post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CONFIRMED"));
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    assertThat(res.getBody().get("code")).isEqualTo("OUT_OF_STOCK");
+    assertThat(get("/api/v1/orders/" + id, cust).getBody().get("status")).isEqualTo("PLACED");
+    assertThat(stock(admin, pid)).isEqualTo(1);
+    restock("Potato Chips", 80);
   }
 
   @Test

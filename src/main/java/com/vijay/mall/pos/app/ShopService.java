@@ -26,7 +26,15 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
     this.clock = clock;
   }
 
-  public ShopSetting get() { return repo.get(); }
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it): the shop details are read on every bill and order, so they are cached. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
+  public ShopSetting get() {
+    return caches == null ? repo.get() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.SHOP, "1", repo::get);
+  }
 
   /** The shop's name, phone, address and number prefix, read from the settings each time so an edit shows at once. */
   private com.vijay.mall.common.live.LiveEvents live;
@@ -37,7 +45,7 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
 
   @Override
   public Info identity() {
-    ShopSetting s = repo.get();
+    ShopSetting s = get();
     return new Info(s.shopName(), s.phone(), s.address(), s.promise() == null ? "" : s.promise(),
         s.details() == null ? "" : s.details(), s.invoicePrefix());
   }

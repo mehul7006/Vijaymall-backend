@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -104,7 +105,8 @@ class OrderServiceTest {
   private OrderRepository.Row row(String status, String method, String payStatus, int coinsUsed, int coinsEarned,
                                   boolean credited, UUID owner) {
     return new OrderRepository.Row(UUID.randomUUID(), "VSM-1001", owner, "DELIVERY", status, 10000, null, 0, coinsUsed,
-        coinsUsed * 100L, 0, 10000, coinsEarned, credited, method, payStatus, null, null, NOW, 3);
+        coinsUsed * 100L, 0, 10000, coinsEarned, credited, method, payStatus, null, null, NOW, 3, null, null,
+        OrderStatus.valueOf(status).holdsStock());
   }
 
   private void stubPlaced(String status) {
@@ -128,7 +130,8 @@ class OrderServiceTest {
     assertEquals(7, o.getValue().coinsEarned());
     verify(repo).insertItem(eq(o.getValue().id()), any());
     verify(repo).insertHistory(eq(o.getValue().id()), eq(null), eq("PLACED"), eq(user), eq(null), any());
-    verify(inventory).reserve(eq(List.of(new InventoryService.Item(product, 2))), eq(o.getValue().id()));
+    verify(inventory).checkAvailable(List.of(new InventoryService.Item(product, 2)));
+    verify(inventory, never()).reserve(anyList(), any());
     verify(wallet).redeem(user, 20, o.getValue().id());
     verify(promotions).consume("FESTIVE50", user, o.getValue().id(), 500);
     verify(payments).start(o.getValue().id(), "VSM-1001", 10000, "COD");
@@ -169,7 +172,7 @@ class OrderServiceTest {
     assertEquals(409, e.status().value());
     assertEquals(q, e.details().get("quote"));
     verify(repo, never()).insert(any());
-    verify(inventory, never()).reserve(any(), any());
+    verify(inventory, never()).checkAvailable(any());
   }
 
   @Test
@@ -205,7 +208,7 @@ class OrderServiceTest {
   @Test
   void outOfStockStopsTheOrderBeforeCoinsAndCouponAreTouched() {
     when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 20, "FESTIVE50"));
-    org.mockito.Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of())).when(inventory).reserve(anyList(), any());
+    org.mockito.Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of())).when(inventory).checkAvailable(anyList());
     assertEquals("OUT_OF_STOCK", assertThrows(ApiException.class,
         () -> service.place(user, "k9", cmd("COD", 10000, addressId, Fulfilment.DELIVERY))).code());
     verify(wallet, never()).redeem(any(), anyInt(), any());
@@ -382,7 +385,73 @@ class OrderServiceTest {
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
     service.on(new PaymentEvents.PaymentFailed(r.id(), "declined"));
-    verify(inventory).release(anyList(), eq(r.id()));
+    verify(inventory, never()).release(anyList(), any()); // it never held stock
+  }
+
+  // ---------- stock is taken when staff confirm ----------
+  private void stubItems(OrderRepository.Row r) {
+    when(repo.find(r.id())).thenReturn(Optional.of(r));
+    when(repo.items(r.id())).thenReturn(List.of(new com.vijay.mall.order.domain.OrderViews.Item(product, "Rice", 2, 5000, 10000)));
+  }
+
+  @Test
+  void confirmingTakesTheStockOnceAndLaterMovesDoNot() {
+    OrderRepository.Row placed = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    stubItems(placed);
+    when(repo.updateStatus(any(), eq("CONFIRMED"), anyLong(), any())).thenReturn(true);
+    service.adminChangeStatus(placed.id(), OrderStatus.CONFIRMED, null, user);
+    verify(inventory).reserve(List.of(new InventoryService.Item(product, 2)), placed.id());
+    verify(repo).setStockReserved(placed.id(), true);
+
+    OrderRepository.Row confirmed = row("CONFIRMED", "COD", "NONE", 0, 7, false, user);
+    stubItems(confirmed);
+    when(repo.updateStatus(any(), eq("PACKED"), anyLong(), any())).thenReturn(true);
+    service.adminChangeStatus(confirmed.id(), OrderStatus.PACKED, null, user);
+    verify(inventory, never()).reserve(anyList(), eq(confirmed.id()));
+  }
+
+  @Test
+  void staffCannotWaveAnUnpaidOnlineOrderThrough() {
+    OrderRepository.Row pending = row("PAYMENT_PENDING", "ONLINE", "INITIATED", 0, 7, false, user);
+    when(repo.find(pending.id())).thenReturn(Optional.of(pending));
+    assertEquals("AWAITING_PAYMENT", assertThrows(ApiException.class,
+        () -> service.adminChangeStatus(pending.id(), OrderStatus.PLACED, null, user)).code());
+    verify(repo, never()).updateStatus(any(), any(), anyLong(), any());
+  }
+
+  @Test
+  void confirmingStopsAndChangesNothingWhenTheShelfIsEmpty() {
+    OrderRepository.Row placed = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    stubItems(placed);
+    org.mockito.Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of())).when(inventory).reserve(anyList(), any());
+    assertEquals("OUT_OF_STOCK", assertThrows(ApiException.class,
+        () -> service.adminChangeStatus(placed.id(), OrderStatus.CONFIRMED, null, user)).code());
+    verify(repo, never()).updateStatus(any(), any(), anyLong(), any());
+    verify(repo, never()).setStockReserved(any(), anyBoolean());
+  }
+
+  @Test
+  void cancellingAnOrderThatNeverHeldStockReleasesNone() {
+    OrderRepository.Row placed = row("PLACED", "COD", "NONE", 0, 7, false, user);
+    stubItems(placed);
+    when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
+    service.customerCancel(user, placed.id());
+    verify(inventory, never()).release(anyList(), any());
+    verify(promotions).release(placed.id());
+  }
+
+  @Test
+  void rejectingNeedsAReasonThenCancelsRefundsAndRecordsWhy() {
+    OrderRepository.Row r = row("CONFIRMED", "ONLINE", "CAPTURED", 0, 7, false, user);
+    stubItems(r);
+    when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
+    when(payments.refund(eq(r.id()), anyString())).thenReturn(true);
+    when(profiles.get(any())).thenReturn(new User(user, "a@b.c", "A", null, "CUSTOMER"));
+    assertThrows(ApiException.class, () -> service.adminReject(r.id(), "  ", user));
+    service.adminReject(r.id(), "sold out", user);
+    verify(inventory).release(List.of(new InventoryService.Item(product, 2)), r.id());
+    verify(payments).refund(eq(r.id()), anyString());
+    verify(repo).setCancelReason(r.id(), "Rejected by shop: sold out");
   }
 
   @Test

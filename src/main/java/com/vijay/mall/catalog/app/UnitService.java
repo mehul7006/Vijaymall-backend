@@ -31,7 +31,15 @@ public class UnitService {
   }
 
   /** Units a product can be given (for the pickers and the customer app). */
-  public List<UnitOfMeasure> active() { return units.allActive(); }
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
+  public List<UnitOfMeasure> active() {
+    return caches == null ? units.allActive() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.UNITS, "active", units::allActive);
+  }
 
   /** Every unit, including switched-off ones, for the admin list. */
   public List<UnitOfMeasure> all() { return units.all(); }

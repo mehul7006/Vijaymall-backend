@@ -74,6 +74,16 @@ public class ReportSummaryService {
   @Transactional(readOnly = true)
   public Summary summary(String period, LocalDate from, LocalDate to) {
     Range r = range(period, from, to, clock.instant().atZone(SHOP).toLocalDate());
+    return caches == null ? compute(r) : caches.get(com.vijay.mall.common.cache.AppCaches.Name.REPORT_SUMMARY, r.from() + "/" + r.to(), () -> compute(r));
+  }
+
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it): a date range report is heavy to add up, so it is kept for a minute. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
+  private Summary compute(Range r) {
     Instant f = r.from().atStartOfDay(SHOP).toInstant();
     Instant t = r.to().plusDays(1).atStartOfDay(SHOP).toInstant();
 

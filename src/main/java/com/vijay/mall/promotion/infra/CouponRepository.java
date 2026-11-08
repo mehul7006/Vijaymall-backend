@@ -40,7 +40,7 @@ public class CouponRepository {
   private List<Coupon> toDomains(List<CouponEntity> list) {
     if (list.isEmpty()) return List.of();
     Map<UUID, List<UUID>> byCoupon = new HashMap<>();
-    categories.findByCouponIdIn(list.stream().map(e -> e.id).toList())
+    categories.findByCouponIdInOrderByCategoryId(list.stream().map(e -> e.id).toList())
         .forEach(r -> byCoupon.computeIfAbsent(r.couponId, k -> new ArrayList<>()).add(r.categoryId));
     return list.stream().map(e -> toDomain(e, byCoupon)).toList();
   }

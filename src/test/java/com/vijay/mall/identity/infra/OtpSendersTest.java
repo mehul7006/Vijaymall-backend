@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
-import com.vijay.mall.common.AppProps;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mail.SimpleMailMessage;
@@ -14,8 +13,10 @@ class OtpSendersTest {
   @Test
   void smtpSenderMailsTheCodeWithTheConfiguredFromAddress() {
     JavaMailSender mail = mock(JavaMailSender.class);
-    var props = new AppProps(null, new AppProps.Otp("email", "p", "", "no-reply@shop.test"), null, null, null, null);
-    new SmtpEmailOtpSender(mail, props).send("bob@x.com", "54321");
+    var fs = new FakeSettings().with(com.vijay.mall.config.Settings.OTP_FROM, "no-reply@shop.test");
+    new SmtpEmailOtpSender(fs.settings) {
+      @Override protected JavaMailSender createMailSender(String h, int p, String u, String pw) { return mail; }
+    }.send("bob@x.com", "54321");
     var cap = ArgumentCaptor.forClass(SimpleMailMessage.class);
     verify(mail).send(cap.capture());
     SimpleMailMessage m = cap.getValue();

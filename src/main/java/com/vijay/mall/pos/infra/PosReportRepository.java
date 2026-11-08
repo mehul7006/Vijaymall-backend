@@ -73,4 +73,34 @@ public class PosReportRepository {
         + cashierClause("x", cashier) + " group by p.mode"), from, to, cashier).getResultList();
     return rows.stream().collect(Collectors.toMap(r -> (String) r[0], r -> num(r[1])));
   }
+
+  // ---------- counter controls (loss prevention) ----------
+  public record CashierSales(UUID cashierId, long bills, long totalPaise, long manualDiscounts, long manualDiscountPaise) {}
+
+  public record CashierReturns(UUID cashierId, long notes, long refundPaise) {}
+
+  public record CashierShifts(UUID cashierId, long closed, long variancePaise) {}
+
+  @SuppressWarnings("unchecked")
+  public List<CashierSales> salesByCashier(Instant from, Instant to) {
+    List<Object[]> rows = em.createQuery("select s.cashierId, count(s), sum(s.totalPaise), "
+        + "sum(case when s.manualDiscountPaise > 0 then 1 else 0 end), sum(s.manualDiscountPaise) from PosSaleEntity s "
+        + "where s.createdAt >= :f and s.createdAt < :t group by s.cashierId").setParameter("f", from).setParameter("t", to).getResultList();
+    return rows.stream().map(r -> new CashierSales((UUID) r[0], num(r[1]), num(r[2]), num(r[3]), num(r[4]))).toList();
+  }
+
+  @SuppressWarnings("unchecked")
+  public List<CashierReturns> returnsByCashier(Instant from, Instant to) {
+    List<Object[]> rows = em.createQuery("select x.cashierId, count(x), sum(x.refundPaise) from PosReturnEntity x "
+        + "where x.createdAt >= :f and x.createdAt < :t group by x.cashierId").setParameter("f", from).setParameter("t", to).getResultList();
+    return rows.stream().map(r -> new CashierReturns((UUID) r[0], num(r[1]), num(r[2]))).toList();
+  }
+
+  /** Shifts closed in the period and the total of their cash differences (negative = drawer was short). */
+  @SuppressWarnings("unchecked")
+  public List<CashierShifts> shiftsByCashier(Instant from, Instant to) {
+    List<Object[]> rows = em.createQuery("select h.cashierId, count(h), sum(h.variancePaise) from PosShiftEntity h "
+        + "where h.closedAt >= :f and h.closedAt < :t group by h.cashierId").setParameter("f", from).setParameter("t", to).getResultList();
+    return rows.stream().map(r -> new CashierShifts((UUID) r[0], num(r[1]), num(r[2]))).toList();
+  }
 }

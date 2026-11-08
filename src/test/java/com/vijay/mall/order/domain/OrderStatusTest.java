@@ -15,8 +15,14 @@ class OrderStatusTest {
       }
     }
   }
-  @Test void payment_pending_can_become_anything_but_itself() {
-    assertThat(PAYMENT_PENDING.next(DELIVERY)).doesNotContain(PAYMENT_PENDING).contains(PLACED, CANCELLED, DELIVERED);
+  @Test void payment_pending_only_moves_on_payment_or_cancel() {
+    assertThat(PAYMENT_PENDING.next(DELIVERY)).containsExactlyInAnyOrder(PLACED, CANCELLED);
+  }
+  @Test void stock_is_held_from_confirmed_onwards() {
+    for (var s : new OrderStatus[] {PAYMENT_PENDING, PLACED, CANCELLED}) assertThat(s.holdsStock()).isFalse();
+    for (var s : new OrderStatus[] {CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP}) {
+      assertThat(s.holdsStock()).isTrue();
+    }
   }
   @Test void final_states_have_no_moves() {
     for (var s : new OrderStatus[] {DELIVERED, PICKED_UP, CANCELLED}) {

@@ -24,6 +24,7 @@ class OrderEntity extends BaseEntity {
   long totalPaise;
   int coinsEarned;
   boolean coinsCredited;
+  boolean stockReserved;
   String paymentMethod;
   String paymentStatus;
   String addressSnapshot;

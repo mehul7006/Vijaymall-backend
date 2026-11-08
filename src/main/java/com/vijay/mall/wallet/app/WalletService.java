@@ -55,12 +55,26 @@ public class WalletService {
     }
   }
 
-  public CoinSettings settings() { return repo.settings(); }
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it): coin settings and rules are read on every quote, so they are cached. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
+  private void forget(com.vijay.mall.common.cache.AppCaches.Name name) { if (caches != null) caches.invalidate(name); }
+
+  public CoinSettings settings() {
+    return caches == null ? repo.settings() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COIN_SETTINGS, "1", repo::settings);
+  }
+
+  private List<StoredRule> allRules() {
+    return caches == null ? repo.rules() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES, "all", repo::rules);
+  }
 
   public int balance(UUID userId) { return repo.balance(userId); }
 
   public List<CoinRule> activeRules(Instant now) {
-    return repo.rules().stream().filter(r -> r.isLive(now)).map(StoredRule::rule).toList();
+    return allRules().stream().filter(r -> r.isLive(now)).map(StoredRule::rule).toList();
   }
 
   public Page<WalletRepository.LedgerRow> ledger(UUID userId, int page, int size) {
@@ -92,7 +106,7 @@ public class WalletService {
     if (coins <= 0) return;
     Instant now = clock.instant();
     repo.lockBalance(userId);
-    Instant expires = now.atZone(ZoneOffset.UTC).plusMonths(repo.settings().expiryMonths()).toInstant();
+    Instant expires = now.atZone(ZoneOffset.UTC).plusMonths(settings().expiryMonths()).toInstant();
     if (repo.insertLedger(UUID.randomUUID(), userId, "EARN", coins, coins, expires, orderId, null, "earn:" + orderId, now)) {
       repo.addBalance(userId, coins);
       log.info("Coins credited user={} order={} coins={}", userId, orderId, coins);
@@ -163,6 +177,45 @@ public class WalletService {
     }
   }
 
+  static final int MAX_ADMIN_ADJUST = 100_000;
+
+  /**
+   * A manual correction by the admin (a goodwill gift, or taking back coins given by mistake). A gift gets the normal expiry;
+   * a deduction is taken from the coins that expire soonest and can never take more than the customer has.
+   * Returns the new balance.
+   */
+  @Transactional
+  public int adminAdjust(UUID userId, int delta, UUID actor, String reason) {
+    if (delta == 0 || Math.abs((long) delta) > MAX_ADMIN_ADJUST) {
+      throw ApiException.validation("coins", "a non-zero number up to " + MAX_ADMIN_ADJUST);
+    }
+    Instant now = clock.instant();
+    int balance = repo.lockBalance(userId);
+    UUID ledgerId = UUID.randomUUID();
+    if (delta > 0) {
+      Instant expires = now.atZone(ZoneOffset.UTC).plusMonths(settings().expiryMonths()).toInstant();
+      repo.insertLedger(ledgerId, userId, "ADJUST", delta, delta, expires, null, null, "admin-adjust:" + ledgerId, now);
+      repo.addBalance(userId, delta);
+    } else {
+      int take = -delta;
+      List<LotAllocator.Lot> lots = repo.openLotsForUpdate(userId, now);
+      int spendable = lots.stream().mapToInt(LotAllocator.Lot::remaining).sum();
+      if (balance < take || spendable < take) {
+        throw ApiException.validation("coins", "the customer has only " + Math.min(balance, spendable) + " coins");
+      }
+      repo.insertLedger(ledgerId, userId, "ADJUST", -take, null, null, null, null, "admin-adjust:" + ledgerId, now);
+      for (LotAllocator.Use u : LotAllocator.allocate(lots, take)) {
+        repo.insertLotUse(ledgerId, u.lotId(), u.coins());
+        repo.changeLot(u.lotId(), -u.coins());
+      }
+      repo.addBalance(userId, -take);
+    }
+    audit.log(actor, "COINS_ADJUST", "users", userId, delta + " coins: " + reason);
+    log.info("Coins adjusted by admin user={} delta={} actor={}", userId, delta, actor);
+    changed(userId, "ADJUST", delta);
+    return repo.balance(userId);
+  }
+
   // ---------- jobs ----------
   @Scheduled(cron = "0 0 2 * * *")
   public void expireLots() {
@@ -191,12 +244,13 @@ public class WalletService {
   }
 
   // ---------- admin ----------
-  public List<StoredRule> rules() { return repo.rules(); }
+  public List<StoredRule> rules() { return repo.rules(); } // the admin always sees the stored truth, never a cached copy
 
   @Transactional
   public StoredRule createRule(StoredRule in, UUID actor) {
     UUID id = repo.insertRule(in);
     audit.log(actor, "CREATE", "coin_rule", id, in.rule().name());
+    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
     return repo.rule(id).orElseThrow();
   }
 
@@ -205,6 +259,7 @@ public class WalletService {
     repo.rule(id).orElseThrow(() -> ApiException.notFound("Coin rule"));
     repo.updateRule(id, in);
     audit.log(actor, "UPDATE", "coin_rule", id, in.rule().name());
+    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
     return repo.rule(id).orElseThrow();
   }
 
@@ -212,6 +267,7 @@ public class WalletService {
   public void deleteRule(UUID id, UUID actor) {
     repo.deleteRule(id);
     audit.log(actor, "DELETE", "coin_rule", id, null);
+    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
   }
 
   @Transactional
@@ -221,6 +277,7 @@ public class WalletService {
     if (s.expiryMonths() <= 0) throw ApiException.validation("expiryMonths", "must be positive");
     repo.saveSettings(s);
     audit.log(actor, "UPDATE", "coin_setting", 1, s.toString());
+    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_SETTINGS);
     return repo.settings();
   }
 }

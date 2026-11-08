@@ -64,12 +64,34 @@ public class PosReturnService {
     this.clock = clock;
   }
 
+  /** Cashiers may take back goods from bills this recent; older bills need an admin (0 = no limit). */
+  private int cashierReturnDays = 7;
+  private com.vijay.mall.config.RuntimeSettings settings;
+
+  /** Optional (plain unit tests run without it): the admin can change the return window from the config screen. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+
+  private int returnDays() {
+    return settings != null ? settings.getInt(com.vijay.mall.config.Settings.POS_CASHIER_RETURN_DAYS) : cashierReturnDays;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCashierReturnDays(@org.springframework.beans.factory.annotation.Value("${app.pos.cashier-return-days:7}") int days) {
+    this.cashierReturnDays = days;
+  }
+
+  /** Returns by an admin, who is not held to the cashier's return window. */
   public ReturnRecord refund(UUID cashierId, UUID saleId, String idemKey, ReturnInput in) {
+    return refund(cashierId, true, saleId, idemKey, in);
+  }
+
+  public ReturnRecord refund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
     if (idemKey == null || idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
     Optional<ReturnRecord> existing = sales.findReturnByIdem(idemKey);
     if (existing.isPresent()) return existing.get();
     try {
-      UUID id = tx.execute(s -> doRefund(cashierId, saleId, idemKey, in));
+      UUID id = tx.execute(s -> doRefund(cashierId, admin, saleId, idemKey, in));
       return sales.returnsOf(saleId).stream().filter(r -> r.id().equals(id)).findFirst().orElseThrow();
     } catch (DataIntegrityViolationException e) {
       return sales.findReturnByIdem(idemKey).orElseThrow(() -> e);
@@ -78,8 +100,13 @@ public class PosReturnService {
 
   public List<ReturnRecord> returnsOf(UUID saleId) { return sales.returnsOf(saleId); }
 
-  private UUID doRefund(UUID cashierId, UUID saleId, String idemKey, ReturnInput in) {
+  private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
     SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
+    if (!admin && returnDays() > 0
+        && sale.createdAt().isBefore(clock.instant().minus(returnDays(), java.time.temporal.ChronoUnit.DAYS))) {
+      throw ApiException.unprocessable("RETURN_NEEDS_ADMIN", "This bill is older than " + returnDays()
+          + " days: an admin must take the return", Map.of("days", returnDays()));
+    }
     Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
     Map<UUID, Integer> wanted = merge(in.items(), byId);
     ReturnedSoFar prior = sales.returnedSoFar(saleId, sale.items());

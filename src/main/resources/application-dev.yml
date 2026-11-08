@@ -1,4 +1,6 @@
 app:
+  config:
+    encryption-key: ${CONFIG_ENCRYPTION_KEY:dmlqYXktbWFsbC1kZXYtY29uZmlnLWtleS0zMmJ5ISE=}
   otp:
     channel: console
     sms-channel: console

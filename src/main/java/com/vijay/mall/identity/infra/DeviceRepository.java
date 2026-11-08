@@ -28,4 +28,11 @@ public class DeviceRepository {
   }
 
   public List<String> tokensOf(UUID userId) { return jpa.tokensOf(userId); }
+
+  @Transactional
+  public void deleteAll(UUID userId) { jpa.deleteAllOf(userId); }
+
+  /** Forgets one push token (Firebase said the app was uninstalled or the token is no longer valid). */
+  @Transactional
+  public void deleteToken(String token) { jpa.deleteByToken(token); }
 }

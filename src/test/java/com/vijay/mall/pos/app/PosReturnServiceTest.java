@@ -104,6 +104,19 @@ class PosReturnServiceTest {
     verify(wallet).restore(eq(customer), eq(2), any(UUID.class));
   }
 
+  @Test void cashierCannotTakeBackAnOldBillButAnAdminCan() {
+    service.setCashierReturnDays(7);
+    var old = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, customer, "9000000001", 10000, null, 0, 10, 1000, 9000, 8036, 482,
+        482, 20, null, 0, NOW.minusSeconds(8 * 86400L), sale.items(), List.of());
+    when(sales.lockAndFind(saleId)).thenReturn(Optional.of(old));
+    var in = new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null);
+    var e = org.junit.jupiter.api.Assertions.assertThrows(com.vijay.mall.common.error.ApiException.class,
+        () -> service.refund(cashier, false, saleId, "old1", in));
+    assertThat(e.code()).isEqualTo("RETURN_NEEDS_ADMIN");
+    verify(inventory, org.mockito.Mockito.never()).release(anyList(), any(UUID.class), anyString());
+    assertThat(service.refund(cashier, true, saleId, "old2", in).refundPaise()).isEqualTo(2250);
+  }
+
   @Test void fullReturn_refundsAllNet_andAllCoins() {
     ReturnRecord r = service.refund(cashier, saleId, "r2", new ReturnInput(List.of(new ReturnLine(itemId, 2), new ReturnLine(itemId, 2)), null,
         List.of(new Pay("UPI", 4000, "x"), new Pay("CASH", 5000, null))));
@@ -186,7 +199,7 @@ class PosReturnServiceTest {
   }
 
   @Test void returnsOf_delegates() {
-    when(sales.returnsOf(saleId)).thenReturn(List.of());
+    org.mockito.Mockito.doReturn(List.of()).when(sales).returnsOf(saleId);
     assertThat(service.returnsOf(saleId)).isEmpty();
   }
 

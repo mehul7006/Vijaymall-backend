@@ -37,6 +37,35 @@ public class InventoryService {
     this.events = events;
   }
 
+  private com.vijay.mall.common.outbox.OutboxService outbox;
+
+  /** Optional (plain unit tests run without it): lets stock changes raise low-stock alerts. */
+  @Autowired(required = false)
+  void setOutbox(com.vijay.mall.common.outbox.OutboxService outbox) { this.outbox = outbox; }
+
+  /**
+   * Raises ONE alert per product each time its stock falls onto or below its alert level (or to zero), so staff hear about
+   * it once, not on every sale while it stays low. Written with the stock change, so a rolled-back sale raises nothing.
+   * {@code taken} is how much each product just lost.
+   */
+  private void alertIfLow(Map<UUID, Integer> taken) {
+    if (outbox == null || taken.isEmpty()) return;
+    List<Map<String, Object>> crossed = new ArrayList<>();
+    stocks(taken.keySet()).forEach((id, s) -> {
+      int before = s.qty() + taken.get(id);
+      boolean empty = s.qty() <= 0 && before > 0;
+      boolean low = s.qty() <= s.low() && before > s.low();
+      if (empty || low) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("productId", id.toString());
+        m.put("qty", s.qty());
+        m.put("low", s.low());
+        crossed.add(m);
+      }
+    });
+    if (!crossed.isEmpty()) outbox.add("LOW_STOCK", Map.of("items", crossed));
+  }
+
   /** Tells open screens that stock moved, once the surrounding transaction commits. */
   private void changed(List<UUID> productIds, String reason) {
     if (events != null && !productIds.isEmpty()) {
@@ -65,6 +94,43 @@ public class InventoryService {
       throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
     }
     changed(items.stream().map(Item::productId).distinct().toList(), reason);
+    Map<UUID, Integer> taken = new LinkedHashMap<>();
+    items.forEach(it -> taken.merge(it.productId(), it.qty(), Integer::sum));
+    alertIfLow(taken);
+  }
+
+  /**
+   * For a sale that has ALREADY happened (a bill rung up while the till was offline): takes what the shelf still has and
+   * returns the lines that came up short, instead of refusing the bill. The goods are gone and the money is in the drawer, so
+   * the sale must be recorded; the shortfall is returned for the audit trail and for the admin to look into.
+   */
+  @Transactional
+  public List<Map<String, Object>> takeWhatIsLeft(List<Item> items, UUID orderId, String reason) {
+    Map<UUID, Integer> wanted = new java.util.TreeMap<>();
+    items.forEach(it -> wanted.merge(it.productId(), it.qty(), Integer::sum));
+    List<Map<String, Object>> shortfalls = new ArrayList<>();
+    Map<UUID, Integer> taken = new LinkedHashMap<>();
+    wanted.forEach((id, qty) -> {
+      int take = Math.min(qty, repo.quantity(id));
+      if (take > 0 && repo.reserve(id, take, clock.instant()) > 0) {
+        repo.movement(id, -take, reason, orderId, null, clock.instant());
+        taken.put(id, take);
+      } else {
+        take = 0;
+      }
+      if (take < qty) {
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("productId", id.toString());
+        s.put("sold", qty);
+        s.put("taken", take);
+        shortfalls.add(s);
+      }
+    });
+    if (!taken.isEmpty()) {
+      changed(List.copyOf(taken.keySet()), reason);
+      alertIfLow(taken);
+    }
+    return shortfalls;
   }
 
   /** Takes one line's stock and records the movement; returns a failure description when there is not enough. */
@@ -77,6 +143,28 @@ public class InventoryService {
     failure.put("productId", it.productId().toString());
     failure.put("available", repo.quantity(it.productId()));
     return Optional.of(failure);
+  }
+
+  /**
+   * Looks at the shelf without taking anything: throws OUT_OF_STOCK when a line asks for more than is on hand.
+   * Used when an online order is placed. The stock itself is taken when staff confirm the order.
+   */
+  @Transactional(readOnly = true)
+  public void checkAvailable(List<Item> items) {
+    Map<UUID, Integer> wanted = new LinkedHashMap<>();
+    items.forEach(it -> wanted.merge(it.productId(), it.qty(), Integer::sum));
+    Map<UUID, InventoryRepository.Stock> have = stocks(wanted.keySet());
+    List<Map<String, Object>> failures = new ArrayList<>();
+    wanted.forEach((id, qty) -> {
+      int available = have.get(id).qty();
+      if (available < qty) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("productId", id.toString());
+        failure.put("available", available);
+        failures.add(failure);
+      }
+    });
+    if (!failures.isEmpty()) throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
   }
 
   @Transactional
@@ -93,12 +181,17 @@ public class InventoryService {
 
   /** Admin restock or correction. Throws if the result would be below zero. */
   @Transactional
-  public int adjust(UUID productId, int delta, String reason, UUID actorId) {
+  public int adjust(UUID productId, int delta, String reason, UUID actorId) { return adjust(productId, delta, reason, actorId, null); }
+
+  /** Same, linking the movement to the document behind it (for example a supplier purchase). */
+  @Transactional
+  public int adjust(UUID productId, int delta, String reason, UUID actorId, UUID refId) {
     if (repo.add(productId, delta, clock.instant()) == 0) {
       throw ApiException.validation("delta", "stock cannot go below zero");
     }
-    repo.movement(productId, delta, reason, null, actorId, clock.instant());
+    repo.movement(productId, delta, reason, refId, actorId, clock.instant());
     changed(List.of(productId), reason);
+    if (delta < 0) alertIfLow(Map.of(productId, -delta));
     return repo.quantity(productId);
   }
 
@@ -114,6 +207,9 @@ public class InventoryService {
         java.util.function.Function.identity(), id -> found.getOrDefault(id, new InventoryRepository.Stock(id, 0, 5)),
         (a, _) -> a, LinkedHashMap::new));
   }
+
+  /** How many products are at or below their alert level (for the operations metrics). */
+  public long lowStockCount() { return repo.countLow(); }
 
   public List<InventoryRepository.Stock> lowStock(int limit) { return repo.lowStock(limit); }
 
