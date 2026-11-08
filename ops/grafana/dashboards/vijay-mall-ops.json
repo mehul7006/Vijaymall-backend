@@ -1,0 +1,774 @@
+{
+ "uid": "vijay-mall-ops",
+ "title": "Vijay Super Mall - Operations",
+ "tags": [
+  "vijay-mall"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "Requests per second (by status class)",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[1m]))",
+     "legendFormat": "{{status}}"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Latency p50 / p95 / p99",
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*|.*/stream\"}[5m])))",
+     "legendFormat": "p50"
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*|.*/stream\"}[5m])))",
+     "legendFormat": "p95"
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*|.*/stream\"}[5m])))",
+     "legendFormat": "p99"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Server error rate (5xx)",
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))",
+     "legendFormat": "5xx share"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Slowest endpoints (p95)",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 7,
+    "w": 12,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "topk(8, histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*|.*/stream\"}[5m]))))",
+     "legendFormat": "{{uri}}"
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Busiest endpoints (req/s)",
+   "description": "",
+   "gridPos": {
+    "x": 12,
+    "y": 7,
+    "w": 12,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "topk(8, sum by (uri) (rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[5m])))",
+     "legendFormat": "{{uri}}"
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Orders placed per minute (online)",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 14,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (method) (rate(mall_orders_placed_total[5m])) * 60",
+     "legendFormat": "{{method}}"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "Counter bills per minute",
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 14,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (type) (rate(mall_pos_sales_total[5m])) * 60",
+     "legendFormat": "{{type}}"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Sales value per hour (Rs)",
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 14,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyINR"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(increase(mall_pos_sales_value_paise_total[1h])) / 100",
+     "legendFormat": "counter"
+    },
+    {
+     "refId": "B",
+     "expr": "sum(increase(mall_orders_value_paise_total[1h])) / 100",
+     "legendFormat": "online"
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Order placement time p95",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 21,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(mall_order_place_seconds_bucket[5m])))",
+     "legendFormat": "{{outcome}}"
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "Counter bill time p95",
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 21,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(mall_pos_sale_seconds_bucket[5m])))",
+     "legendFormat": "{{outcome}}"
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "type": "bargauge",
+   "title": "Online orders by status (now)",
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 21,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_orders_by_status",
+     "legendFormat": "{{status}}"
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "type": "stat",
+   "title": "Refunds: pending / failed",
+   "description": "Failed refunds need the admin to retry them.",
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 6,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_refunds_pending",
+     "legendFormat": "pending"
+    },
+    {
+     "refId": "B",
+     "expr": "mall_refunds_failed",
+     "legendFormat": "FAILED (needs a person)"
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "type": "stat",
+   "title": "Outbox backlog",
+   "description": "Notifications and alerts not yet delivered.",
+   "gridPos": {
+    "x": 6,
+    "y": 28,
+    "w": 6,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_outbox_pending",
+     "legendFormat": "events waiting"
+    }
+   ]
+  },
+  {
+   "id": 14,
+   "type": "stat",
+   "title": "Products low on stock",
+   "description": "",
+   "gridPos": {
+    "x": 12,
+    "y": 28,
+    "w": 6,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_stock_low_products",
+     "legendFormat": "products"
+    }
+   ]
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "Audited actions per minute",
+   "description": "",
+   "gridPos": {
+    "x": 18,
+    "y": 28,
+    "w": 6,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (action) (rate(mall_audit_actions_total[5m])) * 60",
+     "legendFormat": "{{action}}"
+    }
+   ]
+  },
+  {
+   "id": 16,
+   "type": "timeseries",
+   "title": "Refused by rate limit",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 35,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (scope) (rate(mall_rate_limited_total[5m]))",
+     "legendFormat": "{{scope}}"
+    }
+   ]
+  },
+  {
+   "id": 17,
+   "type": "timeseries",
+   "title": "Database pool (active / pending / max)",
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 35,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "hikaricp_connections_active",
+     "legendFormat": "active"
+    },
+    {
+     "refId": "B",
+     "expr": "hikaricp_connections_pending",
+     "legendFormat": "pending"
+    },
+    {
+     "refId": "C",
+     "expr": "hikaricp_connections_max",
+     "legendFormat": "max"
+    }
+   ]
+  },
+  {
+   "id": 18,
+   "type": "timeseries",
+   "title": "JVM heap used vs max",
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 35,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+     "legendFormat": "used"
+    },
+    {
+     "refId": "B",
+     "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})",
+     "legendFormat": "max"
+    }
+   ]
+  },
+  {
+   "id": 19,
+   "type": "timeseries",
+   "title": "CPU and threads",
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 42,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "process_cpu_usage",
+     "legendFormat": "process cpu"
+    },
+    {
+     "refId": "B",
+     "expr": "system_cpu_usage",
+     "legendFormat": "system cpu"
+    }
+   ]
+  },
+  {
+   "id": 20,
+   "type": "timeseries",
+   "title": "GC pause time",
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 42,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(jvm_gc_pause_seconds_sum[5m])",
+     "legendFormat": "{{action}}"
+    }
+   ]
+  },
+  {
+   "id": 21,
+   "type": "timeseries",
+   "title": "Live threads / Tomcat busy",
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 42,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "jvm_threads_live_threads",
+     "legendFormat": "live"
+    },
+    {
+     "refId": "B",
+     "expr": "tomcat_threads_busy_threads",
+     "legendFormat": "tomcat busy"
+    }
+   ]
+  },
+  {
+   "id": 22,
+   "type": "timeseries",
+   "title": "Flash sale units sold per minute (by channel)",
+   "description": "Units sold at a flash sale price, online and at the counter.",
+   "gridPos": {
+    "x": 0,
+    "y": 49,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (channel) (rate(mall_flash_units_sold_total[5m])) * 60",
+     "legendFormat": "{{channel}}"
+    }
+   ]
+  },
+  {
+   "id": 23,
+   "type": "timeseries",
+   "title": "Flash sale revenue and discount given (Rs per hour)",
+   "description": "Money taken at flash sale prices and the discount given up, from the last hour.",
+   "gridPos": {
+    "x": 8,
+    "y": 49,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyINR"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(increase(mall_flash_revenue_paise_total[1h])) / 100",
+     "legendFormat": "revenue"
+    },
+    {
+     "refId": "B",
+     "expr": "sum(increase(mall_flash_discount_paise_total[1h])) / 100",
+     "legendFormat": "discount given"
+    }
+   ]
+  },
+  {
+   "id": 24,
+   "type": "timeseries",
+   "title": "Flash sales now, and purchases turned away",
+   "description": "Sales running or scheduled, and checkouts refused because the sale ended or ran out (LIMIT_REACHED, CUSTOMER_LIMIT, ENDED).",
+   "gridPos": {
+    "x": 16,
+    "y": 49,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_flash_sales",
+     "legendFormat": "{{state}}"
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (reason) (increase(mall_flash_refused_total[15m]))",
+     "legendFormat": "refused {{reason}}"
+    }
+   ]
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ }
+}

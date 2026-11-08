@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: vijay-mall
+    folder: Vijay Super Mall
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

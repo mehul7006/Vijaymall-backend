@@ -130,3 +130,99 @@ Migration `V9__units_coupon_categories_shop_details.sql`. The credit migration w
   (`422 PAYMENT_NOT_CONFIGURED`) and at least one method must stay on.
 - **Shop details.** `shop_setting.details` (admin `PUT /admin/shop-settings`, public `GET /shop-settings`). Order number prefix and the
   sign-in e-mail name now come from the shop settings.
+
+## Launch-readiness round: stock at confirm, reject + refund, payment fixes (migration V10)
+
+- **Stock is taken when staff CONFIRM an online order, not when it is placed.** Placing only checks the shelf
+  (`InventoryService.checkAvailable`, no stock taken, `409 OUT_OF_STOCK` if clearly short); the item may be sold at the
+  counter before staff look at the order. Moving the order to CONFIRMED (or any later status) takes the stock atomically;
+  if the shelf is short the status change fails with `409 OUT_OF_STOCK` and the order stays where it was, so staff reject it.
+  `orders.stock_reserved` records whether an order holds stock, so cancel/reject gives it back exactly once. Orders that
+  existed before V10 are marked as holding stock. Customers can still see "in stock" for items promised to unconfirmed
+  orders; the reject path covers that. A soft hold for unconfirmed orders was not added.
+- **Reject.** `POST /api/v1/admin/orders/{id}/reject {reason}` (ADMIN, CASHIER). Cancels the order, stores the reason as
+  `cancelReason` ("Rejected by shop: ..."), tells the customer ("Order rejected ... Anything you paid will be refunded"),
+  gives back stock (if held), coins and coupon use, and refunds an online payment in full.
+- **Unpaid online orders (`PAYMENT_PENDING`)** can only be moved by the payment result (to PLACED) or cancelled. Staff
+  changing them returns `409 AWAITING_PAYMENT`.
+- **Refunds are queued, not sent inside the cancel.** `refund` rows start `PENDING` in the same transaction as the cancel; they
+  are sent to the provider right after commit and by a 30-second job (`PENDING` -> `PROCESSING` -> `ISSUED`, or back with
+  `attempts+1`, `FAILED` after 10 tries: `FAILED` rows need a human, query `select * from refund where status='FAILED'`).
+  A provider outage no longer blocks or fails a cancel. A refund stuck in `PROCESSING` for 10 minutes goes back to the queue.
+- **Failed payment attempts no longer close the payment.** Razorpay lets the customer retry on the same order, so
+  `payment.failed` only records the reason; the order stays `PAYMENT_PENDING` until paid or expired (15 min). A capture of the
+  wrong amount is marked `MISMATCH` and refunded in full.
+- **Rate limits / client IP.** `X-Forwarded-For` and `CF-Connecting-IP` are no longer believed (anyone can send them). Behind
+  Cloudflare set `CLIENT_IP_HEADER=CF-Connecting-IP` and make sure the server only accepts traffic from the proxy.
+  `FORWARD_HEADERS_STRATEGY` now defaults to `none`.
+- **Startup guard** now runs in every profile except `dev` and `test` (not only `prod`), so starting with no profile can no
+  longer run with the public default JWT secret. It also requires `RAZORPAY_WEBHOOK_SECRET` when Razorpay keys are set.
+- **Counter returns.** A cashier can take returns only on bills up to `app.pos.cashier-return-days` old (default 7, 0 = no
+  limit); older bills return `422 RETURN_NEEDS_ADMIN`. Admins are not limited.
+- **Account deletion.** `DELETE /api/v1/me` erases the customer's name, mobile, e-mail, addresses, devices and sign-ins and
+  keeps the (now nameless) account row so orders and bills stay for tax records. Refused with `409 ACCOUNT_HAS_OPEN_ORDERS`
+  or `ACCOUNT_HAS_DUES`. Coins are forfeited. Wishlist rows and reviews are not erased yet.
+
+### Low-stock and out-of-stock alerts for staff and admin
+- **When:** every time a product's stock falls onto or below its own alert level (`lowThreshold`, default 5, editable per
+  product by the admin), or to zero. One alert per crossing, not per sale, so staff are not spammed while an item stays low;
+  restocking above the level re-arms it. Covers confirmed online orders, counter sales and admin write-downs. Returns,
+  cancels and restocks never alert. The alert is written with the stock change (outbox), so a rolled-back sale raises none.
+- **Who:** all active ADMIN and CASHIER accounts get an in-app notification (`kind: STOCK`, `ref` = first product id), e.g.
+  "Low stock - Rice: 3 left, Dal: 4 left (+2 more)", titled "Out of stock" when any line hit zero. Retired products are skipped.
+  Push goes through `PushSender`, which is still the logging stub until FCM is set up.
+- **Daily digest:** 08:00 shop time, one notification to staff listing everything still at or below its level
+  ("7 products need restocking"). Nothing is sent when stock is fine.
+- The existing admin dashboard `lowStock` list and the live `stock` event on the order stream are unchanged.
+
+### Cashier shifts and cash drawer (migration V11)
+- `POST /api/v1/pos/shifts/open {openingFloatPaise}` (cashier, admin): one open shift per cashier (`409 SHIFT_ALREADY_OPEN`).
+  `GET /pos/shifts/current` (404 when none) shows the live expected cash. `POST /pos/shifts/close {countedCashPaise, note}`.
+- Expected cash = float + cash taken for bills - cash refunded + cash credit repayments, all by that cashier since opening.
+  If the count differs, a written reason is required (`422 VARIANCE_NEEDS_NOTE`); the variance is stored on the shift.
+  `GET /api/v1/admin/pos/shifts?cashierId=&page=&size=` (admin) lists shifts with expected, counted and variance.
+- Optional rule: set `app.pos.require-open-shift=true` (env `POS_REQUIRE_OPEN_SHIFT`) and billing is refused with
+  `422 SHIFT_NOT_OPEN` until the cashier opens a shift. Off by default so existing tills keep working.
+- A bill void is a full return of the bill (credit note, stock back, refund); there is no separate void.
+
+### Still open (needs a decision or outside accounts)
+SMS login and FCM push (need provider accounts / DLT template), customer OTP before coins or credit are used at the counter,
+round-off to the rupee, IGST and customer GSTIN, GST invoices for online orders,
+returns after delivery, purchase / supplier / batch-expiry, delivery zones and slots, moving the Razorpay order creation
+out of the order transaction. (Blocked staff already lose access on their next request.)
+
+## Flash sales (migration V19)
+
+A timed offer on chosen products. Staff (ADMIN and CASHIER) configure it; customers see it in the shop; quote, order and counter bill charge it.
+
+**Endpoints** (staff: `/api/v1/admin/flash-sales`, ADMIN or CASHIER; customers: public GET)
+- `POST /admin/flash-sales` create with items (`startsAt` omitted = start now; `endsAt` required; `channel` ONLINE|POS|BOTH; default
+  `discountKind` PERCENT 1-90 | FIXED_PRICE (paise, at least 100 and below the list price) | NONE; `perCustomerLimit` per product, 0 = none;
+  `bannerText`; items `{productId, discountKind?, discountValue?, maxQty?, perCustomerLimit?}`).
+- `GET /admin/flash-sales?status=SCHEDULED|ACTIVE|ENDED|CANCELLED`, `GET /{id}`, `PATCH /{id}` (scheduled: anything; running: name, texts and end time only),
+  `POST /{id}/items`, `PUT /{id}/items/{itemId}`, `DELETE /{id}/items/{itemId}` (once a unit sold: only the cap may be raised, no removal),
+  `POST /{id}/start-now`, `/end-now`, `/cancel`, `/duplicate {name?, startsAt?, endsAt?}`.
+- `GET /admin/flash-sales/{id}/report` and `GET /admin/flash-sales/report?from=&to=` (units, orders, bills, revenue, discount, average discount,
+  customers, sell-through of the caps, by item / channel / hour in shop time; best items for a range). Given-back units are left out.
+- `GET /api/v1/flash-sales/active` and `/upcoming` (public): `{now, sales:[{id,name,description,bannerText,startsAt,endsAt,secondsToEnd,items:[{productId,
+  nameEn,listPricePaise,salePricePaise,discountPercent,unitsLeft,perCustomerLimit,inStock}]}]}`. `unitsLeft` null = unlimited, 0 = sold out.
+- Products and product groups carry an optional `flash` object `{flashSaleId,name,listPricePaise,salePricePaise,discountPercent,unitsLeft,perCustomerLimit,
+  startsAt,endsAt}` (on groups: per variant, and on the group for the first variant on sale). `pricePaise` stays the normal price.
+- Quote lines add `flashSaleId`, `listPricePaise`, `flashDiscountPaise`.
+
+**Rules**
+- Status is computed (SCHEDULED, ACTIVE, ENDED, CANCELLED); never stored. A product can be in only one non-cancelled sale whose window overlaps: `409 FLASH_OVERLAP` names the other sale.
+- Sale price = the product's CURRENT list price minus the percent (rounded half-up to the paisa) or the fixed price; never below Rs 1, never above the list price.
+  An item's own discount beats the sale default; an item with no discount of its own in a sale with default NONE is refused.
+- Caps: `maxQty` for the whole sale (then the item sells at the normal price again) and a per-customer limit per product. Counted by one conditional
+  UPDATE (no oversell); a quantity above what is left is priced as two quote lines (sale price for the units left, list price for the rest). If someone takes the
+  last units between quote and placement the order answers `409 PRICE_CHANGED` with a fresh quote. Cancel, reject, payment failure and payment timeout of an
+  order give its units back exactly once (`flash_consumption.released_at`). Counter returns and online order returns do NOT give units back.
+- Coupons and coins apply on top of the sale price, with no special rule.
+- Counter: items sold by weight are never discounted; an offline bill is always recorded (it takes what is left of the sale, the rest is just recorded); a bill without a
+  customer mobile is not subject to the per-customer limit.
+- Limits: name 1-80, description <= 300, banner <= 80, at most 200 items, a sale runs at most 30 days, a start more than a minute in the past is refused.
+- Once a minute a job announces started / ended sales to staff (outbox types `FLASH_STARTED`, `FLASH_ENDED`; `FLASH_ITEM_SOLD_OUT` once per item), publishes the live area
+  `FLASH` and empties the `flash` cache. Apps should refetch the sale list and product prices when `FLASH` arrives.
+- Code: `common/FlashPricing` is the port (optional setter in `SubtotalStep`, `OrderService`, `PosService`, `CatalogService`); `flash/` holds the module.
+
