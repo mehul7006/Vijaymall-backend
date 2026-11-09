@@ -1,6 +1,7 @@
 package com.vijay.mall.notification.infra;
 
 import com.vijay.mall.common.Page;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -22,6 +23,7 @@ public class NotificationRepository {
    * @param read true once the user opened it
    * @param createdAt when it was created
    */
+  @Schema(name = "NotificationRow")
   public record Row(UUID id, String title, String body, String kind, String ref, boolean read, Instant createdAt) {}
 
   private final NotificationJpa jpa;

@@ -1,5 +1,6 @@
 package com.vijay.mall.flash.app;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -12,6 +13,7 @@ public final class FlashViews {
    * One product in a sale, as staff see it. discountKind/discountValue are the item's own override (null kind = follows the sale);
    * effectiveKind/effectiveValue is what really applies. salePricePaise is worked out from the product's current list price.
    */
+  @Schema(name = "FlashItemView")
   public record ItemView(UUID id, UUID productId, String nameEn, long listPricePaise, Long salePricePaise, Integer discountPercent,
                          String discountKind, long discountValue, String effectiveKind, long effectiveValue, Integer maxQty, int soldQty,
                          Integer unitsLeft, Integer perCustomerLimit, int effectivePerCustomerLimit) {}

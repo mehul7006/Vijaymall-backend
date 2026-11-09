@@ -94,6 +94,7 @@ public final class OrderViews {
    * @param cancelledBy CUSTOMER, SHOP or SYSTEM once cancelled, else null
    * @param cancelCode CUSTOMER_CANCELLED, REJECTED_BY_SHOP, CANCELLED_BY_SHOP, PAYMENT_TIMEOUT or PAYMENT_FAILED; null when not cancelled
    */
+  @Schema(name = "OrderView")
   public record View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,

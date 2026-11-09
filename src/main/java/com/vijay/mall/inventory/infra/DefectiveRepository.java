@@ -1,5 +1,6 @@
 package com.vijay.mall.inventory.infra;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -18,6 +19,7 @@ public class DefectiveRepository {
    * <p>{@code status} is {@code PENDING_REVIEW}, {@code HELD}, {@code WRITTEN_OFF}, {@code RETURNED_TO_SUPPLIER} or {@code RESTOCKED};
    * {@code source} says where it came from and {@code refId} is the return or order behind it.
    */
+  @Schema(name = "DefectiveRow")
   public record Row(UUID id, UUID productId, String productName, int qty, String source, UUID refId, String note, String status, Instant createdAt,
                     UUID createdBy, Instant reviewedAt, UUID reviewedBy, String reviewNote, Instant resolvedAt, UUID resolvedBy,
                     String resolveNote) {}

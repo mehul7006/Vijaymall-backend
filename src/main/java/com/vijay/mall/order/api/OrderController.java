@@ -39,12 +39,12 @@ public class OrderController {
    * @param fulfilment {@code DELIVERY} (default) or {@code PICKUP}
    * @param addressId the saved address; required for delivery
    * @param paymentMethod {@code COD} or {@code ONLINE} (credit and hybrid are counter-only)
-   * @param expectedTotalPaise the total the customer saw in the quote, in paise; a different server total gives {@code 409 PRICE_CHANGED}
+   * @param expectedTotalPaise the total the customer saw in the quote, in paise; optional, a different server total gives {@code 409 PRICE_CHANGED} and leaving it out skips that check
    * @param slot optional delivery or pickup time window, at most 40 characters
    */
   public record PlaceBody(@NotEmpty List< CartController.ItemBody> items, String couponCode,
                           CoinRedemption.Mode coinMode, Integer percent, Fulfilment fulfilment, UUID addressId,
-                          @NotNull String paymentMethod, long expectedTotalPaise, @Size(max = 40) String slot) {
+                          @NotNull String paymentMethod, Long expectedTotalPaise, @Size(max = 40) String slot) {
     OrderService.PlaceCommand toCommand() {
       QuoteRequest q = new CartController.QuoteBody(items, couponCode, coinMode, percent, fulfilment).toRequest();
       return new OrderService.PlaceCommand(q, addressId, paymentMethod, expectedTotalPaise, slot);

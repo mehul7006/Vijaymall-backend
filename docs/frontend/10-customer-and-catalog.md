@@ -728,9 +728,9 @@ Sorted by `nameEn` ascending.
 - **Request**: none.
 - **Response**: `200`:
 ```json
-{ "banners": [ HotBanner ], "products": [ Product ] }
+{ "banners": [ HotBanner ], "products": [ Product ], "page": 0, "size": 20, "total": 37, "totalExact": true, "hasMore": true }
 ```
-`banners`: active banners whose `startAt..endAt` window contains now. `products`: up to 20 in-stock hot products (first 20 by name; no paging).
+`banners`: active banners whose `startAt..endAt` window contains now. `products`: one page (default 20) of in-stock hot products; paging is described in the "changed: paged products" addendum below.
 - **Errors**: none.
 - **UI notes**: Banners have no link target field; they are display only.
 
@@ -936,7 +936,12 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 ### PUT /api/v1/admin/products/{id}
 - **Who**: admin.
 - **Purpose / when the UI calls it**: Edit-product "Save" (single variant).
-- **Request**: body identical to POST (same validation). Differences: it is a full replacement - omitted `description`/`packSize` become "", omitted `active` becomes true, omitted `hotSale` false, omitted `earnsCoins`/`coinRedeemable` true. `qtyOnHand` is the **new absolute stock** when sent: the server records the difference as an `ADJUST` stock movement. **Omitted (null) keeps the current stock** (it no longer resets to 0); a negative value is 400 `fields.qtyOnHand`. `lowThreshold` changes only if sent (omitted keeps the current alert level; `0` is a valid level). A blank `unit` keeps the current unit (and an inactive current unit is allowed to stay). A given `productGroupId` moves the product into that group. A `qtyOnHand` that would be negative is ignored.
+- **Request**: body identical to POST (same validation). **PUT means replace: send the whole form every time; use `PATCH` (below) to change only some fields.** What an omitted key does, per field:
+  - **Cleared**: `hotStart` and `hotEnd` (both become null, so a hot-sale window disappears), `description` and `packSize` (stored as empty text `""`).
+  - **Reset to a default**: `active` true, `hotSale` false, `earnsCoins` true, `coinRedeemable` true.
+  - **Kept**: `qtyOnHand` (stock), `lowThreshold` (alert level), `unit` (a blank unit keeps the current one), `productGroupId` (a given id moves the product into that group; omitted leaves it where it is), `variantName` and `variantOrder` (changed only when sent).
+  - `categoryId`, `nameEn`, `nameGu`, `mrpPaise`, `pricePaise` are required.
+  Also: `hotStart`/`hotEnd` accept the date forms listed under "Dates and times" in file 00. `qtyOnHand` is the **new absolute stock** when sent: the server records the difference as an `ADJUST` stock movement. **Omitted (null) keeps the current stock** (it no longer resets to 0); a negative value is 400 `fields.qtyOnHand`. `lowThreshold` changes only if sent (`0` is a valid level). An inactive current unit is allowed to stay.
 - **Response**: `200` AdminProduct.
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND`.
 - **UI notes**: For quick stock changes use the stock endpoint instead, to avoid overwriting concurrent changes (e.g. a sale while the form was open).
@@ -1042,15 +1047,15 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 | sortOrder | integer | no | null -> 0 | ascending display order |
 | active | boolean | no | null -> true | inactive categories vanish from `GET /categories` |
 
-- **Response**: `201 Created` Category (`imageUrl` null; there is no endpoint to set it).
+- **Response**: `201 Created`, the full category, the same shape as an item of `GET /admin/categories`: `{ "id": "...", "nameEn": "Dairy", "nameGu": "ડેરી", "imageUrl": null, "sortOrder": 1, "active": true }` (`imageUrl` is null until a picture is uploaded with `POST /admin/categories/{id}/image`). `active` is now always present (it was missing before).
 - **Errors**: 400 `VALIDATION_FAILED`.
-- **UI notes**: There is no admin list-categories or delete-category endpoint; `GET /categories` returns only active ones, so an inactive category can no longer be listed in the UI (keep it from the PUT response if needed).
+- **UI notes**: The admin list is `GET /admin/categories` (includes hidden ones); `GET /categories` returns only active ones.
 
 ### PUT /api/v1/admin/categories/{id}
 - **Who**: admin.
 - **Purpose / when the UI calls it**: Edit/hide category.
 - **Request**: path `id`; same body/validation as POST (full replacement: omitted `sortOrder` -> 0, omitted `active` -> true).
-- **Response**: `200` Category.
+- **Response**: `200`, the full category with `active`, same shape as `POST /admin/categories` and the admin list item.
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND` ("Category not found").
 - **UI notes**: —
 
@@ -1253,7 +1258,7 @@ Every paged response (`items`, `page`, `size`, `total`) now also carries two fie
 | hasMore | boolean | always exact: `true` when another page follows this one. Page until it is `false`; do not compute it from `total`. |
 
 - Totals are counted on every request (never cached or stale). When the page itself shows the end of the list, `total` is simply rows before this page + rows on this page, exact, even for a list that is longer than 10,000 rows seen from its last page.
-- Paging endpoints in this file affected: `GET /products`, `GET /product-groups`, `GET /wallet/ledger`, `GET /admin/products`, `GET /admin/customers`, `GET /admin/customers/{id}/wallet-ledger`, `GET /admin/customers/{id}/orders` and the other paged lists of the backend. `GET /hot-sale` pages the products part but only adds `page`, `size`, `total` (see below, no `totalExact`/`hasMore` there).
+- Paging endpoints in this file affected: `GET /products`, `GET /product-groups`, `GET /wallet/ledger`, `GET /admin/products`, `GET /admin/customers`, `GET /admin/customers/{id}/wallet-ledger`, `GET /admin/customers/{id}/orders` and the other paged lists of the backend. `GET /hot-sale` pages the products part and now also returns `totalExact` and `hasMore` (see below).
 - A product search result is remembered by the server for up to 5 minutes but is cleared at once when a catalog edit commits or a product sells out or comes back in stock, so a product that appears or vanishes with stock shows up in the next list call. Stock numbers and flash prices in the answer are always fresh.
 
 ### ETag and `If-None-Match` (conditional GET)
@@ -1320,7 +1325,7 @@ In `GET /product-groups` and `GET /product-groups/{id}`, a `Variant` without its
 | mrpPaise, pricePaise | whole number (paise) | else 400 "must be a whole number"; same price rules as PUT: price and MRP not negative ("price cannot be negative" on `fields.pricePaise`), MRP not below price (`fields.mrpPaise` "MRP must not be below the price") |
 | unit, packSize | string | text (`null` accepted); `unit` is checked against the unit list as in PUT |
 | active, hotSale, earnsCoins, coinRedeemable | boolean | else 400 "must be true or false" |
-| hotStart, hotEnd | ISO instant string or **null** | `null` clears it; end must be after start (`fields.hotEnd` "must be after hotStart"); bad text: 400 "must be a date-time such as 2026-01-31T10:00:00Z" |
+| hotStart, hotEnd | date-time string (same forms as everywhere, see file 00) or **null** | `null` clears it; end must be after start (`fields.hotEnd` "must be after hotStart"); bad text: 400 "must be a date-time such as 2026-01-31T10:00:00Z" |
 | lowThreshold | integer >= 0 | else 400 "must be 0 or more" |
 | variantName, variantOrder | string, integer | change the pack's name / order inside its product |
 
@@ -1364,9 +1369,9 @@ Leaving `active` out keeps the current value on every pack (the server writes `a
 - **Request**: query `page` (default 0), `size` (default 20, clamped to 1..50; negative page counts as 0).
 - **Response**: `200`:
 ```json
-{ "banners": [ HotBanner ], "products": [ Product ], "page": 0, "size": 20, "total": 37 }
+{ "banners": [ HotBanner ], "products": [ Product ], "page": 0, "size": 20, "total": 37, "totalExact": true, "hasMore": true }
 ```
-`banners`: all banners that are active and whose window contains now (not paged; always the same on every page). `products`: this page of in-stock products on hot sale now, ordered by **soonest `hotEnd` first (products with no end date last), then name**. `page`, `size`, `total` describe the products part only; `total` counts exactly up to 10,000. There is no `hasMore` / `totalExact` here: ask for the next page while `(page + 1) * size < total`.
+`banners`: all banners that are active and whose window contains now (not paged; always the same on every page). `products`: this page of in-stock products on hot sale now, ordered by **soonest `hotEnd` first (products with no end date last), then name**. `page`, `size`, `total`, `totalExact` and `hasMore` describe the products part only and mean the same as in every paged list: `total` is exact up to 10,000 (`totalExact` false above that), and `hasMore` is always exact: ask for the next page while it is true.
 - **Errors**: none.
 - **UI notes**: Replaces the old "first 20 by name" behaviour; `GET /hot-sale` with no params is page 0 of 20.
 
@@ -1450,3 +1455,18 @@ Response also has `totalExact` and `hasMore` (see the paging section). Searching
 - `PATCH /admin/customers/{id}` note "customer access tokens are not re-checked per call": they are now re-checked within 10 seconds.
 - `POST /admin/customers/{id}/coins`: errors are on `fields.coins` **and** `fields.delta`.
 - Address shape: has `phone`.
+
+## Addendum: round 2 (2026-11-09 evening)
+
+### Dates in requests (JSON bodies and query parameters)
+Every request field or query parameter that is a date-time accepts three forms, read by one parser:
+- ISO-8601 with `Z` or an offset: `2026-11-09T10:00:00Z`, `2026-11-09T15:30:00+05:30` (as before).
+- Zone-less date-time: `2026-11-09T15:30:00`, read as **India time** (`Asia/Kolkata`).
+- A plain date: `2026-11-09`, read as the **start of that day in India time** (`2026-11-08T18:30:00Z`).
+Anything else is a 400. Responses are unchanged: always UTC with `Z`. These were stricter before and are now lenient: `GET /pos/products?updatedSince=` (only a full offset date-time was accepted; a zone-less or plain date gave a bare 400) and the `hotStart`/`hotEnd` keys of `PATCH /admin/products/{id}` (only `Z`/offset). JSON body fields (`hotStart`, `hotEnd`, coupon and banner windows, ...) were already lenient.
+
+### PATCH /admin/products/{id}: typed schema in Swagger
+The body is still a free JSON object read key by key (so "key absent = keep" and "key null = clear" stay different), but Swagger/OpenAPI now publishes the keys as the schema `ProductPatchBody`: `categoryId`, `nameEn`, `nameGu`, `description`, `mrpPaise`, `pricePaise`, `unit`, `packSize`, `active`, `hotSale`, `hotStart`, `hotEnd`, `earnsCoins`, `coinRedeemable`, `lowThreshold`, `variantName`, `variantOrder`, all optional. `qtyOnHand` is rejected and is not in the schema.
+
+### Swagger schema names are now unique
+Several response/request records used to share a simple name (`View`, `Row`, `Report`, `ReviewBody`, ...), so Swagger merged them into one wrong schema. Each now has its own name. The ones you are most likely to look for: the customer order view `OrderViews.View` is the schema **`OrderView`**; the product review body `{rating, comment}` is **`ProductReviewBody`**; the defective-stock review body `{decision, note}` is **`DefectiveReviewBody`**; the offline-exception review `{note}` is **`OfflineExceptionReviewBody`**; the counter-controls report is **`CounterControlsReport`** (rows `CounterControlsRow`) and the credit report **`CreditReport`**; POS and cart quote bodies are **`PosQuoteBody`** and **`CartQuoteBody`**; the two return bodies are **`PosReturnBody`** and **`OrderReturnBody`**. The JSON on the wire did not change; only generated code and docs names do. A unit test fails the build if two API models ever share a schema name again.

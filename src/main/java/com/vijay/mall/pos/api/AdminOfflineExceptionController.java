@@ -4,6 +4,7 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.pos.app.OfflineExceptionService;
 import com.vijay.mall.pos.infra.OfflineExceptionRepository.Row;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin/pos/offline-exceptions")
 public class AdminOfflineExceptionController {
   /** note is optional, up to 500 characters. */
+  @Schema(name = "OfflineExceptionReviewBody")
   public record ReviewBody(String note) {}
 
   private final OfflineExceptionService exceptions;

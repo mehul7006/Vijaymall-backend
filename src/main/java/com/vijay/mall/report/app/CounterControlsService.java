@@ -4,6 +4,7 @@ import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.pos.infra.PosReportRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Comparator;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CounterControlsService {
   /** The percentages are of that cashier's own sales, to one decimal; shiftVariancePaise below zero means the drawer was short. */
+  @Schema(name = "CounterControlsRow")
   public record Row(UUID cashierId, String name, long bills, long salesPaise, long manualDiscounts, long manualDiscountPaise,
                     double discountPercentOfSales, long returns, long refundsPaise, double refundPercentOfSales, long shiftsClosed,
                     long shiftVariancePaise) {}
@@ -35,6 +37,7 @@ public class CounterControlsService {
    * @param to last day, included
    * @param cashiers one row per cashier who sold, took returns or closed a shift, biggest sales first
    */
+  @Schema(name = "CounterControlsReport")
   public record Report(LocalDate from, LocalDate to, List<Row> cashiers) {}
 
   private final PosReportRepository repo;

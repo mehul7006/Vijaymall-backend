@@ -11,6 +11,7 @@ import com.vijay.mall.order.infra.OrderRepository;
 import com.vijay.mall.order.infra.OrderReturnRepository;
 import com.vijay.mall.payment.app.PaymentService;
 import com.vijay.mall.wallet.app.WalletService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -49,6 +50,7 @@ public class OrderReturnService {
    * @param qty units coming back, at most what is still returnable
    * @param restock {@code false} to treat the units as defective (refund, but not back on the shelf); {@code null} or {@code true} puts them back
    */
+  @Schema(name = "ReturnItemInput")
   public record ItemInput(UUID productId, int qty, Boolean restock) {}
 
   /**
@@ -63,6 +65,7 @@ public class OrderReturnService {
    * @param refundPaise the refund for these units, in paise
    * @param restocked whether the units went back on the shelf
    */
+  @Schema(name = "ReturnItemView")
   public record ItemView(UUID productId, String name, int qty, long refundPaise, boolean restocked) {}
 
   /** refundMode is ONLINE (back to the customer's payment method), CASH (the shop hands it over; cash-on-delivery orders) or NONE. */

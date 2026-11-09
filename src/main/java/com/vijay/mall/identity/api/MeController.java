@@ -45,12 +45,12 @@ public class MeController {
    * @param label short name such as Home or Office
    * @param line1 house number and street
    * @param area locality or area
-   * @param pincode postal code
+   * @param pincode postal code, exactly 6 digits
    * @param isDefault true to make this the default address; null or false leaves the default unchanged
    * @param phone optional contact phone for the delivery: blank, or exactly 10 digits
    */
   public record AddressInput(@NotBlank String label, @NotBlank String line1, @NotBlank String area,
-                             @NotBlank String pincode, Boolean isDefault,
+                             @NotBlank @Pattern(regexp = "^$|\\d{6}", message = "must be 6 digits") String pincode, Boolean isDefault,
                              @Pattern(regexp = "^$|\\d{10}", message = "must be 10 digits") String phone) {
     /** An address input without a phone. */
     public AddressInput(String label, String line1, String area, String pincode, Boolean isDefault) {

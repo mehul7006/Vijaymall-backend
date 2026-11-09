@@ -46,7 +46,7 @@ A blocked staff member's token stops working on the next request (403/401). A bl
 All money is an integer number of **paise** (1 rupee = 100 paise), field names end in `Paise`. Never use floating point. Show `Rs 125.00` for `12500`. A negative value only appears where documented (for example `roundOffPaise` on a bill).
 
 ### Dates and times
-ISO-8601 in UTC (`2026-11-08T17:52:42Z`). The shop's own clock is India time (`Asia/Kolkata`, UTC+5:30); the public shop details endpoint returns `timezone`, `openNow` and `todayHours` already computed, so do not recompute them on the device.
+ISO-8601 in UTC (`2026-11-08T17:52:42Z`) in every response. **Requests** (JSON fields and query parameters such as `updatedSince`) accept the same, an offset (`+05:30`), a zone-less date-time (`2026-11-09T15:30:00`, read as India time) and a plain date (`2026-11-09`, start of that day in India time). `updatedSince` and the `PATCH` hot-sale window used to accept only `Z`/offset and are now lenient too. The shop's own clock is India time (`Asia/Kolkata`, UTC+5:30); the public shop details endpoint returns `timezone`, `openNow` and `todayHours` already computed, so do not recompute them on the device.
 
 ### IDs
 UUID strings. Order numbers and invoice numbers are human-readable strings for display and search; use `id` for API calls.
@@ -71,8 +71,32 @@ Every error has this body (HTTP status varies):
 ```
 
 - `code` is stable and machine readable: switch on it. `message` is human readable and safe to show.
-- `details.fields` (validation errors) maps request field names to messages; highlight those inputs.
+- `details.fields` (validation errors) maps request field names to messages; highlight those inputs. Field names are JSON paths (`items[0].qty`), header names for a missing header (`Idempotency-Key`), and parameter names for path and query values.
 - `traceId` equals the `X-Trace-Id` header.
+- Advice: switch on `code` (stable); show `details.fields[<field>]` under the matching input; show `message` as the toast. Never parse `message` or the field texts to make decisions: the texts are for people and may be reworded.
+
+#### Request mistakes: what you get
+
+All of these are `400 VALIDATION_FAILED` with `details.fields[<field>]` set. The server reports the first unreadable value in the body (for example a wrong type) on its own; missing or invalid fields found by validation are reported all at once.
+
+| Mistake | Field | Text |
+|---|---|---|
+| A required field left out or `null` (code, kind, value, nameEn ...) | the field | `is required` |
+| A number below its minimum / above its maximum | the field | `must be 0 or more` / `must be 99 or less` |
+| A word that is not one of the allowed values (`fulfilment`, `coinMode`) | the field | `must be DELIVERY or PICKUP`, `must be NONE, ALL or PERCENT`; for long lists `must be one of PLACED, CONFIRMED, ...` |
+| Text where a whole number goes (`items[0].qty: "two"`) | `items[0].qty` | `must be a whole number` |
+| A decimal where a number goes | the field | `must be a number` |
+| A bad id (`items[0].productId: "abc"`, or `/admin/orders/not-a-uuid` in the path) | `items[0].productId` / `id` | `must be a valid id` |
+| A bad true/false | the field | `must be true or false` |
+| A bad date or date and time | the field | `must be a valid date` / `must be a valid date and time` |
+| A list or object where the other is expected | the field | `must be a list` / `must be an object` |
+| A bad value in the path or query (id, enum, number) | the parameter | same texts as above |
+| A missing query parameter | the parameter | `is required` |
+| A missing header (for example `Idempotency-Key`) | the header name | `is required`; `message` is `Missing header Idempotency-Key` |
+| Broken JSON, an empty body or the wrong shape as a whole | none (`details` is empty) | `message` is `The request body is not valid JSON` |
+| A pincode that is not 6 digits | `pincode` | `must be 6 digits` |
+| A payment method that is not offered | `paymentMethod` | `must be COD or ONLINE (got "CASH")` |
+| An image over 5 MB (code `FILE_TOO_LARGE`) | `file` | `must be 5 MB or smaller`; `message` also says so |
 
 Common statuses and what the UI should do:
 
@@ -113,3 +137,9 @@ Register the device token with the devices endpoint (see `10-customer-and-catalo
 ## 5. Building the app from this guide
 
 Suggested build order: auth and token refresh, catalog browse (guest), cart quote, place order (COD), order tracking, online payment, profile/addresses, wallet, notifications, then staff screens (order desk), POS counter, reports and admin settings. For every endpoint, the section files give: who may call it, why it exists, the exact request fields with validation, the response shape, the error codes, and UI notes.
+
+## 6. Test environments
+
+- The seeded dev admin is whatever `ADMIN_EMAIL` is set to on that server (default `admin@vijaysupermall.local`; the cashier is `cashier@vijaysupermall.local`). A shared test instance that sets `ADMIN_EMAIL=admin@mall.com` has `admin@mall.com` as its admin instead, and the default address will not exist there. Ask whoever runs the instance which address it uses.
+- In the dev profile the sign-in code for any e-mail is `12345` unless the server's `OTP_FIXED_CODE` overrides it (production never has a fixed code); when it is empty the code is printed in the server log.
+- Swagger UI and the OpenAPI JSON (`/v3/api-docs`) are on in dev and off in production.

@@ -7,6 +7,7 @@ import com.vijay.mall.customers.app.CustomerAdminService.CustomerView;
 import com.vijay.mall.customers.app.CustomerAdminService;
 import com.vijay.mall.order.domain.OrderViews;
 import com.vijay.mall.wallet.infra.WalletRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
@@ -35,6 +36,7 @@ public class AdminCustomerController {
    * Request body to switch an account on or off.
    * @param active false to block the customer, true to unblock
    */
+  @Schema(name = "CustomerActiveBody")
   public record ActiveBody(@NotNull Boolean active) {}
 
   /**

@@ -7,6 +7,7 @@ import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.purchasing.infra.PurchaseRepository.Header;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
@@ -27,12 +28,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class PurchaseService {
   /** One product received: quantity (1 to {@link #MAX_QTY}) and the cost of each unit in paise. */
+  @Schema(name = "PurchaseItemInput")
   public record ItemInput(UUID productId, int qty, long unitCostPaise) {}
 
   /** A supplier delivery to record: supplier name, optional invoice number and note, and the product lines. */
   public record Input(String supplierName, String invoiceNo, String note, List<ItemInput> items) {}
 
   /** A received line with the product name and the line cost in paise (quantity times unit cost). */
+  @Schema(name = "PurchaseItemView")
   public record ItemView(UUID productId, String name, int qty, long unitCostPaise, long lineCostPaise) {}
 
   /** A recorded delivery with its lines. Money is paise. */

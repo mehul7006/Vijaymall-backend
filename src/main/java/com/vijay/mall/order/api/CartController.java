@@ -7,6 +7,7 @@ import com.vijay.mall.order.domain.Fulfilment;
 import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.order.domain.QuoteRequest;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -39,6 +40,7 @@ public class CartController {
    * @param percent share of the coins to use (default 100), for the percent mode
    * @param fulfilment {@code DELIVERY} (default) or {@code PICKUP}; pickup has no delivery fee
    */
+  @Schema(name = "CartQuoteBody")
   public record QuoteBody(@NotEmpty List<@Valid ItemBody> items, String couponCode, CoinRedemption.Mode coinMode,
                           Integer percent, Fulfilment fulfilment) {
     /** Converts the HTTP body into the request the quote steps work on. */

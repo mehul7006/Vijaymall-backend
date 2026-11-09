@@ -5,12 +5,12 @@ import com.vijay.mall.catalog.app.ImageStore;
 import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.AdminProduct;
-import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -59,7 +59,7 @@ public class AdminCatalogController {
    * applied after the save when given.
    */
   public record ProductBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu,
-                            String description, @Min(0) long mrpPaise, @Min(0) long pricePaise, String unit,
+                            String description, @NotNull @Min(0) Long mrpPaise, @NotNull @Min(0) Long pricePaise, String unit,
                             String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
                             Boolean earnsCoins, Boolean coinRedeemable, @Min(0) Integer qtyOnHand, @Min(0) Integer lowThreshold,
                             UUID productGroupId, String variantName, Integer variantOrder) {
@@ -71,6 +71,31 @@ public class AdminCatalogController {
           qtyOnHand == null ? -1 : qtyOnHand, lowThreshold == null ? -1 : lowThreshold, productGroupId);
     }
   }
+  /**
+   * Documentation of the PATCH body for Swagger: every key is optional, an omitted key keeps the current value and an explicit
+   * {@code null} clears {@code hotStart}, {@code hotEnd} and {@code description}. The endpoint itself reads a free JSON map so
+   * that "omitted" and "null" stay different; this record only publishes the keys. {@code qtyOnHand} and {@code productGroupId}
+   * are not accepted (stock only moves through the stock endpoint).
+   */
+  @Schema(name = "ProductPatchBody", description = "Partial product edit: only the keys present change; explicit null clears hotStart, hotEnd and description")
+  public record ProductPatchBody(
+      @Schema(description = "Move the product to this category") UUID categoryId,
+      @Schema(description = "English name; not blank when present") String nameEn,
+      @Schema(description = "Gujarati name; not blank when present") String nameGu,
+      @Schema(description = "Description; null clears it", nullable = true) String description,
+      @Schema(description = "MRP in paise (whole number, 0 or more, not below the price)") Long mrpPaise,
+      @Schema(description = "Selling price in paise (whole number, 0 or more)") Long pricePaise,
+      @Schema(description = "Unit such as kg, pack, piece") String unit,
+      @Schema(description = "Pack size label such as 500 g") String packSize,
+      @Schema(description = "false hides the product from the shop") Boolean active,
+      @Schema(description = "Hot-sale flag") Boolean hotSale,
+      @Schema(description = "Hot-sale window start (ISO instant with Z or offset, zone-less = India time, or a plain date); null clears it", nullable = true) Instant hotStart,
+      @Schema(description = "Hot-sale window end, same formats as hotStart; null clears it", nullable = true) Instant hotEnd,
+      @Schema(description = "Whether buying earns coins") Boolean earnsCoins,
+      @Schema(description = "Whether coins can pay for it") Boolean coinRedeemable,
+      @Schema(description = "Low-stock alert level (0 or more)") Integer lowThreshold,
+      @Schema(description = "Variant label such as Large; null clears it", nullable = true) String variantName,
+      @Schema(description = "Variant display order") Integer variantOrder) {}
   /** A new variant (size, flavour, colour) of an existing product; name, description and category are copied from it. */
   public record VariantBody(String variantName, String packSize, String unit, @Min(0) long mrpPaise, @Min(0) long pricePaise,
                             Boolean active, Integer qtyOnHand, Integer lowThreshold, Integer variantOrder) {
@@ -149,7 +174,14 @@ public class AdminCatalogController {
   public AdminProduct get(@PathVariable UUID id) { return catalog.adminGet(id); }
 
   /**
-   * Updates a product's details, stock level and alert threshold.
+   * Replaces a product's details, stock level and alert threshold. PUT means replace: send the whole form, and use PATCH for a partial edit.
+   * <p>What an omitted key does:
+   * <ul>
+   * <li>kept: {@code qtyOnHand}, {@code lowThreshold}, {@code productGroupId}, {@code unit} (the current unit stays), {@code variantName}
+   * and {@code variantOrder} (changed only when sent);</li>
+   * <li>cleared: {@code hotStart}, {@code hotEnd}, {@code description} and {@code packSize} (both stored as empty text);</li>
+   * <li>reset to the default: {@code active} true, {@code hotSale} false, {@code earnsCoins} true, {@code coinRedeemable} true.</li>
+   * </ul>
    * <p>A changed {@code qtyOnHand} is recorded as an {@code ADJUST} stock movement. Same price validation as creating.
    */
   @PutMapping("/products/{id}")
@@ -165,7 +197,7 @@ public class AdminCatalogController {
    * An explicit {@code null} clears {@code hotStart}, {@code hotEnd} and {@code description}. Same price and window validation as PUT.
    */
   @PatchMapping("/products/{id}")
-  public AdminProduct patch(@PathVariable UUID id, @RequestBody Map<String, Object> body) {
+  public AdminProduct patch(@PathVariable UUID id, @RequestBody @Schema(implementation = ProductPatchBody.class) Map<String, Object> body) {
     return catalog.patch(id, new ProductPatch(body), CurrentUser.id());
   }
 
@@ -226,13 +258,16 @@ public class AdminCatalogController {
     return catalog.setImage(id, images.save(file.getBytes(), "products"), scope);
   }
 
-  /** Creates a category; answers 201 Created and is repeat-safe with an {@code Idempotency-Key}. */
+  /**
+   * Creates a category; answers 201 Created with the full category (id, nameEn, nameGu, imageUrl, sortOrder, active), the same shape as
+   * the admin list item, and is repeat-safe with an {@code Idempotency-Key}.
+   */
   @PostMapping("/categories")
   @ResponseStatus(HttpStatus.CREATED)
-  public Category createCategory(@Valid @RequestBody CategoryBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+  public AdminCategory createCategory(@Valid @RequestBody CategoryBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     return AdminOps.run(ops, key, "category-create", CurrentUser.id(), AdminOps.fingerprint(b),
-        () -> catalog.createCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active()),
-        c -> c.id().toString(), ref -> catalog.categories().stream().filter(c -> c.id().toString().equals(ref)).findFirst().orElse(null));
+        () -> catalog.createAdminCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active()),
+        c -> c.id().toString(), ref -> catalog.adminCategory(UUID.fromString(ref)));
   }
 
   /** Every category including hidden ones (with active and imageUrl), in the shop order. */
@@ -251,9 +286,9 @@ public class AdminCatalogController {
     return catalog.setCategoryImage(id, images.save(file.getBytes(), "categories"));
   }
 
-  /** Renames, reorders or switches a category on or off; 404 when the category does not exist. */
+  /** Renames, reorders or switches a category on or off; returns the full category like the admin list item; 404 when it does not exist. */
   @PutMapping("/categories/{id}")
-  public Category updateCategory(@PathVariable UUID id, @Valid @RequestBody CategoryBody b) {
+  public AdminCategory updateCategory(@PathVariable UUID id, @Valid @RequestBody CategoryBody b) {
     return catalog.updateCategory(id, b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active());
   }
 

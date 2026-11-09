@@ -8,6 +8,7 @@ import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.notification.domain.Segment;
 import com.vijay.mall.notification.infra.BroadcastRepository;
 import com.vijay.mall.notification.infra.SegmentQueryRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -49,6 +50,7 @@ public class BroadcastService {
                         String body, String ref) {}
 
   /** A broadcast as the API shows it. */
+  @Schema(name = "BroadcastView")
   public record View(UUID id, Audience audience, String title, String body, String ref, String status, long recipients, long delivered,
                      long pushed, UUID createdBy, Instant createdAt, Instant startedAt, Instant finishedAt, List<String> skipped,
                      UUID segmentId, Segment segment) {}

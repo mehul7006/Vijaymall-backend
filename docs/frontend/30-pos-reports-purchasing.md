@@ -843,8 +843,8 @@ Sorted by `salesPaise` descending. Percentages are of that cashier's own sales, 
 
 ### GET /api/v1/admin/stock/low
 - **Who**: admin only. **Purpose**: reorder list.
-- **Request**: query `limit` int, default 50; values outside 1..200 are clamped silently (no error).
-- **Response**: 200 array (not paged) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: active products at or below their own stock alert level, emptiest first. Set the alert level per product in the catalog admin screens.
+- **Request**: query `limit` int, default 50. **The hard cap is 200 rows**: a `limit` above 200 returns 200 and one below 1 returns 1, silently (no error). There is no `page` parameter and no `hasMore`, so this endpoint can never show more than the 200 emptiest products; the dashboard's `lowStock` list is the same list cut to 10.
+- **Response**: 200 plain array (deliberately not a paged object) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: products whose stock is at or below their own alert level (`lowThreshold`), **sorted by `qty` ascending** (emptiest first; products with the same `qty` come in no guaranteed order). Retired (inactive) products are not filtered out of this list. Set the alert level per product in the catalog admin screens.
 
 ### GET /api/v1/admin/audit-log
 - **Who**: admin only. **Purpose**: "who changed what", newest first.
@@ -1028,7 +1028,7 @@ Money is in paise everywhere below. Everything here is read from the code; nothi
 
 ### GET /api/v1/pos/products (changed): search and incremental refresh
 - `q` still matches names, and now also a **barcode or an item code (PLU)** typed exactly. The PLU is matched when `q` is 1 to 6 digits, leading zeros ignored. A product with an exact barcode/PLU match is listed first. A blank `q` lists everything.
-- New optional `updatedSince` (ISO-8601 instant, e.g. `2026-11-08T10:00:00Z`): only products changed at or after it (the product, its counter details or its barcodes). Use it to refresh an offline copy; use `catalogVersion` from `/pos/sync/status` to decide when. **Limitation**: a barcode that was only deleted is not seen by `updatedSince` (only creation times are kept for barcodes). A malformed instant is a 400.
+- New optional `updatedSince`: only products changed at or after it (the product, its counter details or its barcodes). Use it to refresh an offline copy; use `catalogVersion` from `/pos/sync/status` to decide when. **Limitation**: a barcode that was only deleted is not seen by `updatedSince` (only creation times are kept for barcodes). **Accepted formats** (the same parser as every request date, see file 00): `2026-11-08T10:00:00Z` or with an offset `2026-11-08T15:30:00+05:30`; a zone-less date-time `2026-11-08T15:30:00` (India time); a plain date `2026-11-08` (start of that day, India time). Before this release only the first form was accepted and the others gave a bare 400. Anything else is a 400 `VALIDATION_FAILED`. Typical use: keep the largest `updatedAt`/the time you started the last refresh and send it back; for the first full download omit the parameter.
 - Each product gains four fields: `packSize` (string, `""` when none), `unit` (string, `""` when none), `variantName` (string, `""` when none) and `displayName`. The same fields are on the product inside `GET /pos/barcode/{code}`.
 - **`displayName`** is what to show on the counter: the English `name`, then the variant name, then the pack size, e.g. `Basmati Rice Premium 1 kg`. Rules: words of the variant name that are already in the name (case-insensitive) are not repeated; a pack size already written in the name as a whole phrase is left out; with no variant and no pack size it equals `name`.
 - Paged lists carry `totalExact` and `hasMore` (see the paging note below).
@@ -1052,3 +1052,100 @@ Documented in the addendum "flash-sale prices at the counter" above and in `40-f
 - `total` is exact up to **10,000** rows. Above that, `total` = `10000` and `totalExact` = `false` (show "10,000+").
 - `hasMore` is **always exact**: keep paging until it is `false`. Do not compute "last page" from `total` when `totalExact` is `false`.
 - No cached totals: the numbers are never out of date. Existing fields are unchanged.
+
+## Addendum: round 2 (2026-11-09 evening)
+
+Everything below is read from the code (PosController, PosService, PaymentRules, ReceiptText). Money is in paise.
+
+### Payment-mode error text depends on the context
+Same rule everywhere (trimmed, case-insensitive, no aliases), two texts:
+- A **bill** (`POST /pos/sales`, bills in `POST /pos/sync/sales`): `payment mode must be CASH, UPI or CARD, or CREDIT on a bill (got "xyz")`.
+- A **refund or repayment** (`refunds[].mode` of a return, `refundMode`, `payments[].mode` of `POST /pos/credit/payments`): `payment mode must be CASH, UPI or CARD (got "xyz")`.
+A missing mode ends `(got none)`. So `CREDIT` is valid on a bill and the text for a bill mentions it; on a refund or repayment `CREDIT` is refused with the shorter text. Both are `400 VALIDATION_FAILED`.
+
+### GET /api/v1/pos/shop: roundOffMode
+`roundOffMode` is `"NONE"` or `"NEAREST_RUPEE"` (the admin config `gst.roundOff`). With `NEAREST_RUPEE` the payable total is rounded to a whole rupee, 50 paise rounds up; the paise added are `roundOffPaise` (negative = taken off) on `/pos/quote` and on the sale, and `totalPaise` already includes it. Payments must add up to `totalPaise` after rounding. With `NONE`, `roundOffPaise` is 0. Example: items 249.60 -> `roundOffPaise` 40, `totalPaise` 25000; items 249.40 -> `roundOffPaise` -40, `totalPaise` 24900.
+```json
+{ "shopName": "Vijay Super Mall", "roundOffMode": "NEAREST_RUPEE" }
+```
+
+### POST /api/v1/pos/sales/{id}/returns: refundMode
+Header `Idempotency-Key` required. Body (`items` required, the rest optional):
+```json
+{ "items": [ { "saleItemId": "uuid-of-bill-line", "qty": 1, "restock": true } ], "reason": "damaged", "refundMode": "UPI" }
+```
+- `refundMode` `CASH`, `UPI` or `CARD` (trimmed, case-insensitive) pays the whole refund in that one mode. Or send `refunds` for a split: `"refunds": [ { "mode": "CASH", "amountPaise": 5000 }, { "mode": "UPI", "amountPaise": 4000 } ]`, which must add up to the part that is paid out. Never both (`400`, `fields.refundMode` = `cannot be combined with refunds: send one or the other`).
+- Neither sent: the bill's own mode if it was paid in exactly one of CASH/UPI/CARD, otherwise CASH.
+- Bad mode: `400` `fields.refundMode` = `payment mode must be CASH, UPI or CARD (got "xyz")`. On a credit bill the refund first cancels what the customer still owes; only the rest is paid out in `refundMode`. If nothing is left to pay out, no refund line is made and the mode is unused.
+- Response: the return record with `creditNoteNo`, the refund lines actually paid (`refunds[].mode`, `amountPaise`), `refundTotalPaise` and `creditAdjustedPaise`.
+
+### GET /api/v1/pos/sales/{id}/returns/{returnId}/receipt?width=32|48
+Response `{ "width": 32, "text": "..." }`. The text, 32 columns, for a return of 2 soap and 1.5 kg of loose sugar where 20.00 only reduced the customer's credit and 92.50 was paid out by UPI (lines end with a newline; amounts are right-aligned; weighed items show kg):
+```
+        Vijay Super Mall
+       Market Road, Surat
+         Ph: 9876543210
+     GSTIN: 24ABCDE1234F1Z5
+--------------------------------
+CREDIT NOTE
+CN: VSM-CN/2026-27/000003
+Orig Inv: VSM/2026-27/000007
+27-10-2026 10:30
+Cashier: Asha  Cust: 9000000001
+--------------------------------
+Soap
+  Returned 2 (12%)         45.00
+Loose Sugar
+  Returned 1.500 kg (5%)   67.50
+--------------------------------
+Taxable                   100.00
+CGST                        6.00
+SGST                        6.50
+--------------------------------
+Refund total              112.50
+Credit reduced             20.00
+Refund UPI                 92.50
+Reason: damaged
+--------------------------------
+           Thank you!
+```
+Parts that are empty are left out: `Ph:`, `GSTIN:`, `Cust:` (walk-in), `Reason:`, and `Credit reduced` (only shown when part of the refund only reduced credit). One `Refund <MODE>` line per paid mode. At width 48 the same layout is wider (lines up to 48 characters). Bad width: `400` `fields.width` = `width must be 32 or 48`; unknown bill or return: `404 NOT_FOUND`.
+
+### GET /api/v1/pos/credit/payments/{id}/receipt?width=32|48
+`id` is the payment id from `POST /pos/credit/payments`. Response `{ "width": 32, "text": "..." }`; sample for a 30.00 repayment (10.00 cash + 20.00 UPI) that took the balance from 50.00 to 20.00:
+```
+        Vijay Super Mall
+       Market Road, Surat
+         Ph: 9876543210
+     GSTIN: 24ABCDE1234F1Z5
+--------------------------------
+CREDIT PAYMENT RECEIPT
+Receipt: VSM-CR/2026-27/000002
+27-10-2026 10:30
+Cashier: Asha
+Customer: 9000000001
+--------------------------------
+Balance before             50.00
+Paid CASH                  10.00
+Paid UPI                   20.00
+Amount paid                30.00
+Balance after              20.00
+Note: part payment
+--------------------------------
+           Thank you!
+```
+`Note:` appears only when a note was sent. Balance before/after are the balances right before and after this payment (not today's). Errors: `404 NOT_FOUND` (`Payment`), `400` `fields.width`.
+
+### POST /api/v1/pos/credit/payments
+Request and response are in the section above (the response `id` is the id for the receipt URL). Its UI note "no receipt-text endpoint" is out of date: use the receipt endpoint above for the printable text.
+
+### GET /api/v1/pos/products: updatedSince and the four extra fields
+- **updatedSince** accepts `2026-11-08T10:00:00Z`, `2026-11-08T15:30:00+05:30`, `2026-11-08T15:30:00` (India time) and `2026-11-08` (start of that day, India time); anything else is `400`. Details in the 2026-11-09 addendum above.
+- Each product has `packSize` (`""` when none), `unit` (`""` when none), `variantName` (`""` when none) and `displayName`:
+```json
+{ "productId": "uuid", "name": "Basmati Rice Premium", "packSize": "1 kg", "unit": "kg", "variantName": "Premium", "displayName": "Basmati Rice Premium 1 kg", "pricePaise": 14000 }
+```
+`displayName` = English `name`, then the variant name, then the pack size, with repeats removed (variant words already in the name are not repeated, a pack size already written in the name is left out); with no variant and no pack size it equals `name`. Use it as the line title at the counter and on the bill preview.
+
+### GET /api/v1/admin/stock/low
+Plain array, unchanged. Cap 200 rows (`limit` 1..200, default 50), sorted by `qty` ascending. See the report section above.

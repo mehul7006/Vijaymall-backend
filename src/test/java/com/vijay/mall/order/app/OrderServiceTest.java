@@ -482,7 +482,7 @@ class OrderServiceTest {
     when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
     stubPlaced("PLACED");
     OrderService.PlaceCommand base = cmd("COD", 10000, addressId, Fulfilment.DELIVERY);
-    service.place(user, "key-slot", new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000, slot));
+    service.place(user, "key-slot", new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000L, slot));
     ArgumentCaptor<OrderRepository.NewOrder> o = ArgumentCaptor.forClass(OrderRepository.NewOrder.class);
     verify(repo).insert(o.capture());
     return o.getValue();
@@ -502,7 +502,7 @@ class OrderServiceTest {
   void aSlotLongerThanFortyCharactersIsRejectedBeforeAnythingIsSaved() {
     when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
     OrderService.PlaceCommand base = cmd("COD", 10000, addressId, Fulfilment.DELIVERY);
-    OrderService.PlaceCommand tooLong = new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000, "x".repeat(41));
+    OrderService.PlaceCommand tooLong = new OrderService.PlaceCommand(base.quote(), addressId, "COD", 10000L, "x".repeat(41));
     assertEquals("VALIDATION_FAILED", assertThrows(ApiException.class, () -> service.place(user, "k", tooLong)).code());
     verify(repo, never()).insert(any());
   }
@@ -569,5 +569,22 @@ class OrderServiceTest {
       assertEquals("VALIDATION_FAILED", assertThrows(ApiException.class, () -> service.place(user, "k-" + method, c)).code());
     }
     verify(repo, never()).insert(any());
+  }
+
+  @Test
+  void leavingOutTheExpectedTotalSkipsThePriceCheck() {
+    when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
+    stubPlaced("PLACED");
+    OrderService.PlaceCommand base = cmd("COD", 1, addressId, Fulfilment.DELIVERY);
+    service.place(user, "key-no-total", new OrderService.PlaceCommand(base.quote(), addressId, "COD", null, null));
+    verify(repo).insert(any());
+  }
+
+  @Test
+  void unknownPaymentMethodIsEchoedBack() {
+    when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 0, null));
+    OrderService.PlaceCommand c = cmd("CASH", 10000, addressId, Fulfilment.DELIVERY);
+    ApiException e = assertThrows(ApiException.class, () -> service.place(user, "key-cash", c));
+    assertEquals("must be COD or ONLINE (got \"CASH\")", e.getMessage());
   }
 }

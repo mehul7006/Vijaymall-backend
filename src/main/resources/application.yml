@@ -147,6 +147,9 @@ app:
     # Most admin broadcasts one admin may create per hour (429 RATE_LIMITED after that).
     broadcast-per-hour: ${BROADCAST_PER_HOUR:20}
   rate-limit:
+    # Login codes one e-mail address, and one client address, may ask for per hour (429 RATE_LIMITED after that). The dev profile raises both.
+    otp-per-email-hour: ${OTP_PER_EMAIL_HOUR:5}
+    otp-per-ip-hour: ${OTP_PER_IP_HOUR:20}
     # Header carrying the real client IP when behind a trusted proxy, e.g. CF-Connecting-IP. Empty = use the socket address.
     client-ip-header: ${CLIENT_IP_HEADER:}
   cors:

@@ -9,6 +9,7 @@ import com.vijay.mall.notification.domain.Segment;
 import com.vijay.mall.notification.domain.SegmentValidator;
 import com.vijay.mall.notification.infra.SegmentQueryRepository;
 import com.vijay.mall.notification.infra.SegmentRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -27,6 +28,7 @@ public class SegmentService {
   static final int MAX_DESCRIPTION = 300;
 
   /** A saved segment as the API shows it. */
+  @Schema(name = "SegmentView")
   public record View(UUID id, String name, String description, String match, List<Rule> rules, UUID createdBy, Instant createdAt, Instant updatedAt) {}
 
   /** One matching customer in a preview, with the mobile number masked. */

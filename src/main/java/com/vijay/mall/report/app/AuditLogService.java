@@ -6,6 +6,7 @@ import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuditLogService {
   /** actorName is the person's name or e-mail, null when the action was the system's own. */
+  @Schema(name = "AuditLogRow")
   public record Row(UUID id, UUID actorId, String actorName, String action, String entity, String entityId, String change, Instant at) {}
 
   private static final long MAX_DAYS = 93;

@@ -2,6 +2,7 @@ package com.vijay.mall.pos.infra;
 
 import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class OfflineExceptionRepository {
   /** One exception with the bill it belongs to, as the manager sees it. */
+  @Schema(name = "OfflineExceptionRow")
   public record Row(UUID id, UUID saleId, String invoiceNo, UUID cashierId, String cashierName, Instant soldAt, OfflineExceptionKind kind,
                     String detail, UUID productId, String productName, String expected, String actual, Instant createdAt,
                     UUID reviewedBy, Instant reviewedAt, String reviewNote) {}

@@ -7,6 +7,7 @@ import com.vijay.mall.config.Settings.Type;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -48,6 +49,7 @@ public class RuntimeSettings implements MeterBinder {
   public enum Source { DATABASE, ENVIRONMENT, DEFAULT }
 
   /** What the admin screen shows for one setting. value is null for secrets (use {@code set}). */
+  @Schema(name = "SettingRow")
   public record Row(String key, String group, String groupLabel, String type, String label, String help, boolean secret, boolean set,
                     String value, String source, List<String> allowed, Long min, Long max, boolean restart) {}
 
@@ -56,6 +58,7 @@ public class RuntimeSettings implements MeterBinder {
    * @param key the setting key, see {@link Settings}
    * @param value the new value; blank clears the setting
    */
+  @Schema(name = "SettingChange")
   public record Change(String key, String value) {}
 
   private final AppSettingJpa jpa;
