@@ -13,6 +13,7 @@ class PosPaymentEntity extends BaseEntity {
   String mode;
   long amountPaise;
   String reference;
+  UUID terminalPaymentId;
 
   /** Required by JPA; not for application code. */
   protected PosPaymentEntity() {}

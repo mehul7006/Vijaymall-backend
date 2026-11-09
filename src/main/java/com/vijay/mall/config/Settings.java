@@ -24,7 +24,7 @@ public final class Settings {
   /** Sections of the config screen. */
   public enum Group {
     PAYMENT("Online payment"), PUSH("Push notifications"), SMS("SMS login codes"), EMAIL("E-mail login codes"),
-    LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), SECURITY("Security");
+    PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), SECURITY("Security");
 
     /** The heading shown to the admin. */
     public final String label;
@@ -76,6 +76,58 @@ public final class Settings {
   /** Minutes a customer has to pay an online order before it is cancelled (5 to 120). */
   public static final Def ONLINE_TIMEOUT_MINUTES = number("payment.onlineTimeoutMinutes", Group.PAYMENT, "Minutes to pay an online order",
       "An online order nobody pays for in this time is cancelled.", "app.payment.online-timeout-minutes", "15", 5, 120);
+
+  // ---- Paytm wireless card machine
+  /** Master switch for the Paytm card machine. */
+  public static final Def PAYTM_ENABLED = flag("paytm.enabled", Group.PAYTM, "Use the Paytm card machine",
+      "Needs the merchant id, merchant key and channel id below. It cannot be switched on while one of them is missing.", "app.paytm.enabled", "false");
+  /** STAGING or PRODUCTION. */
+  public static final Def PAYTM_ENVIRONMENT = choice("paytm.environment", Group.PAYTM, "Paytm environment",
+      "STAGING = Paytm's test system (no real money). PRODUCTION = live.", "app.paytm.environment", "STAGING", "STAGING", "PRODUCTION");
+  /** Optional override of the Paytm host. */
+  public static final Def PAYTM_BASE_URL = text("paytm.baseUrl", Group.PAYTM, "Paytm address (optional)",
+      "Leave blank to use Paytm's standard address for the environment above. Fill it only if Paytm gave you another host. Must start with https://.",
+      "app.paytm.base-url", "", 300);
+  /** Paytm merchant id. */
+  public static final Def PAYTM_MID = text("paytm.mid", Group.PAYTM, "Paytm merchant id (MID)", "From the Paytm dashboard or your Paytm welcome mail.",
+      "app.paytm.mid", "", 40);
+  /** Paytm merchant key (encrypted). */
+  public static final Def PAYTM_MERCHANT_KEY = secret("paytm.merchantKey", Group.PAYTM, "Paytm merchant key",
+      "The 16-character key from the Paytm dashboard. Leave blank to keep the saved one.", "app.paytm.merchant-key", 64);
+  /** Channel id issued by Paytm for the wireless machine API. */
+  public static final Def PAYTM_CHANNEL_ID = text("paytm.channelId", Group.PAYTM, "Paytm channel id", "Issued by Paytm when wireless payments are enabled for you.",
+      "app.paytm.channel-id", "", 40);
+  /** Seconds between status checks. */
+  public static final Def PAYTM_POLL_SECONDS = number("paytm.pollSeconds", Group.PAYTM, "Seconds between payment checks",
+      "How often an open card payment is checked with Paytm (Paytm advises about 10).", "app.paytm.poll-seconds", "10", 3, 60);
+  /** Seconds to wait for the customer. */
+  public static final Def PAYTM_WAIT_SECONDS = number("paytm.waitSeconds", Group.PAYTM, "Seconds to wait for the customer",
+      "After this long an unpaid card payment is closed as expired (after one last check).", "app.paytm.wait-seconds", "180", 30, 900);
+  /** Whether the machine accepts the amount without the cashier touching it. */
+  public static final Def PAYTM_AUTO_ACCEPT = flag("paytm.autoAccept", Group.PAYTM, "Machine accepts the amount by itself",
+      "On: the customer goes straight to paying. Off: the cashier presses accept on the machine first.", "app.paytm.auto-accept", "true");
+  /** Which ways the machine offers. */
+  public static final Def PAYTM_PAYMENT_MODE = choice("paytm.paymentMode", Group.PAYTM, "Ways to pay on the machine",
+      "ALL = card and QR. CARD = card only. QR = QR only.", "app.paytm.payment-mode", "ALL", "ALL", "CARD", "QR");
+  /** Time-out sent to Paytm with the sale; 0 leaves it out. */
+  public static final Def PAYTM_TIMEOUT_CONFIG = number("paytm.timeoutConfig", Group.PAYTM, "Paytm time-out value (0 = not sent)",
+      "Paytm accepts 1 to 60 here but its documentation gives no unit. Leave 0 unless Paytm tells you what to use.", "app.paytm.timeout-config", "0", 0, 60);
+  /** Whether the settlement import from the Paytm API is on. */
+  public static final Def PAYTM_SETTLEMENT_ENABLED = flag("paytm.settlement.enabled", Group.PAYTM, "Read settlements from the Paytm API",
+      "Untested until Paytm gives API access. The dashboard Settlement Report file can always be imported instead.", "app.paytm.settlement.enabled", "false");
+  /** How the settlement API is authenticated. */
+  public static final Def PAYTM_SETTLEMENT_AUTH = choice("paytm.settlement.authStyle", Group.PAYTM, "Settlement API sign-in style",
+      "CHECKSUM = signed with the merchant key. BEARER = a token from Paytm. Ask Paytm which one your account uses.",
+      "app.paytm.settlement.auth-style", "BEARER", "CHECKSUM", "BEARER");
+  /** Bearer token for the settlement API (encrypted). */
+  public static final Def PAYTM_SETTLEMENT_TOKEN = secret("paytm.settlement.token", Group.PAYTM, "Settlement API token",
+      "Only for the BEARER style. Leave blank to keep the saved one.", "app.paytm.settlement.token", 2000);
+  /** Address of the secure settlement host. */
+  public static final Def PAYTM_SETTLEMENT_BASE_URL = text("paytm.settlement.baseUrl", Group.PAYTM, "Settlement API address (optional)",
+      "Leave blank for the standard production address. Must start with https://.", "app.paytm.settlement.base-url", "", 300);
+  /** How many days back each settlement sync reads. */
+  public static final Def PAYTM_SETTLEMENT_SYNC_DAYS = number("paytm.settlement.syncDays", Group.PAYTM, "Settlement days to read each time",
+      "Each sync asks Paytm for this many days back, so late settlements are caught.", "app.paytm.settlement.sync-days", "7", 1, 60);
 
   // ---- push (Firebase Cloud Messaging)
   /** Firebase service account JSON used for push notifications (encrypted). */
@@ -202,6 +254,9 @@ public final class Settings {
   }
 
   private static final List<Def> BASE = List.of(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, ONLINE_TIMEOUT_MINUTES,
+      PAYTM_ENABLED, PAYTM_ENVIRONMENT, PAYTM_BASE_URL, PAYTM_MID, PAYTM_MERCHANT_KEY, PAYTM_CHANNEL_ID, PAYTM_POLL_SECONDS,
+      PAYTM_WAIT_SECONDS, PAYTM_AUTO_ACCEPT, PAYTM_PAYMENT_MODE, PAYTM_TIMEOUT_CONFIG, PAYTM_SETTLEMENT_ENABLED, PAYTM_SETTLEMENT_AUTH,
+      PAYTM_SETTLEMENT_TOKEN, PAYTM_SETTLEMENT_BASE_URL, PAYTM_SETTLEMENT_SYNC_DAYS,
       FCM_SERVICE_ACCOUNT, SMS_CHANNEL, SMS_HTTP_URL, SMS_HTTP_METHOD, SMS_HTTP_HEADERS, SMS_HTTP_BODY, SMS_SENDER_ID, SMS_DLT_TEMPLATE_ID,
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,

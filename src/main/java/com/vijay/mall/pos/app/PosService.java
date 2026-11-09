@@ -32,6 +32,7 @@ import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.CreditNoteData;
 import com.vijay.mall.pos.domain.PaymentRules;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
+import com.vijay.mall.payment.paytm.app.TerminalPaymentService;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
@@ -402,6 +403,7 @@ public class PosService implements ReferenceLookup {
     }
 
     UUID saleId = UUID.randomUUID();
+    List<Pay> paid = withTerminalPayments(pays, saleId, cashierId);
     int earned = customerId == null ? 0 : (int) q.coinsToEarn();
     List<InventoryService.Item> taken = bill.lines().stream().map(l -> new InventoryService.Item(l.productId(), l.qty())).toList();
     List<OfflineFinding> findings = new ArrayList<>();
@@ -429,7 +431,7 @@ public class PosService implements ReferenceLookup {
     List<SaleItemRecord> items = bill.lines().stream().map(l -> new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(),
         l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(),
         l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0)).toList();
-    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
+    List<PaymentRecord> payments = paid.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId())).toList();
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), payable, bill.tax().taxable(), bill.tax().cgst(),
         bill.tax().sgst(), earned, in.cashTenderedPaise(), change, soldAt, items, payments, PaymentRules.classify(payLines),
@@ -448,6 +450,34 @@ public class PosService implements ReferenceLookup {
     log.info("POS sale invoice={} cashier={} total={} lines={} payments={} onCredit={} coinsUsed={} coinsEarned={}", invoiceNo,
         cashierId, payable, items.size(), payments.size(), onCredit, q.coinsUsed(), earned);
     return saleId;
+  }
+
+  private TerminalPaymentService terminalPayments;
+
+  /** Optional (plain unit tests run without it): attaches paid card machine payments to the payment lines that name one. */
+  @Autowired(required = false)
+  void setTerminalPayments(TerminalPaymentService terminalPayments) { this.terminalPayments = terminalPayments; }
+
+  /**
+   * Attaches the card machine payment of every line that names one (it must be paid, unused, of the line's amount and fit its
+   * mode) and fills an empty reference with the machine's RRN and authorisation code. Lines without one stay as they are.
+   */
+  private List<Pay> withTerminalPayments(List<Pay> pays, UUID saleId, UUID cashierId) {
+    List<Pay> out = new ArrayList<>();
+    for (int i = 0; i < pays.size(); i++) {
+      Pay p = pays.get(i);
+      if (p.terminalPaymentId() == null) {
+        out.add(p);
+        continue;
+      }
+      String field = "payments[" + i + "].terminalPaymentId";
+      if (!"CARD".equals(p.mode()) && !"UPI".equals(p.mode())) throw ApiException.validation(field, "only a CARD or UPI line can use a card machine payment");
+      if (terminalPayments == null) throw ApiException.validation(field, "the card machine is not available");
+      TerminalPaymentService.Confirmed c = terminalPayments.attach(p.terminalPaymentId(), saleId, p.amountPaise(), p.mode(), field, cashierId);
+      String ref = p.reference() == null || p.reference().isBlank() ? c.reference() : p.reference();
+      out.add(new Pay(p.mode(), p.amountPaise(), ref, p.terminalPaymentId()));
+    }
+    return out;
   }
 
   private OfflineExceptionService offlineExceptions;
@@ -502,6 +532,11 @@ public class PosService implements ReferenceLookup {
       throw ApiException.validation("cart", "a coupon or coin redemption cannot be checked offline: ring this bill without it");
     }
     List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
+    for (int i = 0; i < pays.size(); i++) {
+      if (pays.get(i).terminalPaymentId() != null) {
+        throw ApiException.validation("payments[" + i + "].terminalPaymentId", "a card machine payment cannot be used on an offline bill");
+      }
+    }
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     if (PaymentRules.creditAmount(payLines) > 0) {
       throw ApiException.validation("payments", "credit (udhar) cannot be given on an offline bill: it needs the customer's account");

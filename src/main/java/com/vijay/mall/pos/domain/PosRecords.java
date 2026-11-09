@@ -55,7 +55,10 @@ public final class PosRecords {
     }
 
     /** One stored payment on a bill or refund: mode, amount in paise and reference. */
-    public record PaymentRecord(String mode, long amountPaise, String reference) { }
+    public record PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId) {
+        /** A payment without a card machine payment. */
+        public PaymentRecord(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null); }
+    }
 
     /**
      * One stored line of a bill, money in paise: gross, discount, net and the GST split, plus how many units have

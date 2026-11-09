@@ -100,6 +100,7 @@ public class PosSaleRepository {
       r.mode = p.mode();
       r.amountPaise = p.amountPaise();
       r.reference = p.reference();
+      r.terminalPaymentId = p.terminalPaymentId();
       payments.save(r);
     });
     items.flush();
@@ -199,7 +200,7 @@ public class PosSaleRepository {
         .collect(Collectors.groupingBy(i -> i.saleId, Collectors.mapping(PosSaleRepository::toItem, Collectors.toList())));
     Map<UUID, List<PaymentRecord>> pays = payments.findBySaleIdIn(ids).stream()
         .collect(Collectors.groupingBy(p -> p.saleId,
-            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference), Collectors.toList())));
+            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference, p.terminalPaymentId), Collectors.toList())));
     return list.stream().map(s -> new SaleRecord(s.id, s.invoiceNo, s.cashierId, s.customerId, s.customerMobile,
         s.subtotalPaise, s.couponCode, s.couponDiscountPaise, s.coinsUsed, s.coinDiscountPaise, s.totalPaise,
         s.taxablePaise, s.cgstPaise, s.sgstPaise, s.coinsEarned, s.tenderedPaise, s.changePaise, s.createdAt,

@@ -32,7 +32,11 @@ public final class PosViews {
    */
   public record Pay(@Size(max = 20) String mode,
                     @Min(value = 0, message = "must be at least 0") @Max(value = MAX_PAISE, message = "must be at most 100000000") long amountPaise,
-                    @Size(max = 100) String reference) {}
+                    @Size(max = 100) String reference,
+                    @Schema(description = "Optional: id of a SUCCESS card machine payment (mode CARD or UPI, same amount, not used before)") UUID terminalPaymentId) {
+    /** A payment part without a card machine payment (the shape older clients send). */
+    public Pay(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null); }
+  }
 
   /** The largest amount any single money input accepts: 100,000,000 paise (10 lakh rupees). */
   public static final long MAX_PAISE = 100_000_000L;
