@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
-import com.vijay.mall.identity.infra.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.time.Instant;
@@ -184,56 +183,26 @@ class OrderRepositoryCoverageTest {
   @Test
   void adminListPicksTheRightQueryForEveryFilterCombination() {
     when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of());
-    when(orders.listByNumber(any(), any())).thenReturn(List.of());
+    when(orders.listByNumberOrCustomer(any(), any())).thenReturn(List.of());
     when(orders.findPageByStatus(any(), any())).thenReturn(List.of());
-    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of());
+    when(orders.listByStatusAndNumberOrCustomer(any(), any(), any())).thenReturn(List.of());
 
     repo.adminList(null, null, 0, 10);
     repo.adminList("  ", "  ", 0, 10);
     verify(orders, org.mockito.Mockito.times(2)).findPageBy(any(Pageable.class));
 
     repo.adminList(null, " 1001 ", 0, 10);
-    verify(orders).listByNumber(org.mockito.ArgumentMatchers.eq("%1001%"), any());
+    verify(orders).listByNumberOrCustomer(org.mockito.ArgumentMatchers.eq("%1001%"), any());
 
     repo.adminList("PLACED", null, 0, 10);
     repo.adminList("PLACED", "", 0, 10);
     verify(orders, org.mockito.Mockito.times(2)).findPageByStatus(org.mockito.ArgumentMatchers.eq("PLACED"), any());
 
     repo.adminList("PLACED", " 77 ", 0, 10);
-    verify(orders).listByStatusAndNumber(org.mockito.ArgumentMatchers.eq("PLACED"), org.mockito.ArgumentMatchers.eq("%77%"), any());
+    verify(orders).listByStatusAndNumberOrCustomer(org.mockito.ArgumentMatchers.eq("PLACED"), org.mockito.ArgumentMatchers.eq("%77%"), any());
     assertThat(OrderRepository.pattern(" VSM-1_0%1 ")).as("case folded, wildcards removed").isEqualTo("%vsm-101%");
     verify(items, never()).countsFor(any());
     verify(orders, never()).count();
-  }
-
-  @Test
-  void aSearchAlsoFindsOrdersOfCustomersMatchingTheText() {
-    UserRepository users = mock(UserRepository.class);
-    repo.setUsers(users);
-    UUID c = UUID.randomUUID();
-    when(users.idsMatching("%9876%", OrderRepository.MAX_CUSTOMER_MATCHES)).thenReturn(List.of(c));
-    when(orders.listByNumberOrUsers(any(), any(), any())).thenReturn(List.of());
-    when(orders.listByStatusAndNumberOrUsers(any(), any(), any(), any())).thenReturn(List.of());
-    repo.adminList(null, "9876", 0, 10);
-    verify(orders).listByNumberOrUsers(ArgumentMatchers.eq("%9876%"), ArgumentMatchers.eq(List.of(c)), any());
-    repo.adminList("PLACED", "9876", 0, 10);
-    verify(orders).listByStatusAndNumberOrUsers(ArgumentMatchers.eq("PLACED"), ArgumentMatchers.eq("%9876%"),
-        ArgumentMatchers.eq(List.of(c)), any());
-    verify(orders, never()).listByNumber(any(), any());
-    // no text, no customer lookup
-    repo.adminList(null, null, 0, 10);
-    verify(users, Mockito.times(2)).idsMatching(any(), ArgumentMatchers.anyInt());
-  }
-
-  @Test
-  void aSearchWithNoMatchingCustomerFallsBackToTheOrderNumberQueries() {
-    UserRepository users = mock(UserRepository.class);
-    repo.setUsers(users);
-    when(users.idsMatching(any(), ArgumentMatchers.anyInt())).thenReturn(List.of());
-    when(orders.listByNumber(any(), any())).thenReturn(List.of());
-    repo.adminList(null, "5", 0, 10);
-    verify(orders).listByNumber(ArgumentMatchers.eq("%5%"), any());
-    verify(orders, never()).listByNumberOrUsers(any(), any(), any());
   }
 
   @Test
@@ -301,37 +270,24 @@ class OrderRepositoryCoverageTest {
   }
 
   @Test
-  void theCountFollowsTheSameFiltersAsThePage() {
+  void theCountFollowsTheSameFiltersAsThePageAndMatchesEveryCustomerInSql() {
     OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
     when(items.countsFor(any())).thenReturn(List.of());
     when(orders.findPageByStatus(any(), any())).thenReturn(List.of(e, e, e));
-    when(orders.listByNumber(any(), any())).thenReturn(List.of(e, e, e));
-    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of(e, e, e));
+    when(orders.listByNumberOrCustomer(any(), any())).thenReturn(List.of(e, e, e));
+    when(orders.listByStatusAndNumberOrCustomer(any(), any(), any())).thenReturn(List.of(e, e, e));
     Query q = countReturns(44_794L);
     repo.adminList("PLACED", null, 0, 2);
     verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and o.status = :status limit 10001) bounded");
     verify(q).setParameter("status", "PLACED");
+    String customers = " and o.id in (select a.id from orders a where lower(a.order_no) like :pattern union select b.id from orders b "
+        + "where b.user_id in (select u.id from users u where lower(coalesce(u.name, '')) like :pattern "
+        + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))";
     repo.adminList(null, "77", 0, 2);
-    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and lower(o.order_no) like :pattern limit 10001) bounded");
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1" + customers + " limit 10001) bounded");
     verify(q).setParameter("pattern", "%77%");
     repo.adminList("PLACED", "77", 0, 2);
-    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and o.status = :status and lower(o.order_no) like :pattern limit 10001) bounded");
-  }
-
-  @Test
-  void aSearchThatAlsoMatchesCustomersCountsTheirOrdersToo() {
-    UserRepository users = mock(UserRepository.class);
-    repo.setUsers(users);
-    UUID c = UUID.randomUUID();
-    OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
-    when(items.countsFor(any())).thenReturn(List.of());
-    when(users.idsMatching(any(), ArgumentMatchers.anyInt())).thenReturn(List.of(c));
-    when(orders.listByNumberOrUsers(any(), any(), any())).thenReturn(List.of(e, e, e));
-    Query q = countReturns(12L);
-    var page = repo.adminList(null, "7", 0, 2);
-    assertThat(page.total()).isEqualTo(12);
-    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and (lower(o.order_no) like :pattern or o.user_id in (:users)) limit 10001) bounded");
-    verify(q).setParameter("users", List.of(c));
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and o.status = :status" + customers + " limit 10001) bounded");
   }
 
   @Test

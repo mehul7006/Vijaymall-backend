@@ -128,10 +128,11 @@ class SegmentServiceTest {
 
   @Test
   void previewReportsTheCountSampleAndMasksMobileNumbers() {
-    when(query.count(any(), eq(NOW), eq(10_000))).thenReturn(new SegmentQueryRepository.Count(10_000, 4, false));
     UUID u = UUID.randomUUID();
-    when(query.sample(any(), eq(NOW), eq(5))).thenReturn(List.of(new SegmentQueryRepository.Sample(u, "Asha", "9876543210"),
-        new SegmentQueryRepository.Sample(u, null, null), new SegmentQueryRepository.Sample(u, "Short", "1234")));
+    when(query.preview(any(), eq(NOW), eq(10_000), eq(5))).thenReturn(new SegmentQueryRepository.Preview(
+        new SegmentQueryRepository.Count(10_000, 4, false),
+        List.of(new SegmentQueryRepository.Sample(u, "Asha", "9876543210"),
+            new SegmentQueryRepository.Sample(u, null, null), new SegmentQueryRepository.Sample(u, "Short", "1234"))));
 
     var r = service.preview(null, good);
 

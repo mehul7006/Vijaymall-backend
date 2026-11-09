@@ -110,6 +110,7 @@ Common statuses and what the UI should do:
 | 422 | `ORDERS_PAUSED`, others | The request is valid but a business rule refuses it. Show `message` |
 | 429 | `RATE_LIMITED` | Too many requests. Wait, then retry; do not hammer |
 | 503 | provider errors | A provider (SMS, payment) is not set up or is down. Show `message` |
+| 503 | `SERVICE_BUSY` | The database pool is full: retry after `Retry-After` seconds (`details.retryAfterSeconds`); distinct from provider 503s like `SMS_NOT_CONFIGURED`. Also sent for a token check that could not reach the database |
 
 Unknown codes: show `message`. Each endpoint lists its own specific codes.
 

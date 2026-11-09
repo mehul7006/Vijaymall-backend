@@ -192,12 +192,6 @@ public class UserRepository {
     return BoundedCount.assemble(rows, page, size, () -> jpa.countCustomersUpTo(text, pattern, BoundedCount.CAP + 1));
   }
 
-  /**
-   * Ids of up to {@code limit} users whose name, e-mail or mobile contains the pattern (case-insensitive), newest accounts first.
-   * @param pattern lower-case text wrapped in {@code %}, already free of wildcards typed by a person
-   */
-  public List<UUID> idsMatching(String pattern, int limit) { return jpa.idsMatching(pattern, PageRequest.of(0, limit)); }
-
   /** An active admin and the hash of their manager-approval PIN. */
   public record AdminPin(UUID id, String hash) {}
 

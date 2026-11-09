@@ -56,6 +56,26 @@ class AppCachesTest {
   }
 
   @Test
+  void aLoadThatBeganBeforeTheCacheWasEmptiedIsReturnedButNeverStored() {
+    String seenByLoader = caches.get(Name.PRODUCT_LIST, "q", () -> {
+      caches.invalidate(Name.PRODUCT_LIST); // the commit and its invalidation land while this (older) load is still running
+      return load("stale");
+    });
+    assertThat(seenByLoader).as("its own caller still gets the value it read").isEqualTo("stale");
+    assertThat(caches.get(Name.PRODUCT_LIST, "q", () -> load("fresh"))).as("nothing stale was stored").isEqualTo("fresh");
+    assertThat(caches.get(Name.PRODUCT_LIST, "q", () -> load("again"))).as("a load after the clear is stored").isEqualTo("fresh");
+  }
+
+  @Test
+  void aLoadThatBeganBeforeAKeyWasEvictedIsNotStored() {
+    caches.get(Name.BLOCKED_USERS, "u", () -> {
+      caches.evict(Name.BLOCKED_USERS, "u");
+      return load("old");
+    });
+    assertThat(caches.get(Name.BLOCKED_USERS, "u", () -> load("new"))).isEqualTo("new");
+  }
+
+  @Test
   void emptyingACacheMakesTheNextReadFresh() {
     caches.get(Name.CATEGORIES, "active", () -> load("old"));
     caches.invalidate(Name.CATEGORIES);

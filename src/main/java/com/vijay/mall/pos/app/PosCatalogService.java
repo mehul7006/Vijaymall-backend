@@ -116,7 +116,7 @@ public class PosCatalogService {
   public Page<PosProduct> search(String q, int page, int size, Instant updatedSince) {
     Set<UUID> exact = exactMatches(q);
     Page<ProductData> found = exact.isEmpty() && updatedSince == null ? catalog.posSearch(q, page, size)
-        : catalog.posSearch(q, exact, updatedSince, updatedSince == null ? Set.of() : repo.changedSince(updatedSince), page, size);
+        : catalog.posSearch(q, exact, updatedSince, page, size);
     return found.withItems(views(found.items()));
   }
 

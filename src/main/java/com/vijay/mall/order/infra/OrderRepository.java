@@ -4,7 +4,6 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.persistence.BoundedCount;
 import com.vijay.mall.common.persistence.Window;
-import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -357,20 +356,12 @@ public class OrderRepository {
   /** All orders, newest first, optionally of one status. */
   public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
-  private UserRepository users;
-
-  /** Optional (plain unit tests run without it): lets the admin search find orders by the customer's name, mobile or e-mail. */
-  @Autowired(required = false)
-  void setUsers(UserRepository users) { this.users = users; }
-
-  /** At most this many matching customers are used by one admin search, so a very short text cannot build a huge query. */
-  static final int MAX_CUSTOMER_MATCHES = 200;
-
   /**
    * How many orders match, counting at most {@link BoundedCount#CAP} + 1 rows (see {@link BoundedCount}): exact, never cached, and
-   * as cheap on 5 million orders as on 5,000.
+   * as cheap on 5 million orders as on 5,000. A text search matches the order number or any customer whose name, e-mail or mobile
+   * number contains it, decided in SQL (no list of customers is built or capped).
    */
-  private long boundedTotal(String status, String like, List<UUID> customers, boolean anyStatus, boolean anyNumber) {
+  private long boundedTotal(String status, String like, boolean anyStatus, boolean anyNumber) {
     StringBuilder from = new StringBuilder("orders o where 1 = 1");
     Map<String, Object> params = new HashMap<>();
     if (!anyStatus) {
@@ -378,9 +369,10 @@ public class OrderRepository {
       params.put("status", status);
     }
     if (!anyNumber) {
-      from.append(customers.isEmpty() ? " and lower(o.order_no) like :pattern" : " and (lower(o.order_no) like :pattern or o.user_id in (:users))");
+      from.append(" and o.id in (select a.id from orders a where lower(a.order_no) like :pattern union select b.id from orders b "
+          + "where b.user_id in (select u.id from users u where lower(coalesce(u.name, '')) like :pattern "
+          + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))");
       params.put("pattern", like);
-      if (!customers.isEmpty()) params.put("users", customers);
     }
     return BoundedCount.count(em, from.toString(), params);
   }
@@ -394,16 +386,10 @@ public class OrderRepository {
     boolean anyStatus = status == null || status.isBlank();
     boolean anyNumber = q == null || q.isBlank();
     String like = anyNumber ? null : pattern(q);
-    // customers whose name, mobile or e-mail contains the text: their orders match as well as the order number
-    List<UUID> customers = anyNumber || users == null ? List.of() : users.idsMatching(like, MAX_CUSTOMER_MATCHES);
-    boolean withCustomers = !customers.isEmpty();
     List<OrderEntity> content = anyStatus
-        ? (anyNumber ? orders.findPageBy(req)
-            : withCustomers ? orders.listByNumberOrUsers(like, customers, req) : orders.listByNumber(like, req))
-        : (anyNumber ? orders.findPageByStatus(status, req)
-            : withCustomers ? orders.listByStatusAndNumberOrUsers(status, like, customers, req)
-            : orders.listByStatusAndNumber(status, like, req));
+        ? (anyNumber ? orders.findPageBy(req) : orders.listByNumberOrCustomer(like, req))
+        : (anyNumber ? orders.findPageByStatus(status, req) : orders.listByStatusAndNumberOrCustomer(status, like, req));
     // the total is exact: no count when the page settles it, otherwise a count that stops at BoundedCount.CAP rows
-    return summaries(BoundedCount.assemble(content, page, size, () -> boundedTotal(status, like, customers, anyStatus, anyNumber)));
+    return summaries(BoundedCount.assemble(content, page, size, () -> boundedTotal(status, like, anyStatus, anyNumber)));
   }
 }

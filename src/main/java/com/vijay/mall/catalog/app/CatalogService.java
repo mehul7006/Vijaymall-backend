@@ -440,10 +440,14 @@ public class CatalogService {
         .map(p -> p.withStock(stocks.get(p.id()).qty(), stocks.get(p.id()).low()).toCustomer(now)).toList());
   }
 
-  /** Review average and count, written by the review service after every change. */
+  /**
+   * Review average and count, written by the review service after every change. The rating is part of what the remembered product lists
+   * hold, so this announces a catalog change: the lists are emptied when the review commits.
+   */
   @Transactional
   public void updateRating(UUID productId, double rating, int reviewCount) {
     products.setRating(productId, rating, reviewCount);
+    changed();
   }
 
   // ---------- counter (POS) side ----------
@@ -454,11 +458,10 @@ public class CatalogService {
 
   /**
    * Counter search by name that also returns the products in {@code exactIds} (exact barcode or item code matches) first, and
-   * can keep only products changed at or after {@code since} (or whose id is in {@code alsoChanged}).
+   * can keep only products changed at or after {@code since} (the product, its counter attributes or its barcodes).
    */
-  public Page<ProductData> posSearch(String q, Collection<UUID> exactIds, Instant since, Collection<UUID> alsoChanged, int page,
-                                     int size) {
-    return products.searchForCounter(q, exactIds, since, alsoChanged, Math.max(0, page), Page.clampSize(size));
+  public Page<ProductData> posSearch(String q, Collection<UUID> exactIds, Instant since, int page, int size) {
+    return products.searchForCounter(q, exactIds, since, Math.max(0, page), Page.clampSize(size));
   }
 
   /** The variant name of each of these products (empty text when it has none), for the counter. */

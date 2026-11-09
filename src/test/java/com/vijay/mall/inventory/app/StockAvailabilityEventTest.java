@@ -36,43 +36,47 @@ class StockAvailabilityEventTest {
     when(repo.add(any(), anyInt(), any())).thenReturn(1);
   }
 
+  private void stockAfter(int qty) {
+    when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(product, qty, 5)));
+  }
+
   private void catalogEvents(int times) {
     verify(events, times(times)).publishEvent(argThat((Object e) -> e instanceof CatalogChanged c && CatalogChanged.CATALOG.equals(c.area())));
   }
 
   @Test
   void sellingTheLastUnitAnnouncesThatTheProductLeftTheShopList() {
-    when(repo.quantity(product)).thenReturn(0); // 3 were there, 3 taken
+    stockAfter(0); // 3 were there, 3 taken
     service.reserve(List.of(new InventoryService.Item(product, 3)), UUID.randomUUID());
     catalogEvents(1);
   }
 
   @Test
   void sellingSomeButNotAllAnnouncesNothing() {
-    when(repo.quantity(product)).thenReturn(4); // 7 were there, 3 taken
+    stockAfter(4); // 7 were there, 3 taken
     service.reserve(List.of(new InventoryService.Item(product, 3)), UUID.randomUUID());
     catalogEvents(0);
   }
 
   @Test
   void aReturnOrARestockOfAProductThatHadNoneAnnouncesItIsBack() {
-    when(repo.quantity(product)).thenReturn(2); // was 0
+    stockAfter(2); // was 0
     service.release(List.of(new InventoryService.Item(product, 2)), UUID.randomUUID());
     catalogEvents(1);
-    when(repo.quantity(product)).thenReturn(5); // was 3
+    stockAfter(5); // was 3
     service.release(List.of(new InventoryService.Item(product, 2)), UUID.randomUUID());
     catalogEvents(1);
   }
 
   @Test
   void anAdjustmentThatCrossesZeroEitherWayAnnouncesIt() {
-    when(repo.quantity(product)).thenReturn(50); // 0 -> 50
+    stockAfter(50); // 0 -> 50
     service.adjust(product, 50, "RESTOCK", UUID.randomUUID());
     catalogEvents(1);
-    when(repo.quantity(product)).thenReturn(0); // 5 -> 0
+    stockAfter(0); // 5 -> 0
     service.adjust(product, -5, "ADJUST", UUID.randomUUID());
     catalogEvents(2);
-    when(repo.quantity(product)).thenReturn(6); // 10 -> 6
+    stockAfter(6); // 10 -> 6
     service.adjust(product, -4, "ADJUST", UUID.randomUUID());
     catalogEvents(2);
   }
@@ -83,6 +87,22 @@ class StockAvailabilityEventTest {
     when(repo.reserve(any(), anyInt(), any())).thenReturn(1);
     service.takeWhatIsLeft(List.of(new InventoryService.Item(product, 2)), UUID.randomUUID(), "POS_SALE");
     verify(events, never()).publishEvent(argThat((Object e) -> e instanceof RuntimeException));
+  }
+
+  @Test
+  void aThirtyLineSaleReadsTheStockOfAllItsProductsInOneQueryNotThirty() {
+    List<InventoryService.Item> items = new java.util.ArrayList<>();
+    List<InventoryRepository.Stock> rows = new java.util.ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      UUID p = UUID.randomUUID();
+      items.add(new InventoryService.Item(p, 1));
+      rows.add(new InventoryRepository.Stock(p, i == 7 ? 0 : 9, 5)); // only line 7 sold its last unit
+    }
+    when(repo.stocks(any())).thenReturn(rows);
+    service.reserve(items, UUID.randomUUID());
+    verify(repo, times(1)).stocks(any());
+    verify(repo, never()).quantity(any());
+    catalogEvents(1);
   }
 
   @Test

@@ -83,6 +83,8 @@ public class AppCaches implements MeterBinder {
     final AtomicLong clears = new AtomicLong();
     final AtomicLong bypassed = new AtomicLong();
     volatile long lastCleared;
+    /** Bumped by every invalidate or evict; a load stores its result only if this is unchanged since the load began. */
+    long generation;
   }
 
   private static final Logger log = LoggerFactory.getLogger(AppCaches.class);
@@ -112,7 +114,8 @@ public class AppCaches implements MeterBinder {
 
   /**
    * The cached value for the key, or the loader's result (stored for next time). A loader that throws caches nothing and the
-   * exception reaches the caller. A null result is not cached.
+   * exception reaches the caller. A null result is not cached. A load that started before the cache was emptied (or the key evicted)
+ * is not stored either, because it may hold data read before that change; it is still returned to its own caller.
    */
   @SuppressWarnings("unchecked")
   public <T> T get(Name name, Object key, Supplier<T> loader) {
@@ -129,6 +132,7 @@ public class AppCaches implements MeterBinder {
       return (T) e.value();
     }
     s.misses.incrementAndGet();
+    long generationBefore = generationOf(s);
     long t0 = System.nanoTime();
     T loaded = loader.get();
     long ms = (System.nanoTime() - t0) / 1_000_000;
@@ -145,17 +149,29 @@ public class AppCaches implements MeterBinder {
           .addKeyValue("cache", name.key).addKeyValue("durationMs", ms).log();
     }
     if (loaded != null) {
-      if (s.map.size() >= name.maxEntries) s.map.clear(); // a runaway number of keys must not grow memory
-      s.map.put(key, new Entry(loaded, now + ttl * 1000L));
+      synchronized (s) {
+        if (s.generation == generationBefore) {
+          if (s.map.size() >= name.maxEntries) s.map.clear(); // a runaway number of keys must not grow memory
+          s.map.put(key, new Entry(loaded, now + ttl * 1000L));
+        }
+      }
     }
     return loaded;
+  }
+
+  private static long generationOf(Store s) {
+    synchronized (s) { return s.generation; }
   }
 
   /** Empties one cache and counts the clear. */
   public void invalidate(Name name) {
     Store s = stores.get(name);
-    int dropped = s.map.size();
-    s.map.clear();
+    int dropped;
+    synchronized (s) {
+      s.generation++;
+      dropped = s.map.size();
+      s.map.clear();
+    }
     s.clears.incrementAndGet();
     s.lastCleared = clock.millis();
     log.atDebug().setMessage("Cache emptied cache={} entries={}").addArgument(name.key).addArgument(dropped).addKeyValue("event", "cache-clear")
@@ -163,7 +179,13 @@ public class AppCaches implements MeterBinder {
   }
 
   /** Drops one key of a cache (for example a customer who was just blocked), so the next read loads fresh data. */
-  public void evict(Name name, Object key) { stores.get(name).map.remove(key); }
+  public void evict(Name name, Object key) {
+    Store s = stores.get(name);
+    synchronized (s) {
+      s.generation++;
+      s.map.remove(key);
+    }
+  }
 
   /** Empties every cache. */
   public void invalidateAll() { for (Name n : Name.values()) invalidate(n); }

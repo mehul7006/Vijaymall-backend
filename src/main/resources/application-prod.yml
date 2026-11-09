@@ -7,10 +7,6 @@ spring:
       minimum-idle: ${DB_POOL_MIN_IDLE:10}
       connection-timeout: ${DB_POOL_WAIT_MS:5000}
       leak-detection-threshold: ${DB_POOL_LEAK_MS:0}
-  task:
-    scheduling:
-      pool:
-        size: ${SCHEDULER_THREADS:4}
 server:
   tomcat:
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}

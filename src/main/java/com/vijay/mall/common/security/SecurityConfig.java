@@ -3,6 +3,7 @@ package com.vijay.mall.common.security;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.cache.AppCaches;
+import com.vijay.mall.common.error.DatabaseBusy;
 import com.vijay.mall.common.error.ErrorBody;
 import com.vijay.mall.common.web.TraceIdFilter;
 import com.vijay.mall.identity.infra.UserRepository;
@@ -30,6 +31,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -88,10 +90,15 @@ public class SecurityConfig {
   /** Staff tokens are checked against the account on every call, uncached. */
   static boolean isBlockedStaff(String role, String subject, UserRepository users) {
     if (!"CASHIER".equals(role) && !"ADMIN".equals(role)) return false;
+    UUID id = parse(subject);
+    return id != null && users.isBlocked(id);
+  }
+
+  private static UUID parse(String subject) {
     try {
-      return users.isBlocked(UUID.fromString(subject));
+      return UUID.fromString(subject);
     } catch (IllegalArgumentException e) {
-      return false;
+      return null;
     }
   }
 
@@ -101,12 +108,34 @@ public class SecurityConfig {
    */
   static boolean isBlockedCustomer(String role, String subject, UserRepository users, AppCaches caches) {
     if ("CASHIER".equals(role) || "ADMIN".equals(role)) return false;
+    UUID id = parse(subject);
+    return id != null && caches.get(AppCaches.Name.BLOCKED_USERS, id, () -> users.isBlocked(id));
+  }
+
+  /**
+   * Refuses a token whose account is blocked. Fails closed: if the account cannot be looked up, the request is NOT let through. A full
+   * connection pool becomes {@link DatabaseBusyAuthenticationException} (answered 503 SERVICE_BUSY); any other lookup failure propagates
+   * as an error, never as "not blocked".
+   */
+  static void requireNotBlocked(Jwt jwt, UserRepository users, AppCaches caches) {
+    String role = jwt.getClaimAsString("role");
+    boolean blocked;
     try {
-      UUID id = UUID.fromString(subject);
-      return caches.get(AppCaches.Name.BLOCKED_USERS, id, () -> users.isBlocked(id));
-    } catch (IllegalArgumentException e) {
-      return false;
+      blocked = isBlockedStaff(role, jwt.getSubject(), users) || isBlockedCustomer(role, jwt.getSubject(), users, caches);
+    } catch (RuntimeException e) {
+      if (DatabaseBusy.causes(e)) throw new DatabaseBusyAuthenticationException(e);
+      throw e;
     }
+    // A blocked cashier or admin loses access at once, a blocked customer within 10 seconds, not when the 15-minute token runs out.
+    if (blocked) throw new DisabledException("account blocked");
+  }
+
+  /** Writes the busy answer: 503 SERVICE_BUSY with Retry-After. */
+  static void writeBusy(HttpServletResponse res, JsonMapper om) throws IOException {
+    res.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+    res.setHeader("Retry-After", String.valueOf(DatabaseBusy.RETRY_AFTER_SECONDS));
+    res.setContentType("application/json");
+    om.writeValue(res.getOutputStream(), DatabaseBusy.body(MDC.get(TraceIdFilter.KEY)));
   }
 
   private static void write(HttpServletResponse res, JsonMapper om, HttpStatus s, String code, String msg)
@@ -119,18 +148,16 @@ public class SecurityConfig {
   @Bean
   SecurityFilterChain filterChain(HttpSecurity http, JsonMapper om,
                                   UserRepository users, AppCaches caches) throws Exception {
-    AuthenticationEntryPoint entry =
-        (req, res, ex) -> write(res, om, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Please sign in again");
+    AuthenticationEntryPoint entry = (req, res, ex) -> {
+      if (ex instanceof DatabaseBusyAuthenticationException) writeBusy(res, om);
+      else write(res, om, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Please sign in again");
+    };
     AccessDeniedHandler denied =
         (req, res, ex) -> write(res, om, HttpStatus.FORBIDDEN, "FORBIDDEN", "Not allowed");
 
     JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
     converter.setJwtGrantedAuthoritiesConverter(jwt -> {
-      String role = jwt.getClaimAsString("role");
-      if (isBlockedStaff(role, jwt.getSubject(), users) || isBlockedCustomer(role, jwt.getSubject(), users, caches)) {
-        // A blocked cashier or admin loses access at once, a blocked customer within 10 seconds, not when the 15-minute token runs out.
-        throw new DisabledException("account blocked");
-      }
+      requireNotBlocked(jwt, users, caches);
       Collection<GrantedAuthority> list =
           List.<GrantedAuthority>of(new SimpleGrantedAuthority("ROLE_" + jwt.getClaimAsString("role")));
       return list;

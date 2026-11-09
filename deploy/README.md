@@ -25,18 +25,23 @@ Back up the `dbdata` volume (pg_dump) and the `images` volume.
 
 ## Thread and connection pools
 
-Defaults live in the property files: shared values in `application.yml`, then `application-dev.yml` (small pools, leak detection on) or `application-prod.yml` (production sizing) on top. Every value can be overridden from `prod.env` with the variable named below, without a rebuild. The table shows the prod defaults (dev: pool 10, 2 idle, 2 scheduler threads).
+Defaults live in the property files: shared values in `application.yml`, then `application-dev.yml` (small pools, leak detection on) or `application-prod.yml` (production sizing) on top. Every value can be overridden from `prod.env` with the variable named below, without a rebuild. The table shows the prod defaults (dev: pool 10, 2 idle).
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `DB_POOL_MAX` | 20 | Most database connections one backend holds. `instances x DB_POOL_MAX` must stay under PostgreSQL `max_connections` (100 in the compose file). |
-| `DB_POOL_MIN_IDLE` | 5 | Connections kept warm. |
+| `DB_POOL_MIN_IDLE` | 10 (dev 2; base default 5) | Connections kept warm. |
 | `DB_POOL_WAIT_MS` | 5000 | A request waits this long for a connection, then fails fast. |
 | `DB_POOL_MAX_LIFETIME_MS` | 1500000 | Connections are replaced after 25 min (before firewalls drop them). |
 | `DB_POOL_LEAK_MS` | 0 (off) | Set e.g. 20000 to log code that holds a connection too long. |
-| `SCHEDULER_THREADS` | 4 | Threads for background jobs (outbox relay, flash sales...). Spring's own default is 1. |
 | `TOMCAT_MAX_CONNECTIONS` / `TOMCAT_ACCEPT_COUNT` | 8192 / 200 | Open sockets / waiting queue. |
 
-Requests run on virtual threads, so there is no request-thread pool to size; the database pool is the real limit.
+Requests and background jobs (`@Scheduled`: outbox relay, flash sales...) run on virtual threads: each request and each job run gets its own thread, so there is no request-thread or scheduler pool to size; the database pool is the real limit.
 Watch `hikaricp_connections_pending` (should stay ~0) and `hikaricp_connections_active` in Prometheus; raise `DB_POOL_MAX`
 only if pending stays above 0 while the database CPU is not busy. JVM memory: container uses `-XX:MaxRAMPercentage=70`.
+
+## Running migrations safely
+
+Flyway runs the migrations when the backend starts. Some of them (the V24 backfill, plain `CREATE INDEX` statements such as V27's) lock the table while they run.
+That is instant on today's data, but on a big database stop the app first (`docker compose ... stop api`), let the new version start alone, and for
+very large tables create the index by hand with `CREATE INDEX CONCURRENTLY IF NOT EXISTS ...` before deploying so the migration finds it already there.

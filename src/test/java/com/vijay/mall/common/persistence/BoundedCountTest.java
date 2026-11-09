@@ -58,6 +58,19 @@ class BoundedCountTest {
   }
 
   @Test
+  void aPageBeyondTheEndReportsTheRealTotalNotTheOffset() {
+    Page<Integer> past = BoundedCount.assemble(List.of(), 5, 20, () -> 45L);
+    assertThat(past.items()).isEmpty();
+    assertThat(past.total()).as("not page * size = 100").isEqualTo(45);
+    assertThat(past.totalExact()).isTrue();
+    assertThat(past.hasMore()).isFalse();
+    Page<Integer> pastBig = BoundedCount.assemble(List.of(), 5, 20, () -> BoundedCount.CAP + 1L);
+    assertThat(pastBig.total()).isEqualTo(BoundedCount.CAP);
+    assertThat(pastBig.totalExact()).isFalse();
+    assertThat(BoundedCount.assemble(List.of(), 5, 20, () -> 0L).total()).as("the list shrank to nothing").isZero();
+  }
+
+  @Test
   void aTotalNeverContradictsTheRowsAlreadyShown() {
     // rows were added between reading the page and counting: the total still covers what is on screen plus the next row
     Page<Integer> p = BoundedCount.assemble(rows(21), 1, 20, () -> 10L);

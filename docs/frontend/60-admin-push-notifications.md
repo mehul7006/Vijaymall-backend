@@ -28,7 +28,8 @@ Sending is asynchronous. `POST /broadcast` only records the broadcast and answer
 ### Delivery guarantees
 
 - **The inbox is reliable.** Each recipient gets exactly one inbox item per broadcast, even if the server restarts in the middle (a broadcast left half sent is resumed and nobody receives it twice).
-- **Push is best effort.** If Firebase is down or not configured, the inbox items are still written and the broadcast still ends `DONE`. `pushed` counts devices a push was handed to; it does not prove arrival.
+- **Push is best effort, but a crash does not lose a batch.** If Firebase is down or not configured, the inbox items are still written and the broadcast still ends `DONE`. The server records how far it has pushed; after a restart it pushes the batch that was interrupted again (so one person may get that push twice, but never zero times). A push call that fails is not retried: the batch is counted in `pushFailedBatches` (its inbox items were written anyway).
+- **`pushed` only counts real hand-overs.** It counts devices of push calls that returned normally, and stays `0` while no push provider (Firebase service account) is configured: the broadcast then reaches the inbox only, and `pushConfigured` is `false`. Show a hint such as "Push is not set up: customers will see this in the app inbox only" when `pushConfigured` is `false`. `pushed` does not prove arrival.
 - A user with no registered device gets the inbox item only.
 - **Blocked accounts never receive anything**, and neither do deleted accounts or counter customers who never claimed their number (they cannot sign in).
 - Messages are delivered to the people eligible when sending happens, not a frozen list (except `USERS`, which is resolved when you create the broadcast).
@@ -50,7 +51,7 @@ Sending is asynchronous. `POST /broadcast` only records the broadcast and answer
    - `SEGMENT`: either pick a saved segment (`GET /segments`) or open the **segment builder** (section 2.4) and use it inline without saving. Always show the preview count (`POST /segments/preview`) before continuing.
 3. **Message.** Title (required, 1 to 80 characters after trimming), body (required, 1 to 500), optional `ref` (at most 100). Show live counters; trim the text before measuring. A live preview card shows how it looks in the inbox.
 4. **Confirm.** Summary: audience, count, title, body. Primary button "Send to N people". **Generate a fresh UUID when the confirm screen opens or when the button is tapped, keep it for retries of that tap, and send it as the `Idempotency-Key` header** (section 4). Disable the button while the request runs.
-5. **Progress.** After the `202`, show the broadcast. Poll `GET /broadcasts/{id}` every 2 s (back off to 5 s after 30 s). Stop when `status` is `DONE` or `FAILED`, or when the admin leaves the screen. Show a progress bar `delivered / recipients` (for role groups and segments `recipients` is the count at creation; `delivered` can end slightly different if people joined or were blocked meanwhile, so on `DONE` show the final `delivered` and do not insist the bar reaches 100%). On `FAILED` show "Sending stopped. N of M people received it. Contact support" and offer "Send again to everyone", warning that people who already received it will get a second message (a new broadcast is a new message). Never retry automatically after `FAILED`.
+5. **Progress.** After the `202`, show the broadcast. Poll `GET /broadcasts/{id}` every 2 s (back off to 5 s after 30 s). Stop when `status` is `DONE` or `FAILED`, or when the admin leaves the screen. Show a progress bar `delivered / recipients` (for role groups and `USERS`, `recipients` is the count at creation and `delivered` can end slightly different if people joined or were blocked meanwhile; for a **segment**, `recipients` is only an estimate while `recipientsExact` is `false`: show "10,000+" instead of a number, never let the bar exceed 100% (`recipients` is never less than `delivered`), and when the broadcast ends `recipients` is replaced by the number really delivered and `recipientsExact` becomes `true`. On `DONE` show the final `delivered` and do not insist the bar reaches 100%). On `FAILED` show "Sending stopped. N of M people received it. Contact support" and offer "Send again to everyone", warning that people who already received it will get a second message (a new broadcast is a new message). Never retry automatically after `FAILED`.
 
 ### 2.3 Segments list and editor
 
@@ -132,7 +133,9 @@ Errors:
 | 404 | `NOT_FOUND` | `segmentId` does not exist (deleted). Ask the admin to pick another segment |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | The key was used with a different body. Generate a new key and ask the admin to review |
 | 422 | `NO_RECIPIENTS` | `USERS` list matched nobody; `details.skipped` lists the ids and numbers that did not match |
-| 429 | `RATE_LIMITED` | Too many broadcasts. See section 5 |
+| 422 | `SEGMENT_TOO_HEAVY` | The segment could not be counted in time (about 5 seconds). Ask the admin to narrow it (add a condition or a shorter period). Nothing was recorded and no quota was used |
+| 429 | `PREVIEW_BUSY` | Other segment counts are running. Retry after `Retry-After` seconds (`details.retryAfterSeconds`). Nothing was recorded |
+| 429 | `RATE_LIMITED` | Too many broadcasts. See section 5. Only a broadcast that is actually recorded uses the hourly quota: failed requests (validation, unknown segment, no recipients, too heavy) do not |
 | 401 / 403 | `UNAUTHENTICATED` / `FORBIDDEN` | Sign in again / not an admin |
 
 ### 3.2 `GET /audience-size?audience=CUSTOMERS`
@@ -183,7 +186,7 @@ Give exactly one of `segmentId` or (`match` and `rules`); otherwise 400 `VALIDAT
 }
 ```
 
-`recipients` is exact up to 10,000. When more people match, `recipients` is `10000` and `totalExact` is `false` (show "10,000+"). `withDevices` counts push-capable people among those counted. `sample` has at most 5 customers; the mobile number is masked and `name`/`mobile` can be `null`. The preview typically answers in well under a second; debounce the calls. Errors: 400 `VALIDATION_FAILED` (`rules[i].<param>` field keys), 404 for an unknown `segmentId`.
+`recipients` is exact up to 10,000. When more people match, `recipients` is `10000` and `totalExact` is `false` (show "10,000+"). `withDevices` counts push-capable people among exactly those `recipients`, so it is never larger than `recipients`. `sample` has at most 5 customers; the mobile number is masked and `name`/`mobile` can be `null`. The preview typically answers in well under a second; debounce the calls. Errors: 400 `VALIDATION_FAILED` (`rules[i].<param>` field keys), 404 for an unknown `segmentId`, 422 `SEGMENT_TOO_HEAVY` (the count did not finish in about 5 seconds: tell the admin to narrow the segment), 429 `PREVIEW_BUSY` (at most 2 previews/counts run at once on the server; retry after the `Retry-After` header).
 
 ### 3.7 `POST /segments` (201), `PUT /segments/{id}` (200)
 
@@ -230,8 +233,11 @@ Page of segment objects (newest first) / one segment. 404 `NOT_FOUND` for an unk
   "ref": "offers",
   "status": "DONE",
   "recipients": 120,
+  "recipientsExact": true,
   "delivered": 120,
   "pushed": 87,
+  "pushFailedBatches": 0,
+  "pushConfigured": true,
   "createdBy": "78e35581-0000-4000-8000-000000000004",
   "createdAt": "2027-03-01T10:15:30.123Z",
   "startedAt": "2027-03-01T10:15:31.002Z",
@@ -245,16 +251,19 @@ Page of segment objects (newest first) / one segment. 404 `NOT_FOUND` for an unk
 | Field | Meaning |
 |---|---|
 | `status` | `QUEUED` (waiting), `SENDING`, `DONE`, `FAILED` |
-| `recipients` | People it was addressed to when it was created |
+| `recipients` | People it was addressed to when it was created. For a `SEGMENT` it is an estimate (counted only up to 10,000) while `recipientsExact` is `false`; it is never less than `delivered`, and at the end it becomes the number really delivered |
+| `recipientsExact` | `false` while `recipients` is only an estimate (show "10,000+"); `true` for all other audiences and once the broadcast has ended |
 | `delivered` | Inbox messages written so far (the reliable count) |
-| `pushed` | Devices a push was handed to so far (best effort) |
+| `pushed` | Devices a push was handed to so far (best effort; always `0` when `pushConfigured` is `false`) |
+| `pushFailedBatches` | Batches (of up to 500 people) in which a push call failed. Their inbox messages were written; the push was not retried |
+| `pushConfigured` | `false` when no push provider (Firebase) is configured: the broadcast reaches the inbox only |
 | `createdBy` | Admin user id |
 | `startedAt`, `finishedAt` | `null` until sending starts / ends |
 | `skipped` | For `USERS`: ids and numbers that matched nobody; otherwise `[]` |
 | `segmentId` | The saved segment used, or `null` (inline segment or other audience) |
 | `segment` | **Snapshot** of the conditions used (`null` unless audience is `SEGMENT`). Editing or deleting the segment later does not change it |
 
-A broadcast that was interrupted by a server restart is picked up again automatically (it can sit in `SENDING` for up to about two minutes first). A `FAILED` broadcast stopped after three failed attempts; the people reached before that keep their message.
+A broadcast that was interrupted by a server restart is picked up again automatically (it can sit in `SENDING` for up to about ten minutes first; while a server is working on it, it shows that it is alive at least every 30 seconds, and a server that was replaced can no longer change it). A `FAILED` broadcast stopped after three failed attempts; the people reached before that keep their message.
 
 ### 4.2 Segment object
 
@@ -412,8 +421,11 @@ class Broadcast {
   final String? ref;
   final BroadcastStatus status;
   final int recipients;
+  final bool recipientsExact;     // false: recipients is an estimate, show "10,000+"
   final int delivered;
   final int pushed;
+  final int pushFailedBatches;
+  final bool pushConfigured;      // false: inbox only, no push provider set up
   final String createdBy;
   final DateTime createdAt;
   final DateTime? startedAt;

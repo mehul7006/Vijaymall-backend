@@ -13,7 +13,8 @@ import java.util.function.LongSupplier;
  * Instead:
  * <ul>
  *   <li>the page is read with one extra row, which tells exactly whether another page follows;</li>
- *   <li>when no page follows, the total is {@code offset + rows shown}: exact, with no count at all;</li>
+ *   <li>when no page follows, the total is {@code offset + rows shown}: exact, with no count at all (except a page past the end, which
+ *       shows nothing, so the real bounded count is asked for);</li>
  *   <li>otherwise rows are counted but never more than {@link #CAP} + 1, so the cost has a ceiling however big the table grows.
  *       Up to {@link #CAP} rows the total is exact; beyond it the page says so ({@code totalExact=false}) and the app shows
  *       "10,000+" while paging still works through {@code hasMore}.</li>
@@ -39,7 +40,11 @@ public final class BoundedCount {
     boolean hasMore = fetched.size() > size;
     List<T> items = hasMore ? List.copyOf(fetched.subList(0, size)) : List.copyOf(fetched);
     long shown = (long) page * size + items.size();
-    if (!hasMore) return new Page<>(items, page, size, shown, true, false);
+    if (!hasMore && (page == 0 || !items.isEmpty())) return new Page<>(items, page, size, shown, true, false);
+    if (!hasMore) { // a page past the end: nothing to show, so the offset says nothing about the total; ask for the real bounded count
+      long counted = boundedCount.getAsLong();
+      return new Page<>(items, page, size, Math.min(counted, CAP), counted <= CAP, false);
+    }
     long counted = boundedCount.getAsLong();
     boolean exact = counted <= CAP;
     long total = Math.max(Math.min(counted, CAP), shown + 1); // rows may have been added or removed between the two reads
