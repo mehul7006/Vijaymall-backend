@@ -412,7 +412,7 @@ Mobile rules: if the account's mobile is **verified** (came from mobile OTP logi
 | label | string | yes | `@NotBlank` | "Home"/"Work" tag |
 | line1 | string | yes | `@NotBlank` | street/house |
 | area | string | yes | `@NotBlank` | locality |
-| pincode | string | yes | `@NotBlank` only (no format or length check in the API; validate 6 digits in the UI) | postal code |
+| pincode | string | yes | not blank AND exactly 6 digits (400 `fields.pincode`; added later, see the identity addendum in file 20); validate 6 digits in the UI too | postal code |
 | isDefault | boolean | no | null = false | make default |
 
 The very first address is forced to default regardless of `isDefault`. Setting a new default clears the previous one.
@@ -543,7 +543,7 @@ Concepts: 1 coin = `paisePerCoin` paise. Coins can pay at most `maxRedeemPercent
 - **Request**: none.
 - **Response**: `200`:
 ```json
-{ "coins": 120, "valuePaise": 12000, "paisePerCoin": 100, "maxRedeemPercent": 20,
+{ "coins": 120, "valuePaise": 12000, "paisePerCoin": 100, "maxRedeemPercent": 20, "expiryMonths": 6,
   "rules": [ { "name": "Festival", "spendPaise": 10000, "coins": 2, "mode": "PRO_RATA" } ] }
 ```
 | field | type | meaning |
@@ -552,6 +552,7 @@ Concepts: 1 coin = `paisePerCoin` paise. Coins can pay at most `maxRedeemPercent
 | valuePaise | integer (paise) | `coins * paisePerCoin` |
 | paisePerCoin | integer (paise) | value of 1 coin |
 | maxRedeemPercent | integer 0..100 | max share of the redeemable amount payable with coins |
+| expiryMonths | integer | months after which earned coins expire |
 | rules[] | array | only currently live earn rules: `name` string, `spendPaise` integer paise ("per this much spend"), `coins` integer (coins given), `mode` `"PRO_RATA"` or `"SLAB"` |
 
 - **Errors**: none specific.
@@ -753,8 +754,10 @@ Sorted by `nameEn` ascending.
 ```json
 [ { "code": "DAIRY10", "kind": "PERCENT", "value": 10, "minOrderPaise": 20000, "maxDiscountPaise": 5000,
     "categoryId": null, "startAt": null, "endAt": null, "worksWithCoins": true, "firstOrderOnly": false,
-    "perUserLimit": 1, "categoryIds": [] } ]
+    "perUserLimit": 1, "categoryIds": [], "productIds": [], "productGroupIds": [],
+    "appliesTo": "ALL", "appliesToNames": [], "appliesToText": "All items" } ]
 ```
+The last five fields were added with item-specific coupons (`appliesTo`, `appliesToNames`, `appliesToText` are ready to show; see file 20, coupon targeting); the exact `appliesTo` words are in file 20.
 `value`: paise for `FLAT`, percent for `PERCENT`; `minOrderPaise`, `maxDiscountPaise`: paise, 0 = none/no cap; `perUserLimit` 0 = unlimited; `categoryIds` empty = all categories; `categoryId` = first of them or null. Internal id, total limit and used count are not exposed.
 - **Errors**: none.
 - **UI notes**: Show "valid on <category names>", "first order only", "cannot combine with coins" (`worksWithCoins:false`). Presence in this list does not guarantee the signed-in customer can use it.

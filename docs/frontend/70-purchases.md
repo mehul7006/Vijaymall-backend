@@ -7,7 +7,7 @@ Conventions used below:
 - Money is an integer number of **paise** in fields ending `Paise`. Dates (`invoiceDate`, `dueDate`...) are `yyyy-MM-dd` India dates. Timestamps are ISO-8601 UTC. IDs are UUID strings.
 - Error body: `{ "code", "message", "traceId", "details": { "fields": { "<field>": "<text>" }, ... } }`. Validation is 400 `VALIDATION_FAILED`. Business refusals use the codes in each endpoint (409/422).
 - Lists use the standard page: `{ items, page, size, total, totalExact, hasMore }` (`size` 1..50; `total` stops counting at 10,000: show "10,000+" when `totalExact` is false).
-- Every write needs an `Idempotency-Key` header (a fresh UUID per tap, reused on retries) unless stated. A repeat with the same key and body returns the first answer and changes nothing; the same key with another body is `409 IDEMPOTENCY_KEY_REUSED`.
+- Every write needs an `Idempotency-Key` header (a fresh UUID per tap, reused on retries) unless stated; supplier `PUT`/`activate`/`deactivate`, the purchase `PATCH` and the attachment endpoints take none, and supplier create has it optional. A repeat with the same key and body returns the first answer and changes nothing; the same key with another body is `409 IDEMPOTENCY_KEY_REUSED` (for purchases, payments, returns and refunds; a purchase stored before fingerprints existed is compared by supplier name and invoice number).
 
 ---
 
@@ -67,7 +67,7 @@ The shop's state is the `stateCode` in shop settings (default `24`). The supplie
 A line with `applyToVariant: true` and `mrpPaise` and/or `sellingPricePaise` updates that product's MRP/price in the same transaction (same rules as editing the product: price may not exceed MRP). The admin decides, every change is audited (`PURCHASE_PRICE_APPLY`, "mrp a -> b, price c -> d (purchase id)"). Without the flag the MRP/price are only stored on the line.
 
 ### 2.7 Stock
-Receiving adds `qty + freeQty` to stock (reason `PURCHASE`, linked to the purchase) exactly once per idempotency key. A debit note takes the units out again (reason `PURCHASE_RETURN`). Lots/batches as separate stock records are not built yet: `batchNo` and `expiryDate` are only stored on the line.
+Receiving adds `qty + freeQty` to stock (reason `PURCHASE`, linked to the purchase) exactly once per idempotency key. A debit note takes the units out again (reason `PURCHASE_RETURN`). Every received line also opens a stock lot (cost, MRP, selling price, batch, expiry): see `74-stock-lots-and-pricing.md`; `batchNo` and `expiryDate` are stored on the line and on the lot.
 
 ---
 
@@ -109,12 +109,13 @@ Query: `q` (matches name, phone or GSTIN, contains, any case; `%` and `_` are li
 ```json
 { "id": "uuid", "name": "Agro Traders", "phone": "98250 11111", "gstin": "24ABCDE1234F1Z5", "stateCode": "24",
   "address": "Rajkot", "paymentTermsDays": 30, "active": true, "createdAt": "2026-11-09T05:00:00Z",
-  "lastInvoiceNo": "INV-77", "lastPurchaseAt": "2026-11-09T05:30:00Z", "purchaseCount": 4, "totalDuePaise": 68000 }
+  "lastInvoiceNo": "INV-77", "lastPurchaseAt": "2026-11-09T05:30:00Z", "purchaseCount": 4, "totalDuePaise": 68000,
+  "balancePaise": 68000, "creditPaise": 0 }
 ```
 `lastInvoiceNo` is `""` and `lastPurchaseAt` null for a supplier without purchases. `totalDuePaise` adds up `duePaise` of all its purchases (negative = supplier owes us). The figures are fetched in two queries per page, not per row.
 
 ### POST /api/v1/admin/suppliers
-Header `Idempotency-Key` is optional (a repeat with the key returns the first answer). Body (PUT takes the same body and replaces all fields):
+Header `Idempotency-Key` is optional (a repeat with the key returns the first answer). Body (PUT takes the same body and replaces all fields: an omitted `paymentTermsDays` resets to 0 and an omitted phone, address or GSTIN becomes empty, so always send the whole supplier; `PUT` takes no `Idempotency-Key`):
 
 | field | rules |
 |---|---|
@@ -167,7 +168,7 @@ Header `Idempotency-Key` mandatory. Only `items` and one of `supplierId` / `supp
 | supplierId / supplierName | one required; id must exist and be active; name 1..120 |
 | invoiceNo | max 60; a repeated invoice number for the same supplier only adds a `warnings` entry |
 | invoiceDate, receivedDate | default today (India); not in the future |
-| attachmentNote | max 500: free text or a link; **no file upload yet** |
+| attachmentNote | max 500: free text or a link. The invoice file itself is uploaded afterwards with `POST /admin/purchases/{id}/attachment` (Addendum 1) |
 | gstMode | `REGULAR`, `COMPOSITION`, `NONE` (any case); default from the shop setting |
 | docDiscountPercent / docDiscountPaise | give one (percent 0..100, at most 2 decimals) |
 | freightPaise / freightGstPercent | freight >= 0; GST percent one of 0, 3, 5, 12, 18, 28 (ignored when freight is 0) |
@@ -175,7 +176,7 @@ Header `Idempotency-Key` mandatory. Only `items` and one of `supplierId` / `supp
 | expectedTotalPaise | optional guard, see 2.2 |
 | paymentStatus | `PAID`, `PARTIAL`, `PENDING`; default: derived from `paidPaise` (nothing = PENDING, equal to total = PAID, otherwise PARTIAL) |
 | paidPaise | PENDING: 0 or omitted; PAID: omitted or equal to the server total; PARTIAL: more than 0 and less than the total |
-| paymentMode | `CASH`, `UPI`, `CARD`, `BANK`, `CHEQUE`; required when something is paid |
+| paymentMode | `CASH`, `UPI`, `CARD`, `BANK`, `CHEQUE`; required when something is paid (`CREDIT_NOTE` is accepted only on the payments endpoint, Addendum 1) |
 | paymentRef | max 80 (UTR, cheque number) |
 | moneyAccountId | uuid, **accepted and stored but not validated yet** (the money-account module is separate; any uuid is kept as is) |
 | dueDate | not before `invoiceDate`; default `invoiceDate + supplier.paymentTermsDays` when the terms are above 0, else null |
@@ -211,13 +212,14 @@ Response 201 (the same object as `GET /admin/purchases/{id}`, plus `warnings`):
     "cgstPaise": 8336, "sgstPaise": 8337, "igstPaise": 0, "cessPercent": 0, "cessPaise": 0, "lineTotalPaise": 109298, "hsn": "3401",
     "mrpPaise": 15000, "sellingPricePaise": 14000, "batchNo": "B-1", "expiryDate": "2027-01-31", "applyToVariant": true, "returnedQty": 0,
     "landedTotalPaise": 97625, "landedUnitCostPaise": 8135.4167, "landedUnitCostRoundedPaise": 8135 } ],
+  "hasAttachment": false, "attachmentUrl": null,
   "warnings": [] }
 ```
 (The numbers above only illustrate the shape.) `lineCostPaise` is `qty * unitCostPaise` (gross, as before). `docDiscountPercent` is null when an amount was used.
 
 Errors: 400 `VALIDATION_FAILED` (every field above, plus `Idempotency-Key` missing, "a product appears twice", "a product does not exist", "this supplier is switched off"), 409 `IDEMPOTENCY_KEY_REUSED`, 422 `TOTAL_MISMATCH`.
 
-UI notes: generate the key when the form opens and keep it until success. Show the server's figures in a read-only summary; to preview before saving, compute with the rules in 2.2 but treat the answer as the truth.
+UI notes: generate the key when the form opens and keep it until success. Show the server's figures in a read-only summary. There is NO preview endpoint: an estimate computed with the rules in 2.2 can differ by a few paise (the document discount and freight are shared out by largest remainder), so show it as "about" and never send an estimated `expectedTotalPaise` (use the total of a previous answer, or leave it out).
 
 ### GET /api/v1/admin/purchases
 Newest first. Query: `page`, `size`, `paymentStatus` (`PENDING|PARTIAL|PAID`, any case), `supplierId`, `supplier` (name contains, any case), `overdue` (true = only overdue), `from`, `to` (invoice dates, inclusive, `from` not after `to`), `rounding`. Response: page of the purchase object above (with `items` and `payments`; `warnings` is `[]`). Lists are loaded with one query for lines and one for payments per page.
@@ -262,7 +264,7 @@ Header `Idempotency-Key` mandatory. Body: `{ "amountPaise": 4000, "mode": "CASH"
 | field | rules |
 |---|---|
 | amountPaise | required, more than 0 and not above the due amount |
-| mode | `CASH`, `UPI`, `CARD`, `BANK`, `CHEQUE` (any case) |
+| mode | `CASH`, `UPI`, `CARD`, `BANK`, `CHEQUE` (any case); also `CREDIT_NOTE` with `debitNoteId` (Addendum 1) |
 | reference | max 80 |
 | note | max 200 |
 | paidAt | default now; not more than 10 minutes in the future |
@@ -295,7 +297,7 @@ Response 201:
 ```
 Errors: 400 `VALIDATION_FAILED` (`reason`, `items`, `purchaseItemId` "not a line of this purchase", `qty`, key), 404 `NOT_FOUND`, **422 `RETURN_EXCEEDS_RECEIVED`** (more than `qty + freeQty - returnedQty`; `details.purchaseItemId`), **422 `INSUFFICIENT_STOCK_FOR_RETURN`** (the shop no longer has the units; `details.productId`, `details.onHand`), 409 `IDEMPOTENCY_KEY_REUSED`. Nothing is changed on any error. A repeat with the same key returns the first debit note.
 
-A debit note can be recorded against a fully paid purchase: `duePaise` becomes negative and further payments are refused with `ALREADY_PAID`. The refund from the supplier is not modelled yet (it shows as a negative balance in payables).
+A debit note can be recorded against a fully paid purchase: `duePaise` becomes negative and further payments are refused with `ALREADY_PAID`. The supplier's refund of that money is recorded with `POST /admin/suppliers/{id}/refunds` (Addendum 1); until then it shows as a negative balance in payables.
 
 ### GET /api/v1/admin/purchases/{id}/returns, GET /api/v1/admin/purchase-returns, GET /api/v1/admin/purchase-returns/{id}
 Pages of the debit note object above, newest first. `purchase-returns` filters: `supplierId`, `from`, `to` (India dates of the debit note). 404 `NOT_FOUND` for an unknown purchase or note.
@@ -304,7 +306,7 @@ Pages of the debit note object above, newest first. `purchase-returns` filters: 
 
 ## 8. Reports
 
-All take India dates `from`/`to` (inclusive). Defaults: `to` = today, `from` = first day of that month; a range may span at most 366 days (400 on `from` otherwise, or when `from` is after `to`).
+All take India dates `from`/`to` (inclusive). Defaults: `to` = today, `from` = first day of that month; a range may span at most 366 days inclusive (400 on `from` when `to` is 366 or more days after `from`, or when `from` is after `to`); `ageing` has no range.
 
 ### GET /api/v1/admin/reports/purchases/register
 Filters: `supplierId`, `productId`, `gstRate`, `page`, `size`. One row per purchase line, newest first (by invoice date):
@@ -347,7 +349,7 @@ Age = `asOf` minus the invoice date, only for purchases with something due.
 ```dart
 enum GstMode { regular, composition, none }          // JSON: REGULAR, COMPOSITION, NONE
 enum PayStatus { pending, partial, paid }            // JSON: PENDING, PARTIAL, PAID
-enum PayMode { cash, upi, card, bank, cheque }       // JSON: CASH, UPI, CARD, BANK, CHEQUE
+enum PayMode { cash, upi, card, bank, cheque }       // JSON: CASH, UPI, CARD, BANK, CHEQUE (+ CREDIT_NOTE on the payments endpoint, see Addendum 1)
 
 class Supplier {
   final String id, name, phone, gstin, stateCode, address, lastInvoiceNo;
@@ -376,6 +378,8 @@ class Purchase {
   final List<PurchasePayment> payments;
   final List<PurchaseLine> items;
   final List<String> warnings;
+  final bool hasAttachment;        // invoice file uploaded (Addendum 1)
+  final String? attachmentUrl;     // GET /api/v1/admin/purchases/{id}/attachment or null
 }
 ```
 Use `int` for every `*Paise` money field (Dart ints are 64-bit); only the two `landedUnitCost*` fields are fractional.
@@ -391,9 +395,11 @@ Use `int` for every `*Paise` money field (Dart ints are 64-bit); only the two `l
 - New audit actions: `PURCHASE`, `PURCHASE_PAYMENT`, `PURCHASE_RETURN`, `PURCHASE_PRICE_APPLY`, `SUPPLIER_CREATE`, `SUPPLIER_UPDATE`, `SUPPLIER_ACTIVATE`, `SUPPLIER_DEACTIVATE`.
 - New config key `purchase.gstMode` (REGULAR, COMPOSITION, NONE; default REGULAR) in `GET/PUT /admin/config`, group "GST and bills".
 
-## 11. Not built yet (so the app does not wait for it)
+## 11. Not built (so the app does not wait for it)
 
-Stock lots and per-lot cost/price (the line stores the landed cost for it), file upload of the invoice (only the `attachmentNote` text), validation of `moneyAccountId`, a supplier statement/ledger screen with opening balances, supplier refunds against a negative balance, purchase orders, editing or cancelling a recorded purchase.
+Built since this section was first written (see Addendum 1 and `74`): stock lots, the supplier statement, supplier credit and refunds, invoice file upload, and editing the non-stock fields of a recorded purchase.
+
+Still not built: validation of `moneyAccountId` on purchase payments (it is stored as sent and nothing is posted to any money account book), purchase orders, cancelling a purchase, editing quantities, costs, tax or the supplier of a recorded purchase (record a purchase return and a new purchase instead).
 
 ## 12. Implementation checklist
 
@@ -521,4 +527,4 @@ Future<Map<String, dynamic>> editPurchase(Dio dio, String id, Map<String, dynami
     (await dio.patch('/admin/purchases/$id', data: onlyChanged)).data;
 ```
 
-New audit actions: `SUPPLIER_REFUND`, `PURCHASE_CREDIT_USE`, `PURCHASE_ATTACHMENT`, `PURCHASE_EDIT`. New payment mode value in `payments[].mode`: `CREDIT_NOTE` (not money: do not count it as cash out in a cash report). Still not built: stock lots, purchase orders, cancelling a purchase, validating `moneyAccountId`.
+New audit actions: `SUPPLIER_REFUND`, `PURCHASE_CREDIT_USE`, `PURCHASE_ATTACHMENT`, `PURCHASE_EDIT`. New payment mode value in `payments[].mode`: `CREDIT_NOTE` (not money: do not count it as cash out in a cash report). Still not built: purchase orders, cancelling a purchase, validating `moneyAccountId` (stock lots now exist: `74`).

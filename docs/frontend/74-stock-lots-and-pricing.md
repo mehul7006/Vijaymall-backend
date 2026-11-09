@@ -6,8 +6,8 @@ Audience: the Flutter admin app, the till (POS) app and the shop app. All money 
 
 Every delivery line, opening balance, correction or return creates a **lot**: a batch of one variant with quantity received, quantity left, unit cost (landed cost, four decimals of a paisa), received date, optional MRP, selling price, batch number and expiry date. The units left in a variant's lots always add up to its stock on hand. Sales take from the **oldest lot first** (FIFO). A variant with **track expiry** on sells the lot with the **earliest expiry first** (FEFO).
 
-Two switches per variant (set by `PUT /admin/variants/{id}/lot-settings`):
-- `lotPriced`: the variant's selling price and MRP follow the lot that sells next (the lot's own price/MRP when it has one). Off by default: the variant price stays and lots only carry cost.
+Two switches per variant (read with `GET /admin/variants/{id}/lot-settings`, set by `PUT` on the same path):
+- `lotPriced`: the variant's selling price and MRP follow the lot that sells next (the lot's own price/MRP when it has one). Off by default: the variant price stays and lots only carry cost. Turning it on takes effect at the variant's NEXT stock movement (receive, sale, return), not instantly.
 - `trackExpiry`: FEFO.
 
 Legacy stock became one `OPENING` lot per variant (cost = last purchase landed cost, else `costKnown=false`).
@@ -28,10 +28,10 @@ Legacy stock became one `OPENING` lot per variant (cost = last purchase landed c
  "qty": 1, "linePaise": 15000,
  "lot": {"lotId": "...", "qtyLeftInLot": 3, "batchNo": "", "expiryDate": null, "nextPriceChange": {"afterQty": 3, "newPricePaise": 17000, "newMrpPaise": 18000}}}
 ```
-  `lot` is null without stock. `nextPriceChange` is null when the price stays the same for all stock (and always for variants that are not lot priced). Show a notice: "after 3 more the price is 170.00".
-- **Quote and sale** (`POST /pos/quote`, `/pos/sales`): when a line's quantity spans lots with different prices the server returns **one bill line per price run**, same `productId`: 5 pieces become `{qty:3, unitPricePaise:15000}` and `{qty:2, unitPricePaise:17000}`. Group lines of the same `productId` to print "3 x 150 + 2 x 170". Totals, coupons, coins and GST use these quoted prices. Sale lines never expose cost.
+  `lot` is present for any product with stock (null without stock); `nextPriceChange` is null when the price stays the same for all stock (and always for variants that are not lot priced). Show a notice: "after 3 more the price is 170.00".
+- **Quote and sale** (`POST /pos/quote`, `/pos/sales`; the counter only, the online quote never splits, it caps, see section 4; at the till only unit-sold, non-flash lines are split): when a line's quantity spans lots with different prices the server returns **one bill line per price run**, same `productId`: 5 pieces become `{qty:3, unitPricePaise:15000}` and `{qty:2, unitPricePaise:17000}`. Group lines of the same `productId` to print "3 x 150 + 2 x 170". Totals, coupons, coins and GST use these quoted prices. Sale lines never expose cost.
 - **Flash sales win**: while a flash sale runs, its units are sold at the sale price whatever the lot price is; lot pricing applies to the remaining units, which start counting after the flash units.
-- **Offline**: the item list (`GET /pos/products`, `updatedSince`) carries `lot` per lot-priced product (current lot price in `pricePaise`, `lot.qtyLeftInLot`, `lot.nextPriceChange`). The offline bill sends what it rang (`rung` snapshot). On upload the server allocates lots at that time; a price that differs from the catalog (including because the lot rolled over meanwhile) is flagged with the existing `PRICE_CHANGED` offline exception, a shortfall as `OVERSOLD`. The bill is always recorded.
+- **Offline**: the item list (`GET /pos/products`, `updatedSince`) carries `lot` only for lot-priced products that have stock (the scan answer has it for any product with stock) (current lot price in `pricePaise`, `lot.qtyLeftInLot`, `lot.nextPriceChange`). The offline bill sends what it rang (`rung` snapshot). On upload the server allocates lots at that time; a price that differs from the current catalog price (including because the lot rolled over meanwhile; the check is per rung line against the catalog price, lots are not checked per line) is flagged with the existing `PRICE_CHANGED` offline exception, a shortfall as `OVERSOLD`. The bill is always recorded.
 - Returns put restocked units back into the lot they came from and reverse their cost; units marked `restock=false` stay in the defective flow (their cost stays as a loss).
 
 ## 4. Online (shop app) behaviour
@@ -50,19 +50,20 @@ Legacy stock became one `OPENING` lot per variant (cost = last purchase landed c
 
 | Method and path | Purpose |
 |---|---|
-| `GET /admin/variants/{id}/lots?onlyOpen=false&page=0&size=20` | Lots of a variant, newest first (paged) |
-| `PUT /admin/variants/{id}/lot-settings` body `{"lotPriced":true,"trackExpiry":false}` | Switches (audited). 404 unknown variant |
-| `GET /admin/stock/expiring?days=30` | Lots with stock expiring within `days` (0-365, default the setting), expired included, at most 200 (`truncated`) |
-| `POST /admin/stock/lots/{id}/write-off` body `{"reason":"..."}` optional | Takes the lot's remaining units out of stock (history reason `EXPIRY_WRITE_OFF`, audited). 404 unknown, 409 `LOT_EMPTY` |
+| `GET /admin/variants/{id}/lots?onlyOpen=false&page=0&size=20` | Lots of a variant, newest first (paged); an unknown variant gives an empty page, not 404 |
+| `GET /admin/variants/{id}/lot-settings` | The saved switches `{"variantId","lotPriced","trackExpiry"}` (404 unknown variant). Use it to show the two switches when the screen opens |
+| `PUT /admin/variants/{id}/lot-settings` body `{"lotPriced":true,"trackExpiry":false}` | Switches (audited); answers the same `{variantId, lotPriced, trackExpiry}`; both flags required (400 `lotPriced`/`trackExpiry`). 404 unknown variant |
+| `GET /admin/stock/expiring?days=30` | `{days, until, lots, truncated}`: lots with stock expiring within `days` (0-365, default the setting), expired included, at most 200 (`truncated`) |
+| `POST /admin/stock/lots/{id}/write-off` body `{"reason":"..."}` optional (max 200 chars) | Takes the lot's remaining units out of stock (history reason `EXPIRY_WRITE_OFF`, audited). Answers `{lotId, unitsWrittenOff}`. 404 unknown, 409 `LOT_EMPTY` |
 | `GET /admin/stock/valuation?groupBy=product|category&page&size` | Stock value at cost |
 | `GET /admin/reports/margin?groupBy=product|category|day&from&to&page&size` | Margin (India dates, default this month, at most one year) |
 | `GET /admin/stock/lot-check` | Variants whose lots differ from stock on hand; should be `{"drifts":[],"truncated":false}` |
 
-Lot row: `{"id","productId","productName","receivedAt","qtyReceived","qtyRemaining","unitCost":12.5000,"costKnown":true,"mrpPaise","pricePaise","batchNo","expiryDate","source":"PURCHASE|OPENING|ADJUSTMENT|RETURN|TRANSFER","purchaseItemId"}`.
+Lot row (`unitCost` is in PAISE per unit with up to four decimals, not rupees: a cost of Rs 120 per unit is `12000.0` or `12000.0000`; divide by 100 for rupees): `{"id","productId","productName","receivedAt","qtyReceived","qtyRemaining","unitCost":12500.0000,"costKnown":true,"mrpPaise","pricePaise","batchNo","expiryDate","source":"PURCHASE|OPENING|ADJUSTMENT|RETURN|TRANSFER","purchaseItemId"}`.
 
-Valuation: `{"total":{"qty","valuePaise","costUnknownProducts","costUnknownQty"},"rows":{"items":[{"id","name","qty","valuePaise","costUnknownQty"}],"page","size","total","totalExact","hasMore"}}`.
+Valuation (lots with unknown cost count as 0 value, so `total.valuePaise` is a lower bound while `costUnknownQty > 0`): `{"total":{"qty","valuePaise","costUnknownProducts","costUnknownQty"},"rows":{"items":[{"id","name","qty","valuePaise","costUnknownQty"}],"page","size","total","totalExact","hasMore"}}`.
 
-Margin row: `{"key","name","revenuePaise","costPaise","marginPaise","marginPercent":31.65,"uncostedLines"}`. Revenue is before tax and net of returned units; cost is the FIFO lot cost less cost of units back on the shelf. Lines sold before lots existed have no cost: they are counted in `uncostedLines` and left out of the money.
+Margin row: `{"key","name","revenuePaise","costPaise","marginPaise","marginPercent":31.65,"uncostedLines"}`. Revenue is before tax and net of returned units; cost is the FIFO lot cost less cost of units back on the shelf. Lines sold before lots existed have no cost: they are counted in `uncostedLines` and left out of the money. Lines sold from a lot with `costKnown:false` are NOT in `uncostedLines`: they are costed at 0 and so raise the margin; treat the margin as an upper bound while unknown-cost lots exist. `marginPercent` is null when revenue is 0; `day` groups are sorted by date.
 
 ## 6. Costing rules
 

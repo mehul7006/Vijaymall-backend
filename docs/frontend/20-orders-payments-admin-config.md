@@ -113,7 +113,7 @@ Methods: only `COD` and `ONLINE` exist for the app. (`CREDIT` and `HYBRID` are c
 Checkout steps the app performs:
 
 1. Place the order with `paymentMethod: "ONLINE"`. Response status `PAYMENT_PENDING` with `paymentSession`.
-2. Open the Razorpay Checkout SDK with `key = payload.keyId`, `order_id = payload.razorpayOrderId`, `amount = payload.amountPaise`, `currency = payload.currency` (Flutter: `razorpay_flutter`; web: Checkout.js). Prefill customer details if you like. Show a countdown to the payment deadline: place time + the timeout (the API does not return the deadline and the timeout setting is admin-only, so show a generic message such as "Pay within 15 minutes" or none; the server cancels the order when time runs out).
+2. Open the Razorpay Checkout SDK with `key = payload.keyId`, `order_id = payload.razorpayOrderId`, `amount = payload.amountPaise`, `currency = payload.currency` (Flutter: `razorpay_flutter`; web: Checkout.js). Prefill customer details if you like. Show a countdown to `paymentExpiresAt` on the order object (set only while the order is `PAYMENT_PENDING`; see the payment addendum below); the server cancels the order when it passes.
 3. When the SDK reports success, **do not mark the order paid in the app**. Show "Confirming payment…" and wait for the server to confirm, by SSE (`order` event for this order) and/or polling `GET /orders/{id}` every 2-3 s for up to about 60-90 s, until `status` is no longer `PAYMENT_PENDING` (becomes `PLACED`, `paymentStatus` `CAPTURED`). There is no endpoint where the app sends the Razorpay signature; the server learns of payment only from Razorpay's webhook (and a fallback check every 5 minutes for payments older than 5 minutes whose webhook never arrived). If after about 90 s it is still pending, show "We are still confirming your payment. You will be notified; do not pay again" and keep the order screen refreshable.
 4. If the customer dismisses or fails checkout, the order stays `PAYMENT_PENDING` until it expires. A failed attempt is only recorded server-side (it does **not** cancel the order), so the customer may retry: reopen checkout using the `paymentSession` from `GET /orders/{id}` (same Razorpay order). Offer "Retry payment" and "Cancel order" (`POST /orders/{id}/cancel`).
 5. If the order becomes `CANCELLED` (timeout, cancel) and money was captured after that, the server automatically refunds it ("paid after expiry"). The client never needs to do anything for that.
@@ -186,6 +186,7 @@ A cancel or reject never waits for or fails because of Razorpay: the refund is q
 |---|---|---|
 | `lines[]` | array | priced lines (merged duplicates, in request order) |
 | `lines[].unitPricePaise`, `lineTotalPaise` | int | current price; line total = unit x qty |
+| `lines[].flashSaleId`, `listPricePaise`, `flashDiscountPaise` | uuid or null, int, int | present on every line: set when a flash sale prices the line (file 40); otherwise `listPricePaise` equals `unitPricePaise` and the discount is 0. One product can be two lines (sale price and list price) |
 | `lines[].coinRedeemable` / `earnsCoins` | bool | whether the line can be paid with coins / earns coins |
 | `lines[].nameGu`, `unitLabel` | string | Gujarati name, pack label (e.g. "5 kg") |
 | `lines[].categoryId` | UUID or null | category for per-category coupon display |
@@ -208,7 +209,7 @@ Calculation order: subtotal, coupon, coins (max redeemable limited by a coin-set
 | status | code | when |
 |---|---|---|
 | 400 | `VALIDATION_FAILED` | empty items; qty outside 1..99; product not available/unknown/counter-only; bad enum or JSON |
-| 422 | `COUPON_INVALID` | coupon unusable; `details.reason` is one of `NOT_FOUND`, `EXPIRED` (inactive or outside dates), `MIN_ORDER`, `CATEGORY` (no cart item in the coupon's categories), `LIMIT_REACHED`, `FIRST_ORDER_ONLY` |
+| 422 | `COUPON_INVALID` | coupon unusable; `details.reason` is one of `NOT_FOUND`, `EXPIRED` (inactive or outside dates), `MIN_ORDER`, `CATEGORY` (no cart item in the coupon's categories), `ITEM` (no cart item among the coupon's products/groups), `FLASH_ITEMS` (only flash-sale lines are covered and the coupon is not allowed on them), `LIMIT_REACHED`, `FIRST_ORDER_ONLY` |
 
 - **UI notes**: Debounce calls (quantity steppers). Never compute totals in the app; render the response. If the call fails with `COUPON_INVALID`, show the reason and offer to remove the coupon, then re-quote. Always keep the last `totalPaise` to send as `expectedTotalPaise` when placing. Cap qty at 99 in the stepper (the saved basket allows at most 99 per line too).
 
@@ -251,7 +252,7 @@ Calculation order: subtotal, coupon, coins (max redeemable limited by a coin-set
 | `coinMode` | enum | no | null becomes `NONE` | saved coin choice |
 | `percent` | int | no | `@Min(0) @Max(100)`; kept only when `coinMode` is `PERCENT` (null stored as 0 then) | saved percent |
 
-Server normalisation: repeated `productId`s are merged (first position wins, quantities summed). The limit of 99 applies to the merged total (and the saved basket `PUT /cart` allows at most 99 per line).
+Server normalisation: repeated `productId`s are merged (first position wins, quantities summed). The limit of 99 applies to the merged total (and the saved basket `PUT /cart` allows at most 99 per line: a single `PUT /cart` line over 99 is refused by bean validation as field `items[n].qty` "must be 99 or less", not with the `quantity must be 1 to 99` text of quote/place).
 
 - **Response** 200: the stored basket, same shape as `GET /cart`.
 - **Errors**: 400 `VALIDATION_FAILED` (rules above).
@@ -348,7 +349,7 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `id`, `orderNo` | UUID, string | id for API paths; number shown to humans (same number in the shop's records) |
 | `status`, `fulfilment`, `paymentMethod`, `paymentStatus` | string | see enums above |
 | `totalPaise`, `subtotalPaise`, `couponDiscountPaise`, `coinDiscountPaise`, `deliveryFeePaise` | long | money; `totalPaise` = what was charged |
-| `itemCount` | int | number of lines |
+| `itemCount` | int | total number of units in the order (sum of the line quantities), not the number of lines |
 | `couponCode` | string or null | coupon applied |
 | `coinsUsed` | int | coins spent |
 | `placedAt` | ISO instant | when placed |
@@ -377,11 +378,11 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `timeline[]` | array | `{status, at}` oldest first; every status the order has entered |
 | `placedAt` | ISO instant | |
 | `slot` | string or null | the customer's chosen window |
-| `cancelReason` | string or null | the customer's reason, or `"Rejected by shop: <reason>"` when staff rejected |
+| `cancelReason` | string or null | the customer's reason, or the raw reason staff typed when they rejected (`cancelCode` `REJECTED_BY_SHOP`; no "Rejected by shop:" prefix, see the cancel-codes addendum) |
 | `coinBalance` | int or null | the customer's current coin balance (use to refresh the wallet badge) |
 
 - **Errors**: 404 `NOT_FOUND` ("Order not found") for unknown or other users' orders.
-- **UI notes**: Show a stepper from `timeline`/`status` (DELIVERY vs PICKUP final step differs). `CANCELLED` with `cancelReason` starting "Rejected by shop:" should be presented as "Shop could not fulfil your order" with the reason; a timeline note is not returned to customers. Show "Refund on its way" when `status` is `CANCELLED` and `paymentStatus` is `REFUNDED`. If a payment is pending but `paymentSession` is null, the payment attempt is closed; show "Payment expired or failed" and expect the order to be cancelled.
+- **UI notes**: Show a stepper from `timeline`/`status` (DELIVERY vs PICKUP final step differs). `CANCELLED` with `cancelCode` `REJECTED_BY_SHOP` should be presented as "Shop could not fulfil your order" with the reason; a timeline note is not returned to customers. Show "Refund on its way" when `status` is `CANCELLED` and `paymentStatus` is `REFUNDED`. If a payment is pending but `paymentSession` is null, the payment attempt is closed; show "Payment expired or failed" and expect the order to be cancelled.
 
 ### POST /api/v1/orders/{id}/cancel
 - **Who**: customer (own order).
@@ -451,7 +452,8 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `refundMode` | `ONLINE`/`CASH`/`NONE` | `ONLINE` = refunded to the customer's payment method; `CASH` = the shop hands cash (COD orders, or refund queue not applicable); `NONE` = 0 refund |
 | `coinsClawedBack` | int | earned coins taken back |
 | `coinsRestored` | int | spent coins returned to the customer |
-| `items[]` | array | `productId, name, qty, refundPaise, restocked` |
+| `couponClawbackPaise` | long | coupon discount taken back out of this refund by the `CLAWBACK_BELOW_MINIMUM` policy (0 under `KEEP`) |
+| `items[]` | array | `productId, name, qty, refundPaise, restocked` and `couponSharePaise` (the coupon share removed for that line) |
 | `reason`, `createdAt` | string, ISO instant | |
 
 - **Errors**: 404 `NOT_FOUND`.
@@ -526,7 +528,7 @@ Newest first by `placedAt`.
 
 | field | type | required | validation | meaning |
 |---|---|---|---|---|
-| `reason` | string | yes | `@NotNull @Size(1..200)`; also blank after trimming = 400 field `reason` "tell the customer why the order is rejected"; > 200 = 400 | shown to the customer as `cancelReason` = "Rejected by shop: <reason>" and in the notification |
+| `reason` | string | yes | `@NotNull @Size(1..200)`; also blank after trimming = 400 field `reason` "tell the customer why the order is rejected"; > 200 = 400 | shown to the customer as `cancelReason` = the raw `<reason>` with `cancelCode` `REJECTED_BY_SHOP` and in the notification |
 
 - **Response** 200: `AdminView` (status `CANCELLED`). Effects: stock restored if deducted, coupon use released, coins restored, online payment refunded (queued).
 - **Errors**:
@@ -565,12 +567,12 @@ Newest first by `placedAt`.
 | 409 | `OUT_OF_STOCK` | moving to a stock-holding status (usually `CONFIRMED`) but shelf stock is short; `details.items` lists `{productId, available}`; order unchanged. Offer "Reject" |
 | 409 | `VERSION_CONFLICT` | order changed concurrently; reload and retry |
 
-- **UI notes**: Prefer `reject` over `status: CANCELLED` (it records a customer-visible reason; cancelling through `status` leaves `cancelReason` empty). Moving to `DELIVERED`/`PICKED_UP` is irreversible (coins are paid out). Moving to `CANCELLED` refunds like reject.
+- **UI notes**: Prefer `reject` over `status: CANCELLED` (it records a customer-visible reason; cancelling through `status` stores the `note` as `cancelReason` with code `CANCELLED_BY_SHOP`). Moving to `DELIVERED`/`PICKED_UP` is irreversible (coins are paid out). Moving to `CANCELLED` refunds like reject.
 
 ### POST /api/v1/admin/orders/{id}/returns
 - **Who**: admin or cashier (path under `/admin/orders/**`). The service applies no extra role or time-window rule.
 - **Purpose / when the UI calls it**: Staff records goods returned after delivery (damaged, wrong, missing items) and refunds the share.
-- **Request**: path `id`. Header `Idempotency-Key` is **mandatory** (missing = 400 `Bad request`; blank = 400 field `Idempotency-Key`). The key is global (not per user), so use a random UUID per submission. **Replay**: a repeated key returns the first stored return (HTTP 201) without refunding again, even if the body differs. Body:
+- **Request**: path `id`. Header `Idempotency-Key` is **mandatory** (missing = 400 `Bad request`; blank = 400 field `Idempotency-Key`). The key is global (not per user), so use a random UUID per submission. **Replay**: a repeated key returns the first stored return (HTTP 201) without refunding again, even if the body differs. Because the key is global, reusing a key on a DIFFERENT order also returns the first order's return: use a new UUID per submission. Body:
 
 ```json
 { "reason": "Packet damaged", "items": [ { "productId": "0b0e8c0e-…", "qty": 1, "restock": false } ] }
@@ -578,7 +580,7 @@ Newest first by `placedAt`.
 
 | field | type | required | validation | meaning |
 |---|---|---|---|---|
-| `reason` | string | yes (checked in the service) | after trimming 1..200 chars else 400 field `reason` | why |
+| `reason` | string | yes for the real call (checked in the service) | after trimming 1..200 chars else 400 field `reason`. The preview (`/returns/preview`) accepts a blank `reason` and substitutes a placeholder | why |
 | `items` | array | yes | `@NotEmpty`; 1..100 entries else 400 field `items` | lines returned |
 | `items[].productId` | UUID | yes | must be on this order, else 400 field `productId` "is not on this order"; no duplicates (400 field `items`) | product |
 | `items[].qty` | int | yes | > 0 (else 400 field `qty`); not more than `sold qty - already returned` else 409 `RETURN_EXCEEDS_SOLD` | quantity coming back |
@@ -596,7 +598,7 @@ Newest first by `placedAt`.
 | 409 | `REFUND_EXCEEDS_ORDER` | total refunds would exceed the order total; `details.totalPaise` |
 | 409 | `REFUND_EXCEEDS_PAYMENT` | online refund would exceed what was paid; `details.paidPaise`, `alreadyRefundedPaise`, `requestedPaise` |
 
-- **UI notes**: Show the refund amount from the response (`refundPaise`, `refundMode`). For `CASH` tell the cashier to hand cash. For `ONLINE` the refund goes to the customer's payment method asynchronously. Only DELIVERED/PICKED_UP orders: hide the button otherwise. Coins earned on returned goods are taken back and spent coins are restored proportionally.
+- **UI notes**: A return does not change the order's `paymentStatus`; read the refund state from the return (`refundMode`) and the refunds queue. Show the refund amount from the response (`refundPaise`, `refundMode`). For `CASH` tell the cashier to hand cash. For `ONLINE` the refund goes to the customer's payment method asynchronously. Only DELIVERED/PICKED_UP orders: hide the button otherwise. Coins earned on returned goods are taken back and spent coins are restored proportionally.
 
 ### GET /api/v1/admin/orders/{id}/returns
 - **Who**: admin or cashier.
@@ -614,7 +616,7 @@ Newest first by `placedAt`.
 - **Who**: customer (signed-in; not in the public list in SecurityConfig).
 - **Purpose / when the UI calls it**: Checkout screen: which of COD / ONLINE to show.
 - **Request**: none.
-- **Response** 200: only methods that are switched on by the admin and usable (ONLINE appears only if Razorpay key id and secret are configured):
+- **Response** 200: only methods that are switched on by the admin and usable (ONLINE appears only if Razorpay key id and secret are configured AND the admin has switched ONLINE on; it is seeded `enabled=false`, so a fresh server offers COD only):
 
 ```json
 [ { "code": "COD", "enabled": true }, { "code": "ONLINE", "enabled": true } ]
@@ -1087,7 +1089,7 @@ Events (`event:` name, then `data:` is JSON):
 ## Addendum: order response field and returns on split flash-sale lines
 
 - `paymentExpiresAt` (Instant|null): present on the order object only while `status` is `PAYMENT_PENDING` (online order waiting for payment). Use it for the "pay within mm:ss" countdown. After it passes the server cancels the order and releases everything.
-- When a flash sale splits one product into two order lines (sale price and list price), `POST /admin/orders/{id}/returns` still takes one entry per product: `{ "productId", "qty" }`. Units are taken from the order's lines for that product in the order they were sold (the flash-sale line first, then the normal-price line). `RETURN_EXCEEDS_SOLD` reports `returnable` as the total left across both lines.
+- When a flash sale splits one product into two order lines (sale price and list price), `POST /admin/orders/{id}/returns` still takes one entry per product: `{ "productId", "qty" }`, but the response and the preview list one row per ORDER LINE, so the same `productId` can appear twice. Units are taken from the order's lines for that product in the order they were sold (the flash-sale line first, then the normal-price line). `RETURN_EXCEEDS_SOLD` reports `returnable` as the total left across both lines.
 
 
 ---
@@ -1153,7 +1155,7 @@ Every order representation that carries `cancelReason` now also carries `cancell
 | `REJECTED_BY_SHOP` | `SHOP` | `POST /admin/orders/{id}/reject` | the staff `reason` (1..200 chars) |
 | `CANCELLED_BY_SHOP` | `SHOP` | `POST /admin/orders/{id}/status` with `"status": "CANCELLED"` | the staff `note` (trimmed), or `null` if the note was empty |
 | `PAYMENT_TIMEOUT` | `SYSTEM` | the unpaid online order expired (`paymentExpiresAt` passed) | `null` |
-| `PAYMENT_FAILED` | `SYSTEM` | the online payment failed while the order was waiting for payment | `null` |
+| `PAYMENT_FAILED` | `SYSTEM` | reserved: no code path publishes it today (a failed gateway attempt is only recorded and leaves the order pending; only the timeout cancels an unpaid order). Handle it defensively | `null` |
 
 - `cancelReason` is **raw text exactly as typed**. It no longer has the English prefix "Rejected by shop: " (orders rejected before this release stored it with that prefix; the server strips it when it shows the order, so you never see it). Translate the **code** into your own words and show `cancelReason` as the reason line when it is not null. Do not build a message from `cancelReason` alone: system cancellations have none.
 - Orders cancelled before this release were backfilled best-effort from their history (rows that could not be classified stay `null`/`null`, so treat a `CANCELLED` order with `cancelCode: null` as "Cancelled").

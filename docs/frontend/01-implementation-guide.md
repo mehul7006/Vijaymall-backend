@@ -14,10 +14,11 @@ Read this first, then use the numbered guides as the detailed reference. It tell
 | `60-admin-push-notifications.md` | Admin broadcasts to everyone, a role group, chosen people or a segment built from conditions. |
 | `70-purchases.md` | Suppliers, purchase documents (GST, cess, discount, freight), payments and payables, returns to suppliers, supplier statement, credit and refunds, invoice file. |
 | `72-barcode-labels.md` | Generating store barcodes and printing labels (PDF, thermal printer commands, JSON). |
-| `73-paytm-terminal.md` | Taking card and UPI payments on the Paytm wireless swipe machine from the till. |
+| `71-bank-and-settlements.md` | Bank module: money accounts, payment channels (several vendors at once), receipts, settlements and statement import, exceptions, account book, the one card-machine flow for every vendor. |
+| `73-paytm-terminal.md` | The Paytm wireless swipe machine as one vendor of that flow: admin set-up, machines master, till flow, same-day void, Paytm settlements. |
+| `74-stock-lots-and-pricing.md` | Stock lots, lot-aware prices and scanning, FIFO cost, expiry, margin and stock-value reports. |
+| `playbooks/README.md` | Step-by-step implementation playbooks (reading order and index): [P1 orders, coupons, returns, payments](playbooks/P1-orders-coupons-returns-payments.md), [P2 purchases, suppliers, labels](playbooks/P2-purchases-suppliers-labels.md), [P3 counter till and card machine](playbooks/P3-counter-till-and-card-machine.md), [P4 bank, settlements, receipts](playbooks/P4-bank-settlements-receipts.md), [P5 stock lots and pricing](playbooks/P5-stock-lots-pricing.md). Per feature: goal, fields, API sequence, edge cases, Dart, acceptance tests. |
 | `50`, `51`, `52-backend-response-*.md` | The backend's answers to your reviews, item by item, with what to retest. Use them as the change history. |
-
-(Guides for the bank and settlement module and for stock lots and prices are added to this list when those modules are released: `71-bank-and-settlements.md`, `74-stock-lots-and-pricing.md`.)
 
 Each numbered guide ends with its own "Addendum" sections for later changes; where an addendum contradicts older text in the same file, **the addendum wins**.
 
@@ -62,6 +63,11 @@ Each numbered guide ends with its own "Addendum" sections for later changes; whe
 | Barcode labels | 72 | Generate store barcode, choose template, print. |
 | Push broadcasts and segments | 60 | Audience size, segment builder from the condition catalog, progress screen. |
 | Reports, audit log, stock take, defective stock | 30 | Lists are paged with bounded totals. |
+| Money accounts (bank, gateway, UPI, card machines, cash), account book with manual entries, payment defaults | 71 | `CARD_TERMINAL` accounts of provider `paytm` are made by adding the machine; defaults and gateway live on the configuration screen (section 5). |
+| Payment channels overview, receipts list and summary (all vendors), fees report, payer detail on the order and on the bill (`/admin/payments/by-sale/{saleId}`) | 71 | Counter card/UPI lines show under their machine's vendor (for example `paytm`). |
+| Settlements: list, items, sync now, statement CSV import (Paytm Settlement Report is detected by its header), exceptions queue, unsettled report | 71, 73 | Work the exceptions queue; badge = OPEN count. |
+| Paytm machines master and test button | 73 | ADMIN; each machine creates its channel. |
+| Stock lots per variant, lot-priced and expiry switches, expiring list and write-off, stock valuation, margin report, lot check, "Stock and lots" settings | 74 | `GET/PUT /admin/variants/{id}/lot-settings` read and set the two switches. |
 | Flash sales | 40 | Cashiers may use the flash-sale endpoints too. |
 
 ### 3.3 Counter till (cashier)
@@ -71,7 +77,9 @@ Each numbered guide ends with its own "Addendum" sections for later changes; whe
 | Scan or search (barcode, PLU, name), weighed items, quote with manual discount (manager PIN) | 30 | `/pos/products?q=` matches barcode and PLU; incremental sync with `updatedSince`. |
 | Coupons and coins at the till | 30 | Needs the customer's mobile; coupon discount is calculated on covered lines at bill time; re-quote after adding or removing items. |
 | Payments: cash, UPI, card, credit | 30 | Mode errors: bills accept CREDIT, refunds and repayments do not. |
-| Card and UPI on the Paytm machine | 73 | Create a terminal payment, poll, attach to the bill line; online only. |
+| Choose the payment channel per mode (cash drawer, UPI QR, Paytm machine, bank machine, ...) | 71 | `GET /pos/payment-channels`; send the channel's `moneyAccountId` on the payment line. Several vendors can be active at once. |
+| Card and UPI on a card machine (Paytm wireless or a manual bank machine) | 71, 73 | One flow: start with the channel's `moneyAccountId`, poll, confirm (manual only), cancel/void, then `terminalPaymentId` on the bill line; online only. |
+| Lot-aware prices at the scan and quote, split price runs, offline `lot` field | 74 | Show the "after N more the price is ..." notice; group same-product bill lines. |
 | Holds (parked baskets) | 30 | At most 100 exist (409 `HOLD_LIMIT`); they expire after 7 days (`expiresAt`). |
 | Returns, credit notes, return preview | 30 | Preview shows the exact refund per line before confirming. |
 | Credit customers picker (read-only for cashiers) | 30 | `GET /pos/credit/customers`. |
@@ -110,7 +118,9 @@ Each numbered guide ends with its own "Addendum" sections for later changes; whe
 | Counter GST and round-off | GSTIN, state code, invoice prefix, round-off mode | Shop settings |
 | Purchases | `purchase.gstMode` default (regular, composition, none; each purchase can override) | Admin configuration screen |
 | Coupons and returns | `returns.couponPolicy` (KEEP or CLAWBACK_BELOW_MINIMUM), `coupon.allowOnFlashItems` | Admin configuration screen |
-| Paytm machine | Paytm MID, merchant key, channel id, environment; add each machine's terminal id | Admin configuration screen and payment terminals |
+| Paytm machine | `paytm.enabled` (needs the three below), `paytm.mid`, `paytm.merchantKey` (16 characters, secret), `paytm.channelId`, `paytm.environment` (STAGING or PRODUCTION), optional `paytm.baseUrl`; tuning `paytm.pollSeconds`, `paytm.waitSeconds`, `paytm.autoAccept`, `paytm.paymentMode`, `paytm.timeoutConfig`; settlement API `paytm.settlement.enabled`, `paytm.settlement.authStyle`, `paytm.settlement.token`, `paytm.settlement.baseUrl`, `paytm.settlement.syncDays`. Then add each machine's terminal id on the machines screen | Admin configuration screen (group PAYTM) and payment terminals (`73`) |
+| Money accounts and defaults | Create the accounts first (bank, Razorpay gateway account, UPI QRs, machines; keep the cash drawer). `payment.gatewayAccountId` (account for online payments; blank = first active GATEWAY account of the payment's provider), `payment.onlineProvider` (gateway the customer app uses; blank = server default), `payment.settlementDays` (normal settlement cycle, default 2; overdue after one more day), `pos.defaultAccount.CASH`, `pos.defaultAccount.UPI`, `pos.defaultAccount.CARD` (account used when the till names none; blank CASH = the drawer, blank UPI/CARD = Unassigned), `pos.terminalProvider` (default `manual`; only the FALLBACK adapter for a channel whose provider has none, the channel's own provider normally decides) | Admin configuration screen (groups Payments and Counter rules), see `71` |
+| Stock lots | `inventory.lotCrossPolicy` (only `CAP`), `inventory.costingMethod` (only `FIFO`), `inventory.expiryAlertDays` (default 30, 1 to 365), `inventory.autoWriteOffExpired` (default off; the daily job at 03:15 writes off expired lots when on). Per variant: the `lotPriced` and `trackExpiry` switches | Admin configuration screen (group "Stock and lots") and the variant screen, see `74` |
 | Labels | `barcode.storePrefix`, label DPI, label templates | Admin configuration screen and label templates |
 | Hold expiry | `HOLD_EXPIRY_DAYS` (server setting, 0 = never) | Server environment |
 | Invoice files | `FILES_DIR` folder (back it up) | Server environment |
@@ -124,7 +134,9 @@ Each numbered guide ends with its own "Addendum" sections for later changes; whe
 
 **GST on purchases.** Chosen per purchase: `REGULAR` (creditable GST is not part of cost), `COMPOSITION` (GST is part of cost), `NONE`. Inter-state purchases use IGST when the supplier's state differs from the shop's. Landed cost per unit includes freight share and free units.
 
-**Card and UPI at the till.** Choose the machine, the server sends the amount to it, the app polls the payment, and the paid payment is attached to the bill line. Machine payments are online only. UPI paid straight to a QR sticker (not through the machine) appears later in settlement reports, not instantly.
+**Card and UPI at the till.** Choose the channel (the vendor) from `GET /pos/payment-channels`, start the payment with that channel's `moneyAccountId`, poll the session, and put the finished session id on the bill line as `terminalPaymentId`. The channel decides the machine: Paytm reports the result itself, a manual bank machine needs the cashier to confirm with the approval code. Machine payments are online only. UPI paid straight to a QR sticker (not through the machine) appears later in settlement reports, not instantly.
+
+**Several payment vendors at once.** Razorpay online, a Paytm machine, a bank machine, a PhonePe or Paytm QR and the cash drawer can all be active together. Every receipt is tagged with a money account (`Unassigned` is the honest bucket for history); the cashier picks the channel per payment; the customer app uses the gateway named by `payment.onlineProvider`; settlements, receipts and fees are reported per vendor and account. Adding a vendor is server work (adapter) plus a money account, not a new screen: see `71` section 7.
 
 ## 7. Suggested build order
 
@@ -134,11 +146,14 @@ Each numbered guide ends with its own "Addendum" sections for later changes; whe
 4. Till: shifts, billing, payments, holds, returns, credit; then offline.
 5. Purchases and suppliers (70), barcode labels (72).
 6. Push broadcasts (60), flash sales (40).
-7. Paytm machine (73) once the server has Paytm credentials; bank/settlement screens when module 71 is released.
+7. Bank module and channels (71): accounts, defaults, channel chooser at the till, receipts, settlements, exceptions; then the Paytm machine (73) once the server has Paytm credentials.
+8. Stock lots (74): lots tab and switches, till price notice, valuation and margin reports.
+
+For step-by-step detail per feature use the playbooks (`playbooks/README.md`).
 
 ## 8. Open items and dependencies
 
 - Paytm and Razorpay accounts: card/UPI machine and online payments can be verified live only after the owner supplies credentials; the guides list what is unconfirmed.
 - Gujarati text for segment conditions needs proof-reading by a native speaker.
-- Stock lots and lot-based pricing, and the bank and settlement module, are being delivered next; their guides will be added here.
+- Stock lots and lot-based pricing (74) and the bank and settlement module (71) are built; the Paytm and Razorpay settlement APIs can be checked live only with real credentials (see the "not verified" notes in 71, 73 and the playbooks).
 - Questions or gaps: add a row to your findings register; the backend answers in `5x-backend-response-*.md`.

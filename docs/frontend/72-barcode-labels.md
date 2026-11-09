@@ -22,7 +22,7 @@ Output formats: a **PDF** (A4 sheets or one page per thermal label, for any prin
 1. **Inventory screen, variant row or detail:** button "Print labels". Optionally "Generate barcode" when the variant shows no barcode (printing does it for you, so this is only for a screen that wants to show the code first).
 2. **Sheet "Print labels":**
    - Template picker: `GET /api/v1/admin/label-templates` (remember the last one in local storage). Show name, size, and an icon for `kind`.
-   - Copies: a stepper 1 to 500, plus a chip **"One per unit in stock"** which sends `copies: "fromStock"` (hide it when stock is 0). Show the stock number next to it. Warn "capped at 500" when stock is above 500.
+   - Copies: a stepper 1 to 500, plus a chip **"One per unit in stock"** which sends `copies: "fromStock"` (the server compares the word case-insensitively after trimming, but send exactly `fromStock`) (hide it when stock is 0). Show the stock number next to it. Warn "capped at 500" when stock is above 500.
    - For a `SHEET` template: a small grid (`columns` x `rows` of the template) where staff tap the first free cell: that is `startPosition` (1 = top left, counted row by row). Used for a partly used sheet.
    - Optional fields when the template has them: packed on, best before (date pickers), batch number. These are printed on every label of the request.
    - Output: PDF (default for sheets and for the system print dialog), or the printer type saved in the app settings (TSPL, ZPL, ESC/POS or "draw in the app" = JSON).
@@ -79,7 +79,7 @@ Other lengths and text codes (Code 128 such as `LBL-7F3A`) are not checked. Show
 
 - `kind`: `THERMAL` (width x height is the label; the grid fields are fixed at 1, 1, 0, 0, 0, 0) or `SHEET` (width x height is **one cell** of an A4 page; `columns` x `rows` cells, `gapXMm`/`gapYMm` between cells, the first cell starts `marginLeftMm`/`marginTopMm` from the page corner).
 - `barcodeType`: `EAN13` (default), `CODE128`, `QR`.
-- Send **every key of `fields`** when creating or changing (a missing true/false or `fontSize` is a 400 "is required" on `fields.<key>`; `productName` and `alignment` may be left out: `NONE` and `CENTER`).
+- Send **every key of `fields`** when creating or changing (a missing true/false or `fontSize` may be a 400 "is required" on `fields.<key>` or may default to false, depending on the JSON mapper, which is not verified: always send every key; `productName` and `alignment` may be left out: `NONE` and `CENTER`).
 - `fields.productName`: `NONE` (default), `EN`, `GU` or `BOTH`. `fontSize` 4 to 24 points (0 = 7); the price line is 2 points bigger. `alignment` `LEFT`, `CENTER`, `RIGHT`.
 - Built-in templates: **50 x 25 mm thermal**, **38 x 25 mm thermal**, **A4 sheet 3 x 8** (64 x 34 mm cells). They cannot be changed or deleted (409 `BUILT_IN_TEMPLATE`): show "Duplicate" and create a copy with `POST`.
 - Validation (400, `details.fields`): `name` 1 to 60 characters (409 `NAME_TAKEN` when another template has it, ignoring case), `widthMm`/`heightMm` 10 to 200, `fields.fontSize`, `fields.pricePerUnit` needs `fields.price` on, `columns` 1 to 10, `rows` 1 to 30, gaps 0 to 50, margins 0 to 100, and the grid must fit an A4 page (`columns`/`rows` message "wider/taller than an A4 page"). A combination of fields that cannot fit the label height is refused with the height it needs: `fields` = "these fields need about 26.2 mm of height but a label 50 x 25 mm has 25.0 mm; use fewer fields, a smaller font or a taller label". A barcode needs about 7 mm (QR 10 mm) of height after the text lines.
