@@ -26,7 +26,8 @@ class PaymentRepositoryCoverageTest {
   void setUp() {
     payments = mock(PaymentJpa.class);
     refunds = mock(RefundJpa.class);
-    repo = new PaymentRepository(payments, mock(PaymentEventJpa.class), refunds, mock(PaymentSettingJpa.class));
+    repo = new PaymentRepository(payments, mock(PaymentEventJpa.class), refunds, mock(PaymentSettingJpa.class),
+        mock(PaymentAnomalyJpa.class));
   }
 
   private RefundEntity refund(String status, int attempts) {
@@ -137,5 +138,55 @@ class PaymentRepositoryCoverageTest {
     assertThat(p.providerRef).isEqualTo("pay_new");
     assertThat(p.status).isEqualTo("CAPTURED");
     assertThat(p.failureReason).isNull();
+  }
+
+  @Test
+  void aRefundOfAWrongPaymentIsSentToThatPaymentNotToTheRowsCurrentReference() {
+    PaymentEntity pay = new PaymentEntity();
+    pay.id = UUID.randomUUID();
+    pay.provider = "fake";
+    pay.providerRef = "pay_correct";
+    RefundEntity own = refund("PENDING", 0);
+    own.paymentId = pay.id;
+    RefundEntity wrong = refund("PENDING", 0);
+    wrong.paymentId = pay.id;
+    wrong.providerPaymentRef = "pay_wrong";
+    when(refunds.pending(any(Pageable.class))).thenReturn(List.of(own, wrong));
+    when(payments.findById(pay.id)).thenReturn(Optional.of(pay));
+    assertThat(repo.pendingRefunds(10)).extracting(PaymentRepository.PendingRefund::providerRef)
+        .containsExactly("pay_correct", "pay_wrong");
+  }
+
+  @Test
+  void insertRefundRemembersTheProviderPaymentOnlyWhenGiven() {
+    org.mockito.ArgumentCaptor<RefundEntity> saved = org.mockito.ArgumentCaptor.forClass(RefundEntity.class);
+    UUID pay = UUID.randomUUID();
+    repo.insertRefund(pay, 100, "PENDING", null, "cancel", T0);
+    repo.insertRefund(pay, 200, "PENDING", null, "amount mismatch", "pay_x", T0);
+    org.mockito.Mockito.verify(refunds, org.mockito.Mockito.times(2)).save(saved.capture());
+    assertThat(saved.getAllValues()).extracting(r -> r.providerPaymentRef).containsExactly(null, "pay_x");
+  }
+
+  @Test
+  void anomaliesAreSavedAndListedNewestFirst() {
+    org.mockito.ArgumentCaptor<PaymentAnomalyEntity> saved = org.mockito.ArgumentCaptor.forClass(PaymentAnomalyEntity.class);
+    PaymentAnomalyJpa jpa = mock(PaymentAnomalyJpa.class);
+    PaymentRepository r = new PaymentRepository(payments, mock(PaymentEventJpa.class), refunds, mock(PaymentSettingJpa.class), jpa);
+    UUID pay = UUID.randomUUID();
+    UUID order = UUID.randomUUID();
+    r.insertAnomaly(pay, order, "MISMATCH", 5000, 4000, "pay_w", T0);
+    org.mockito.Mockito.verify(jpa).save(saved.capture());
+    PaymentAnomalyEntity e = saved.getValue();
+    when(jpa.findAllByOrderByCreatedAtDesc(any(Pageable.class))).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(e)));
+    var page = r.anomalyPage(0, 20);
+    assertThat(page.total()).isEqualTo(1);
+    assertThat(page.items()).containsExactly(new PaymentRepository.AnomalyRow(e.id, pay, order, "MISMATCH", 5000, 4000, "pay_w", T0));
+  }
+
+  @Test
+  void anomalyRefundExistsAsksTheRefundTable() {
+    when(refunds.existsByProviderPaymentRefAndReason("pay_a", "duplicate payment")).thenReturn(true);
+    assertThat(repo.anomalyRefundExists("pay_a", "duplicate payment")).isTrue();
+    assertThat(repo.anomalyRefundExists("pay_b", "duplicate payment")).isFalse();
   }
 }

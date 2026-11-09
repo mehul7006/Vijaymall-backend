@@ -42,6 +42,39 @@ public class OpsMetrics implements MeterBinder {
     this.clock = clock;
   }
 
+  private volatile com.vijay.mall.inventory.app.DefectiveService defective;
+
+  /** Optional (plain unit tests run without it): lets the gauge below count defective goods waiting for the owner's decision. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setDefective(com.vijay.mall.inventory.app.DefectiveService defective) { this.defective = defective; }
+
+  private volatile long defectiveHeldUnits;
+  private volatile long defectivePendingUnits;
+  private volatile long defectiveTakenAt = Long.MIN_VALUE;
+
+  /** Reads the defective-goods counts at most once per cache period, however many gauges and scrapes ask; a failure is logged and the last values stay. */
+  private void refreshDefective() {
+    long now = clock.millis();
+    if (defective == null || (defectiveTakenAt != Long.MIN_VALUE && now - defectiveTakenAt < CACHE_MS)) return;
+    defectiveTakenAt = now;
+    try {
+      defectiveHeldUnits = defective.heldUnits();
+      defectivePendingUnits = defective.pendingReviewUnits();
+    } catch (RuntimeException e) {
+      log.warn("Could not read the defective goods counts for the metrics: {}", e.getMessage());
+    }
+  }
+
+  private long defectiveHeld() {
+    refreshDefective();
+    return defectiveHeldUnits;
+  }
+
+  private long defectivePending() {
+    refreshDefective();
+    return defectivePendingUnits;
+  }
+
   Snapshot snapshot() {
     long now = clock.millis();
     if (takenAt == Long.MIN_VALUE || now - takenAt >= CACHE_MS) {
@@ -63,6 +96,8 @@ public class OpsMetrics implements MeterBinder {
     gauge(registry, "mall.refunds.failed", "Refunds the provider refused after all tries: a person must look", () -> snapshot().refundsFailed());
     gauge(registry, "mall.outbox.pending", "Events written but not yet delivered (notifications, alerts)", () -> snapshot().outboxPending());
     gauge(registry, "mall.stock.low.products", "Products at or below their stock alert level", () -> snapshot().lowStock());
+    gauge(registry, "mall.stock.defective.units", "Returned goods confirmed defective, kept apart and waiting for the owner to write off or return", this::defectiveHeld);
+    gauge(registry, "mall.stock.defective.pending.units", "Returned goods claimed defective and waiting for staff to review", this::defectivePending);
     for (OrderStatus s : OrderStatus.values()) {
       Gauge.builder("mall.orders.by.status", this, m -> m.snapshot().ordersByStatus().getOrDefault(s.name(), 0L))
           .description("Online orders currently in each status").tag("status", s.name()).strongReference(true).register(registry);

@@ -28,8 +28,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminWalletController {
+  private com.vijay.mall.common.idem.AdminOps ops;
+
+  /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
+  @org.springframework.beans.factory.annotation.Autowired
+  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+
   public record RuleBody(@NotBlank String name, @Min(1) long spendPaise, @Min(1) long coins, @NotNull CoinMode mode,
-                         Long minOrderPaise, Instant startAt, Instant endAt, Boolean active) {
+                         @Min(0) Long minOrderPaise, Instant startAt, Instant endAt, Boolean active) {
     StoredRule toStored() {
       return new StoredRule(null, new CoinRule(name, spendPaise, coins, mode, minOrderPaise == null ? 0 : minOrderPaise),
           startAt, endAt, active == null || active);
@@ -56,7 +62,11 @@ public class AdminWalletController {
 
   @PostMapping("/coin-rules")
   @ResponseStatus(HttpStatus.CREATED)
-  public RuleView create(@Valid @RequestBody RuleBody b) { return RuleView.of(wallet.createRule(b.toStored(), CurrentUser.id())); }
+  public RuleView create(@Valid @RequestBody RuleBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "coin-rule-create", CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(b),
+        () -> RuleView.of(wallet.createRule(b.toStored(), CurrentUser.id())), v -> v.id().toString(),
+        ref -> wallet.rules().stream().filter(r -> r.id().toString().equals(ref)).findFirst().map(RuleView::of).orElse(null));
+  }
 
   @PutMapping("/coin-rules/{id}")
   public RuleView update(@PathVariable UUID id, @Valid @RequestBody RuleBody b) {

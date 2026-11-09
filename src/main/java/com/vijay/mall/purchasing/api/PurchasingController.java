@@ -24,6 +24,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class PurchasingController {
+  private com.vijay.mall.common.idem.AdminOps ops;
+
+  /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
+  @org.springframework.beans.factory.annotation.Autowired
+  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+
   public record PurchaseBody(String supplierName, String invoiceNo, String note, @NotEmpty List<PurchaseService.ItemInput> items) {}
 
   public record StockTakeBody(String note, @NotEmpty List<StockTakeService.Count> items) {}
@@ -53,7 +59,9 @@ public class PurchasingController {
 
   /** Sets stock to the counted figures and returns what changed. */
   @PostMapping("/stock-takes")
-  public StockTakeService.Result stockTake(@Valid @RequestBody StockTakeBody b) {
-    return stockTakes.apply(CurrentUser.id(), b.note(), b.items());
+  public StockTakeService.Result stockTake(@Valid @RequestBody StockTakeBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    // a repeat with the same key returns the first call's result and applies nothing more
+    return com.vijay.mall.common.idem.AdminOps.runStored(ops, key, "stock-take", CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(b),
+        () -> stockTakes.apply(CurrentUser.id(), b.note(), b.items()), StockTakeService.Result.class);
   }
 }

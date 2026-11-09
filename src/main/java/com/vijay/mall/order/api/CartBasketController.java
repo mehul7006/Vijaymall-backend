@@ -1,5 +1,8 @@
 package com.vijay.mall.order.api;
 
+import java.util.Map;
+import java.util.HashMap;
+import com.vijay.mall.common.error.ApiException;
 import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.order.app.CartService;
@@ -41,6 +44,9 @@ public class CartBasketController {
 
   @PutMapping
   public Cart put(@Valid @RequestBody Body b) {
+    Map<UUID, Integer> totals = new HashMap<>();
+    b.items().forEach(i -> totals.merge(i.productId(), i.qty(), Integer::sum));
+    if (totals.values().stream().anyMatch(q -> q > Cart.MAX_QTY)) throw ApiException.validation("qty", "quantity must be 1 to " + Cart.MAX_QTY);
     var lines = b.items().stream().map(i -> new Cart.Line(i.productId(), i.qty())).toList();
     return carts.replace(CurrentUser.id(), lines, b.couponCode(), b.coinMode(), b.percent());
   }

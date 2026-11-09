@@ -13,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.SaleInput;
+import com.vijay.mall.pos.domain.OfflineExceptionKind;
+import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,13 +32,15 @@ class PosSyncServiceTest {
   private final UUID cashier = UUID.randomUUID();
   private PosService pos;
   private PosCatalogService catalog;
+  private OfflineExceptionService exceptions;
   private PosSyncService service;
 
   @BeforeEach
   void setUp() {
     pos = mock(PosService.class);
     catalog = mock(PosCatalogService.class);
-    service = new PosSyncService(pos, catalog, Clock.fixed(NOW, ZoneOffset.UTC));
+    exceptions = mock(OfflineExceptionService.class);
+    service = new PosSyncService(pos, catalog, exceptions, Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private static PosSyncService.OfflineSale bill(String key) {
@@ -123,5 +127,58 @@ class PosSyncServiceTest {
     assertThat(PosService.soldAt(NOW.plusSeconds(120), NOW)).as("a little clock drift is fine").isEqualTo(NOW.plusSeconds(120));
     assertThatThrownBy(() -> PosService.soldAt(NOW.minusSeconds(8 * 86400L), NOW)).isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> PosService.soldAt(NOW.plusSeconds(3600), NOW)).isInstanceOf(ApiException.class);
+  }
+
+  private static PosSyncService.OfflineSale rungBill(String key, Cart cart) {
+    return new PosSyncService.OfflineSale(key, NOW.minusSeconds(600), cart, List.of(), null, null,
+        new PosViews.Rung(List.of(new PosViews.RungLine(UUID.randomUUID(), 1, 100L, 5, null, null, null))));
+  }
+
+  @Test
+  void aBillWithARungSnapshotIsPassedOnAndItsExceptionsAreReported() {
+    when(pos.findByIdempotencyKey("r1")).thenReturn(Optional.empty());
+    SaleRecord created = saved("VSM/2026-27/000011");
+    when(pos.sale(eq(cashier), eq(false), eq("r1"), any())).thenReturn(created);
+    when(exceptions.forSale(created.id())).thenReturn(List.of(new OfflineFinding(OfflineExceptionKind.PRICE_CHANGED, "price moved", null, "1", "2")));
+    var r = service.upload(cashier, false, List.of(rungBill("r1", null))).get(0);
+    assertThat(r.status()).isEqualTo("CREATED");
+    assertThat(r.exceptions()).containsExactly(new PosSyncService.ExceptionView("PRICE_CHANGED", "price moved"));
+    ArgumentCaptor<SaleInput> in = ArgumentCaptor.forClass(SaleInput.class);
+    verify(pos).sale(eq(cashier), eq(false), eq("r1"), in.capture());
+    assertThat(in.getValue().rung()).isNotNull();
+    assertThat(in.getValue().cart()).as("an empty cart stands in when only the snapshot was sent").isNotNull();
+    assertThat(in.getValue().offline()).isTrue();
+  }
+
+  @Test
+  void aSnapshotBillKeepsTheCartItCameWith() {
+    when(pos.findByIdempotencyKey("r2")).thenReturn(Optional.empty());
+    SaleRecord created = saved("VSM/2026-27/000012");
+    when(pos.sale(eq(cashier), eq(false), eq("r2"), any())).thenReturn(created);
+    Cart cart = new Cart(null, "9000000001", null, null, null);
+    var r = service.upload(cashier, false, List.of(rungBill("r2", cart))).get(0);
+    assertThat(r.exceptions()).isEmpty();
+    ArgumentCaptor<SaleInput> in = ArgumentCaptor.forClass(SaleInput.class);
+    verify(pos).sale(eq(cashier), eq(false), eq("r2"), in.capture());
+    assertThat(in.getValue().cart()).isSameAs(cart);
+  }
+
+  @Test
+  void aLegacyBillWithoutACartIsStillHandedOnAsIsSoItIsRefused() {
+    when(pos.findByIdempotencyKey("l1")).thenReturn(Optional.empty());
+    when(pos.sale(eq(cashier), eq(false), eq("l1"), any())).thenThrow(ApiException.validation("cart", "is required"));
+    var r = service.upload(cashier, false, List.of(new PosSyncService.OfflineSale("l1", null, null, List.of(), null, null))).get(0);
+    assertThat(r.status()).isEqualTo("REJECTED");
+    assertThat(r.exceptions()).isEmpty();
+  }
+
+  @Test
+  void aDuplicateReportsTheExceptionsOfTheEarlierBill() {
+    SaleRecord earlier = saved("VSM/2026-27/000013");
+    when(pos.findByIdempotencyKey("d1")).thenReturn(Optional.of(earlier));
+    when(exceptions.forSale(earlier.id())).thenReturn(List.of(new OfflineFinding(OfflineExceptionKind.OVERSOLD, "short", null, "0", "1")));
+    var r = service.upload(cashier, false, List.of(rungBill("d1", null))).get(0);
+    assertThat(r.status()).isEqualTo("DUPLICATE");
+    assertThat(r.exceptions()).extracting(PosSyncService.ExceptionView::kind).containsExactly("OVERSOLD");
   }
 }

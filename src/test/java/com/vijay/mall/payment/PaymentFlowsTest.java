@@ -201,7 +201,7 @@ class PaymentFlowsTest {
   void aFailingProviderLeavesTheRefundForANewTry() {
     var gw = mock(PaymentGateway.class);
     when(gw.provider()).thenReturn("fake");
-    when(gw.refund(anyString(), org.mockito.ArgumentMatchers.anyLong(), anyString())).thenThrow(new IllegalStateException("provider down"));
+    when(gw.refund(anyString(), org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString())).thenThrow(new IllegalStateException("provider down"));
     var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(gw), props("fake")), events, audit,
         Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
     UUID refundId = UUID.randomUUID();

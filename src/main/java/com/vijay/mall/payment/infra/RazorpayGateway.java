@@ -115,6 +115,39 @@ public class RazorpayGateway implements PaymentGateway {
   }
 
   @Override
+  public String refund(String providerRef, long amountPaise, String reason, String ourRefundId) {
+    requireKeys();
+    // our refund id travels as the receipt and in the notes, so the refund can be found again if the answer is lost
+    JsonNode res = http.post().uri("/v1/payments/{id}/refund", providerRef).headers(this::auth).contentType(MediaType.APPLICATION_JSON)
+        .body(Map.of("amount", amountPaise, "receipt", ourRefundId, "notes", Map.of("refundId", ourRefundId))).retrieve().body(JsonNode.class);
+    return res == null ? null : res.path("id").asString(null);
+  }
+
+  @Override
+  public Optional<String> findRefund(String providerRef, String ourRefundId) {
+    requireKeys();
+    for (int page = 0; page < MAX_REFUND_PAGES; page++) {
+      JsonNode res = http.get().uri("/v1/payments/{id}/refunds?count={n}&skip={skip}", providerRef, REFUND_PAGE_SIZE, page * REFUND_PAGE_SIZE)
+          .headers(this::auth).retrieve().body(JsonNode.class);
+      if (res == null) return Optional.empty();
+      JsonNode items = res.path("items");
+      for (JsonNode r : items) {
+        if (ourRefundId.equals(r.path("receipt").asString("")) || ourRefundId.equals(r.path("notes").path("refundId").asString(""))) {
+          return Optional.of(r.path("id").asString());
+        }
+      }
+      if (items.size() < REFUND_PAGE_SIZE) break;
+    }
+    return Optional.empty();
+  }
+
+  /** Refunds asked from Razorpay per page when looking for one (its default is only 10; its maximum is 100). */
+  private static final int REFUND_PAGE_SIZE = 100;
+
+  /** Upper bound on pages read while looking for a refund, so a payment with a huge history cannot loop for long. */
+  private static final int MAX_REFUND_PAGES = 10;
+
+  @Override
   public Optional<PaymentEvent> fetchStatus(String providerOrderId) {
     requireKeys();
     JsonNode res = http.get().uri("/v1/orders/{id}/payments", providerOrderId).headers(this::auth).retrieve().body(JsonNode.class);

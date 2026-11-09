@@ -67,6 +67,11 @@ public class PosReturnService {
   /** Cashiers may take back goods from bills this recent; older bills need an admin (0 = no limit). */
   private int cashierReturnDays = 7;
   private com.vijay.mall.config.RuntimeSettings settings;
+  private com.vijay.mall.inventory.app.DefectiveService defective;
+
+  /** Optional (plain unit tests run without it): where goods returned as defective are kept. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setDefective(com.vijay.mall.inventory.app.DefectiveService defective) { this.defective = defective; }
 
   /** Optional (plain unit tests run without it): the admin can change the return window from the config screen. */
   @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -157,8 +162,22 @@ public class PosReturnService {
         throw ApiException.conflict("RETURN_EXCEEDS_SOLD", "More than what is left to return", Map.of("saleItemId", i.saleItemId().toString()));
       }
     });
-    inventory.release(items.stream().map(i -> new InventoryService.Item(byId.get(i.saleItemId()).productId(), i.qty())).toList(),
-        returnId, "POS_RETURN");
+    // units marked restock=false are damaged: kept apart as defective stock, the rest go back on the shelf
+    Map<UUID, Integer> defectiveQty = new java.util.HashMap<>();
+    if (in.items() != null) in.items().forEach(l -> {
+      if (l != null && l.saleItemId() != null && Boolean.FALSE.equals(l.restock())) defectiveQty.merge(l.saleItemId(), l.qty(), Integer::sum);
+    });
+    List<InventoryService.Item> backOnShelf = new java.util.ArrayList<>();
+    List<InventoryService.Item> damaged = new java.util.ArrayList<>();
+    for (ReturnItemRecord i : items) {
+      int bad = Math.min(i.qty(), defectiveQty.getOrDefault(i.saleItemId(), 0));
+      UUID product = byId.get(i.saleItemId()).productId();
+      if (i.qty() - bad > 0) backOnShelf.add(new InventoryService.Item(product, i.qty() - bad));
+      if (bad > 0) damaged.add(new InventoryService.Item(product, bad));
+    }
+    if (!backOnShelf.isEmpty()) inventory.release(backOnShelf, returnId, "POS_RETURN");
+    if (defective != null && !damaged.isEmpty()) defective.record(damaged, "POS_RETURN", returnId, cashierId, in.reason());
+    else if (!damaged.isEmpty()) inventory.release(damaged, returnId, "POS_RETURN"); // no defective ledger wired (plain unit tests): behave as before
     int clawed = sale.customerId() == null ? 0 : wallet.clawback(sale.customerId(), claw, returnId);
     if (sale.customerId() != null) wallet.restore(sale.customerId(), restore, returnId);
 

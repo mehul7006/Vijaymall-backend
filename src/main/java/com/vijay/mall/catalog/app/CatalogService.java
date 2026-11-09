@@ -284,10 +284,16 @@ public class CatalogService {
   public List<PricedLine> price(List<ItemRequest> items) {
     if (items == null || items.isEmpty()) throw ApiException.validation("items", "cart is empty");
     items.forEach(it -> {
-      if (it.qty() <= 0 || it.qty() > 99) throw ApiException.validation("qty", "quantity must be 1 to 99");
+      if (it.qty() <= 0 || it.qty() > com.vijay.mall.common.OrderLimits.MAX_LINE_QTY) {
+        throw ApiException.validation("qty", "quantity must be 1 to " + com.vijay.mall.common.OrderLimits.MAX_LINE_QTY);
+      }
     });
     Map<UUID, Integer> merged = items.stream().collect(
         java.util.stream.Collectors.toMap(ItemRequest::productId, ItemRequest::qty, Integer::sum, LinkedHashMap::new));
+    // the same product listed twice counts once, so the limit applies to the total
+    if (merged.values().stream().anyMatch(q -> q > com.vijay.mall.common.OrderLimits.MAX_LINE_QTY)) {
+      throw ApiException.validation("qty", "quantity must be 1 to " + com.vijay.mall.common.OrderLimits.MAX_LINE_QTY);
+    }
     Map<UUID, ProductData> byId = products.findAll(List.copyOf(merged.keySet())).stream()
         .collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
     java.util.Set<UUID> counterOnly = products.posOnlyAmong(merged.keySet());
@@ -382,7 +388,7 @@ public class CatalogService {
         in.pricePaise(), unit(in.unit(), null), nz(in.packSize()), in.active(), in.hotSale(), in.hotStart(),
         in.hotEnd(), in.earnsCoins(), in.coinRedeemable(), clock.instant());
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
-    inventory.create(id, Math.max(0, in.qtyOnHand()), in.lowThreshold() <= 0 ? 5 : in.lowThreshold());
+    inventory.create(id, Math.max(0, in.qtyOnHand()), in.lowThreshold() < 0 ? 5 : in.lowThreshold());
     audit.log(actor, "CREATE", "product", id, in.nameEn() + " @ " + in.pricePaise());
     changed();
     return adminGet(id);
@@ -398,7 +404,7 @@ public class CatalogService {
     if (in.productGroupId() != null) products.setGroup(id, in.productGroupId());
     int delta = in.qtyOnHand() - before.qtyOnHand();
     if (delta != 0 && in.qtyOnHand() >= 0) inventory.adjust(id, delta, "ADJUST", actor);
-    if (in.lowThreshold() > 0) inventory.setLowThreshold(id, in.lowThreshold());
+    if (in.lowThreshold() >= 0) inventory.setLowThreshold(id, in.lowThreshold());
     audit.log(actor, "UPDATE", "product", id, "price " + before.pricePaise() + " -> " + in.pricePaise());
     changed();
     return adminGet(id);
@@ -483,7 +489,7 @@ public class CatalogService {
     AdminProduct created = create(new ProductInput(base.categoryId(), base.nameEn(), base.nameGu(), base.description(),
         in.mrpPaise(), in.pricePaise(), nz(in.unit(), base.unit()), pack, in.active() == null || in.active(), base.hotSale(),
         base.hotStart(), base.hotEnd(), base.earnsCoins(), base.coinRedeemable(), in.qtyOnHand(),
-        in.lowThreshold() <= 0 ? 5 : in.lowThreshold(), base.productGroupId()), actor);
+        in.lowThreshold() < 0 ? 5 : in.lowThreshold(), base.productGroupId()), actor);
     products.setVariant(created.id(), name, order);
     return adminGet(created.id());
   }

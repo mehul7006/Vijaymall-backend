@@ -242,11 +242,13 @@ class CatalogServiceTest {
   }
 
   @Test
-  void eachLineQuantityIsCheckedBeforeMerging() {
-    // 60 + 60 would merge to 120, but each request line is checked on its own; merging itself is not capped
+  void theQuantityLimitAppliesToTheMergedTotalOfAProduct() {
+    // 60 + 60 merge to 120, which is over the limit of 99 for one product
     when(products.findAll(any())).thenReturn(List.of(data(pid)));
-    assertThat(service.price(List.of(new CatalogService.ItemRequest(pid, 60), new CatalogService.ItemRequest(pid, 60)))
-        .get(0).qty()).isEqualTo(120);
+    assertThatThrownBy(() -> service.price(List.of(new CatalogService.ItemRequest(pid, 60), new CatalogService.ItemRequest(pid, 60))))
+        .satisfies(t -> assertApi(t, 400, "VALIDATION_FAILED"));
+    assertThat(service.price(List.of(new CatalogService.ItemRequest(pid, 50), new CatalogService.ItemRequest(pid, 49)))
+        .get(0).qty()).isEqualTo(99);
   }
 
   @Test
@@ -306,11 +308,11 @@ class CatalogServiceTest {
         anyBoolean(), anyBoolean(), any())).thenReturn(id);
     when(products.find(id)).thenReturn(Optional.of(data(id)));
 
-    AdminProduct out = service.create(input(6000, 5000, null, null, 12, 0), actor);
+    AdminProduct out = service.create(input(6000, 5000, null, null, 12, -1), actor);
 
     verify(products).insert(eq(cat), eq("Atta"), eq("આટો"), eq(""), eq(6000L), eq(5000L), eq("pc"), eq(""), eq(true),
         eq(false), isNull(), isNull(), eq(true), eq(true), eq(NOW));
-    verify(inventory).create(id, 12, 5); // zero threshold falls back to 5
+    verify(inventory).create(id, 12, 5); // no threshold given (-1) falls back to 5
     verify(audit).log(actor, "CREATE", "product", id, "Atta @ 5000");
     assertThat(out.id()).isEqualTo(id);
   }
@@ -403,9 +405,23 @@ class CatalogServiceTest {
   void updateWithUnchangedStockAndNoThresholdLeavesInventoryAlone() {
     when(products.find(pid)).thenReturn(Optional.of(data(pid)));
     stock.put(pid, new Stock(pid, 10, 5));
-    service.update(pid, input(100, 100, null, null, 10, 0), actor);
+    service.update(pid, input(100, 100, null, null, 10, -1), actor);
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any());
     verify(inventory, never()).setLowThreshold(any(), anyInt());
+  }
+
+  @Test
+  void anAlertLevelOfZeroIsAValidChoiceOnCreateAndEdit() {
+    UUID id = UUID.randomUUID();
+    when(products.insert(any(), any(), any(), any(), anyLong(), anyLong(), any(), any(), anyBoolean(), anyBoolean(), any(), any(),
+        anyBoolean(), anyBoolean(), any())).thenReturn(id);
+    when(products.find(id)).thenReturn(Optional.of(data(id)));
+    service.create(input(6000, 5000, null, null, 12, 0), actor);
+    verify(inventory).create(id, 12, 0);
+    when(products.find(pid)).thenReturn(Optional.of(data(pid)));
+    stock.put(pid, new Stock(pid, 10, 5));
+    service.update(pid, input(100, 100, null, null, 10, 0), actor);
+    verify(inventory).setLowThreshold(pid, 0);
   }
 
   @Test

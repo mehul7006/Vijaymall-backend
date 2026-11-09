@@ -113,3 +113,18 @@ groups:
         annotations:
           summary: "Many checkouts were turned away because a flash sale ended or ran out"
           action: "Customers are seeing a stale sale price. Check that the app refetches when the FLASH live event arrives, and the units left on the sale report."
+
+      - alert: PaymentAnomaly
+        expr: increase(mall_payments_anomalies_total[1h]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "A wrong-amount or duplicate online payment was received and is being refunded"
+          action: "Open GET /api/v1/admin/payments/anomalies to see which orders, then check the refund monitor (GET /api/v1/admin/refunds) that the refunds reach ISSUED."
+
+      - alert: OfflineBillExceptionsUnreviewed
+        expr: mall_pos_offline_exceptions_stale > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Differences in offline counter bills have been waiting for a manager for more than a day"
+          action: "Open the admin list (GET /api/v1/admin/pos/offline-exceptions?status=OPEN): changed prices, discounts nobody approved, stock sold that the system did not have. Look at each one and mark it reviewed."

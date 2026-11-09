@@ -11,7 +11,8 @@ import java.util.UUID;
 @Schema(name = "Basket")
 public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coinMode, Integer percent, Instant updatedAt) {
   public static final int MAX_LINES = 100;
-  public static final int MAX_QTY = 999;
+  /** The most units of one product in a basket; the same constant the quote and order calls use. */
+  public static final int MAX_QTY = com.vijay.mall.common.OrderLimits.MAX_LINE_QTY;
 
   @Schema(name = "BasketLine")
 

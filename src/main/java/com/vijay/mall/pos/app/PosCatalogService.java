@@ -30,6 +30,9 @@ import org.springframework.transaction.annotation.Transactional;
 /** Finds products at the counter (scan or search) and keeps their counter attributes and barcodes. */
 @Service
 public class PosCatalogService {
+  /** The GST percentages the system accepts for a product (also what an offline till may send). */
+  public static final List<Integer> GST_RATES = List.of(0, 3, 5, 12, 18, 28);
+
   private final CatalogService catalog;
   private final PosCatalogRepository repo;
   private final ShopService shop;
@@ -130,7 +133,7 @@ public class PosCatalogService {
     }
     if (code != null && !digits) throw ApiException.validation("plu", "digits only, up to 6");
     if (code != null) code = normalizePlu(code);
-    if (!List.of(0, 3, 5, 12, 18, 28).contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
+    if (!GST_RATES.contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
     List<String> codes = barcodes == null ? List.of() : barcodes.stream().map(String::strip).filter(c -> !c.isEmpty()).distinct().toList();
     if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
       throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");

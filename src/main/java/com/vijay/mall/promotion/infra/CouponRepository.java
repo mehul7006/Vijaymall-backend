@@ -31,7 +31,8 @@ public class CouponRepository {
 
   private static Coupon toDomain(CouponEntity e, Map<UUID, List<UUID>> categoriesByCoupon) {
     List<UUID> ids = new ArrayList<>(categoriesByCoupon.getOrDefault(e.id, List.of()));
-    ids.sort(Comparator.naturalOrder());
+    // the database's own order for ids (UUID.compareTo compares signed numbers and would disagree with it)
+    ids.sort(Comparator.comparing(UUID::toString));
     if (e.categoryId != null && ids.remove(e.categoryId)) ids.add(0, e.categoryId); // keep the first category first
     return new Coupon(e.id, e.code, e.kind, e.amount, e.minOrderPaise, e.maxDiscountPaise, e.categoryId, e.perUserLimit,
         e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active, e.worksWithCoins, e.firstOrderOnly, ids);

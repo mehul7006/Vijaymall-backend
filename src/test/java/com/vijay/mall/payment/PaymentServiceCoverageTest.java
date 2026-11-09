@@ -73,14 +73,12 @@ class PaymentServiceCoverageTest {
   }
 
   @Test
-  void aRefundedOrMismatchedPaymentIsNotCapturedByALateWebhook() {
-    for (String status : new String[] {"REFUNDED", "MISMATCH"}) {
-      when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment(status, 5000)));
-      webhook("late-" + status, "captured", 5000);
-    }
+  void aRefundedPaymentIsNotCapturedAgainByALateWebhookOfAnotherPayment() {
+    when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("REFUNDED", 5000)));
+    webhook("late", "captured", 5000);
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
-    verify(repo, never()).insertRefund(any(), org.mockito.ArgumentMatchers.anyLong(), any(), any(), any(), any());
-    verify(events, never()).publishEvent(any(Object.class));
+    verify(repo).insertRefund(eq(paymentId), eq(5000L), eq("PENDING"), any(), eq("duplicate payment"), eq("pay_late"), any());
+    verify(events, never()).publishEvent(any(PaymentEvents.PaymentCaptured.class));
   }
 
   @Test
@@ -121,9 +119,9 @@ class PaymentServiceCoverageTest {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     when(txManager.getTransaction(any())).thenThrow(new TransactionException("db down") { });
     webhook("m1", "captured", 4000);
-    verify(repo).setStatus(paymentId, "MISMATCH", "pay_m1", "amount mismatch", NOW);
-    verify(repo).insertRefund(paymentId, 4000, "PENDING", null, "amount mismatch", NOW);
-    verify(events, never()).publishEvent(any(Object.class));
+    verify(repo, never()).setStatus(any(), any(), any(), any(), any());
+    verify(repo).insertRefund(paymentId, 4000, "PENDING", null, "amount mismatch", "pay_m1", NOW);
+    verify(events, never()).publishEvent(any(PaymentEvents.PaymentCaptured.class));
   }
 
   @Test

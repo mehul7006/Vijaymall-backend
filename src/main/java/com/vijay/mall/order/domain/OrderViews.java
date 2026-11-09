@@ -45,7 +45,19 @@ public final class OrderViews {
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
                      long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
-                     List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance) {
+                     List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance,
+                     Instant paymentExpiresAt) {
+    /** Without the time the customer has left to pay (only set while an online order waits for payment). */
+    public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
+                String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
+                long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
+                long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
+                List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance) {
+      this(id, orderNo, status, fulfilment, paymentMethod, paymentStatus, items, subtotalPaise, couponCode,
+          couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise, coinsEarned, address,
+          paymentSession, timeline, placedAt, slot, cancelReason, coinBalance, null);
+    }
+
     /** Without the customer's current coin balance. */
     public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                 String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,

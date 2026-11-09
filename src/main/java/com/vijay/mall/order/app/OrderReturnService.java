@@ -33,6 +33,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class OrderReturnService {
+  private com.vijay.mall.inventory.app.DefectiveService defective;
+
+  /** Optional (plain unit tests run without it): where goods returned as defective are kept. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setDefective(com.vijay.mall.inventory.app.DefectiveService defective) { this.defective = defective; }
+
   public record ItemInput(UUID productId, int qty, Boolean restock) {}
 
   public record Input(String reason, List<ItemInput> items) {}
@@ -129,6 +135,7 @@ public class OrderReturnService {
     UUID returnId = UUID.randomUUID();
     List<OrderReturnRepository.Line> stored = new ArrayList<>();
     List<InventoryService.Item> restock = new ArrayList<>();
+    List<InventoryService.Item> defectiveGoods = new ArrayList<>();
     long refund = 0;
     long cumulativeGross = 0;
     for (int k = 0; k < lines.size(); k++) {
@@ -145,6 +152,7 @@ public class OrderReturnService {
       refund += lineRefund;
       stored.add(new OrderReturnRepository.Line(l.id(), returning, lineRefund, back));
       if (back) restock.add(new InventoryService.Item(l.productId(), returning));
+      else defectiveGoods.add(new InventoryService.Item(l.productId(), returning));
     }
     if (prior.refundPaise() + refund > order.total()) {
       throw ApiException.conflict("REFUND_EXCEEDS_ORDER", "More than the order was worth", Map.of("totalPaise", order.total()));
@@ -161,6 +169,9 @@ public class OrderReturnService {
     restored = restore;
 
     if (!restock.isEmpty()) inventory.release(restock, returnId, "ORDER_RETURN");
+    // goods that are not fit to sell are kept apart for the owner to decide on, not lost
+    if (defective != null && !defectiveGoods.isEmpty()) defective.record(defectiveGoods, "ORDER_RETURN", returnId, actor, reason);
+    else if (!defectiveGoods.isEmpty()) inventory.release(defectiveGoods, returnId, "ORDER_RETURN"); // no defective ledger wired: never lose the units
 
     String mode = refund <= 0 ? "NONE" : "ONLINE".equals(order.paymentMethod()) && payments.refundPartial(orderId, refund, "return " + order.orderNo())
         ? "ONLINE" : "CASH";

@@ -78,7 +78,7 @@ public final class PaymentRules {
             throw new IllegalArgumentException("only one credit payment is allowed on a bill");
         }
         lines.forEach(l -> {
-            boolean ok = MODES.contains(l.mode()) || (allowCredit && CREDIT.equals(l.mode()));
+            boolean ok = (l.mode() != null && MODES.contains(l.mode())) || (allowCredit && CREDIT.equals(l.mode()));
             if (!ok) {
                 throw new IllegalArgumentException(allowCredit
                     ? "payment mode must be CASH, UPI or CARD (or CREDIT on a bill)" : "payment mode must be CASH, UPI or CARD");

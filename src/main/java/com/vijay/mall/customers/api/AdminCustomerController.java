@@ -19,7 +19,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/customers")
 public class AdminCustomerController {
-  public record ActiveBody(boolean active) {}
+  private com.vijay.mall.common.idem.AdminOps ops;
+
+  /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
+  @org.springframework.beans.factory.annotation.Autowired
+  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+
+  public record ActiveBody(@jakarta.validation.constraints.NotNull Boolean active) {}
 
   public record CoinsBody(int delta, String reason) {}
 
@@ -39,11 +45,12 @@ public class AdminCustomerController {
 
   /** Switch the account off (also signs them out everywhere) or back on. */
   @PatchMapping("/{id}")
-  public CustomerView setActive(@PathVariable UUID id, @RequestBody ActiveBody b) { return customers.setActive(id, b.active(), CurrentUser.id()); }
+  public CustomerView setActive(@PathVariable UUID id, @Valid @RequestBody ActiveBody b) { return customers.setActive(id, b.active(), CurrentUser.id()); }
 
   /** delta above 0 gives coins, below 0 takes them back; a reason is required. */
   @PostMapping("/{id}/coins")
-  public CustomerView coins(@PathVariable UUID id, @Valid @RequestBody CoinsBody b) {
-    return customers.adjustCoins(id, b.delta(), b.reason(), CurrentUser.id());
+  public CustomerView coins(@PathVariable UUID id, @Valid @RequestBody CoinsBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "coins-adjust:" + id, CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(id, b),
+        () -> customers.adjustCoins(id, b.delta(), b.reason(), CurrentUser.id()), v -> id.toString(), ref -> customers.get(id));
   }
 }

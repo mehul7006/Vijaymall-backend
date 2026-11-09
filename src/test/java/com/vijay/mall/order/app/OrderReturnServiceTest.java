@@ -191,9 +191,20 @@ class OrderReturnServiceTest {
     assertThat(v.items().get(1).productId()).isNull();
     verify(wallet, never()).clawback(any(), anyInt(), any());
     verify(wallet).restore(eq(user), anyInt(), any());
-    verify(inventory).release(anyList(), any(), eq("ORDER_RETURN"));
+    // no defective ledger wired here, so the item returned with restock=false is put back too (the units are never lost)
+    verify(inventory, org.mockito.Mockito.times(2)).release(anyList(), any(), eq("ORDER_RETURN"));
     verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(15000L), eq("CASH"), eq(0), anyInt(), eq(actor), anyList(), eq(now));
     verify(payments, never()).refundPartial(any(), anyLong(), anyString());
+  }
+
+  @Test
+  void goodsReturnedAsDefectiveGoToTheReviewQueueNotTheShelf() {
+    var defective = mock(com.vijay.mall.inventory.app.DefectiveService.class);
+    service.setDefective(defective);
+    stubFind();
+    create(in("leaking", item(prodA, 2, true), item(prodB, 1, false)));
+    verify(inventory, org.mockito.Mockito.times(1)).release(anyList(), any(), eq("ORDER_RETURN")); // only the resellable item
+    verify(defective).record(anyList(), eq("ORDER_RETURN"), any(), eq(actor), eq("leaking"));
   }
 
   @Test
@@ -220,8 +231,11 @@ class OrderReturnServiceTest {
     items(1);
     when(orders.itemRows(orderId)).thenReturn(List.of(new OrderRepository.ItemRow(lineA, prodA, "Free", 2, 0, 0, 0, 0)));
     stubFind();
+    var defective = mock(com.vijay.mall.inventory.app.DefectiveService.class);
+    service.setDefective(defective);
     create(in("r", item(prodA, 1, false)));
     verify(inventory, never()).release(anyList(), any(), anyString());
+    verify(defective).record(anyList(), eq("ORDER_RETURN"), any(), eq(actor), eq("r"));
     verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(0L), eq("NONE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now));
   }
 

@@ -324,6 +324,21 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
     }
   }
 
+  /**
+   * Money that cannot pay the order arrived (wrong amount, or a second payment) and is being refunded. The order itself is
+   * not touched; the customer and the staff are told through the outbox. {@code payable} says whether the customer can still
+   * pay this order.
+   */
+  @EventListener
+  @Transactional
+  public void on(PaymentEvents.PaymentAnomaly e) {
+    OrderRepository.Row row = repo.find(e.orderId()).orElse(null);
+    if (row == null) return;
+    boolean payable = OrderStatus.PAYMENT_PENDING.name().equals(row.status());
+    outbox.add("PAYMENT_ANOMALY", Map.of("orderId", row.id(), "orderNo", row.orderNo(), "userId", row.userId(), "kind", e.kind(),
+        "expectedPaise", e.expectedPaise(), "receivedPaise", e.receivedPaise(), "payable", payable));
+  }
+
   /** The order's status did not change but something on it did (its payment): tell the open screens to refresh it. */
   private void touched(OrderRepository.Row row) {
     events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), row.status(), row.status(), clock.instant()));
@@ -409,7 +424,8 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
         repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
         r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
-        r.deliverySlot(), r.cancelReason(), wallet.balance(r.userId()));
+        r.deliverySlot(), r.cancelReason(), wallet.balance(r.userId()),
+        OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? r.expiresAt() : null); // the app shows a countdown to this
   }
 
   private String toJson(Address a) {

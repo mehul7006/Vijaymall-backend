@@ -119,11 +119,14 @@ public abstract class IntegrationTestBase {
         .retrieve().body(List.class);
   }
 
-  /** Adds stock to a seeded product so one test cannot starve another that runs later against the shared database. */
-  @SuppressWarnings("rawtypes")
+  /**
+   * Adds stock to a seeded product so one test cannot starve another that runs later against the shared database. Every product with
+   * that name gets it (a test may have added a second pack size, and the name alone does not say which one a test sells).
+   */
   protected void restock(String productName, int quantity) {
     String admin = adminToken();
-    Object id = productByName(admin, productName).get("id");
-    post("/api/v1/admin/products/" + id + "/stock", admin, Map.of("delta", quantity, "reason", "RESTOCK"));
+    for (String id : jdbc.queryForList("select id::text from product where name_en = ?", String.class, productName)) {
+      post("/api/v1/admin/products/" + id + "/stock", admin, Map.of("delta", quantity, "reason", "RESTOCK"));
+    }
   }
 }

@@ -39,7 +39,7 @@ public class UserRepository {
   @Transactional
   public void updateProfile(UUID id, String name, String mobile, Instant now) {
     jpa.findById(id).ifPresent(e -> {
-      e.name = name;
+      if (name != null) e.name = name; // a null name leaves the saved one as it is
       // A verified number is only ever replaced by another number, never blanked by a name-only update. An account with no
       // e-mail keeps its number too: blanking it would leave the account with no way to sign in (and break the contact rule).
       if (!((e.mobileVerified || e.email == null) && mobile == null)) {

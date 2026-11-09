@@ -1,5 +1,6 @@
 package com.vijay.mall.payment.app;
 
+import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.payment.domain.InvalidSignatureException;
@@ -8,6 +9,8 @@ import com.vijay.mall.payment.domain.PaymentEvents;
 import com.vijay.mall.payment.domain.PaymentGateway;
 import com.vijay.mall.payment.domain.PaymentSession;
 import com.vijay.mall.payment.infra.PaymentRepository;
+import com.vijay.mall.common.metrics.Metrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -17,6 +20,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -108,22 +112,7 @@ public class PaymentService {
 
   private void apply(String provider, PaymentEvent ev) {
     switch (ev) {
-      case PaymentEvent.Captured c -> repo.byProviderOrder(provider, c.providerOrderId()).ifPresent(p -> {
-        // A failed attempt does not close the provider order (the customer can retry), so a capture is still welcome
-        // after one. FAILED is only left over from older versions that closed the payment on the first failure.
-        if (!"CREATED".equals(p.status()) && !"FAILED".equals(p.status())) return;
-        if (p.amountPaise() != c.amountPaise()) {
-          log.error("Amount mismatch for payment {}: expected {} got {}", p.id(), p.amountPaise(), c.amountPaise());
-          // The money did arrive, but not the right amount: keep the provider reference and give all of it back.
-          repo.setStatus(p.id(), "MISMATCH", c.providerRef(), "amount mismatch", clock.instant());
-          repo.insertRefund(p.id(), c.amountPaise(), "PENDING", null, "amount mismatch", clock.instant());
-          afterCommit(() -> sendQueuedRefunds(AFTER_COMMIT_REFUNDS));
-          return;
-        }
-        repo.setStatus(p.id(), "CAPTURED", c.providerRef(), null, clock.instant());
-        log.info("Payment captured order={} ref={} amount={}", p.orderId(), c.providerRef(), c.amountPaise());
-        events.publishEvent(new PaymentEvents.PaymentCaptured(p.orderId(), c.providerRef()));
-      });
+      case PaymentEvent.Captured c -> repo.byProviderOrder(provider, c.providerOrderId()).ifPresent(p -> onCaptured(p, c));
       case PaymentEvent.Failed f -> repo.byProviderOrder(provider, f.providerOrderId()).ifPresent(p -> {
         if (!"CREATED".equals(p.status())) return;
         // One failed attempt is not the end: the customer may retry on the same provider order. Remember why and keep
@@ -133,6 +122,70 @@ public class PaymentService {
       });
       case PaymentEvent.Ignored _ -> { }
     }
+  }
+
+  /** Refund reason of money received in the wrong amount. */
+  public static final String REASON_MISMATCH = "amount mismatch";
+  /** Refund reason of a second payment on an order that is already paid. */
+  public static final String REASON_DUPLICATE = "duplicate payment";
+  /** Anomaly kinds, as stored and as the metric tag. */
+  public static final String KIND_MISMATCH = "MISMATCH";
+  public static final String KIND_DUPLICATE = "DUPLICATE";
+
+  /**
+   * A provider reported a capture. The right amount on a payment that is still open pays the order. Anything else is an
+   * anomaly: the money is refunded in full and the first valid payment (or the open order) is left exactly as it was.
+   */
+  private void onCaptured(PaymentRepository.Payment p, PaymentEvent.Captured c) {
+    // A failed attempt does not close the provider order (the customer can retry), so a capture is still welcome after
+    // one. MISMATCH and FAILED are only left over from older versions that closed the payment on the first problem.
+    boolean open = "CREATED".equals(p.status()) || "FAILED".equals(p.status()) || "MISMATCH".equals(p.status());
+    if (!open) {
+      // The same payment reported again (another event type) is nothing new; a different payment id is a second payment.
+      if (c.providerRef() == null || c.providerRef().equals(p.providerRef())) return;
+      anomaly(p, c, KIND_DUPLICATE, REASON_DUPLICATE);
+      return;
+    }
+    if (p.amountPaise() != c.amountPaise()) {
+      anomaly(p, c, KIND_MISMATCH, REASON_MISMATCH);
+      return;
+    }
+    repo.setStatus(p.id(), "CAPTURED", c.providerRef(), null, clock.instant());
+    log.info("Payment captured order={} ref={} amount={}", p.orderId(), c.providerRef(), c.amountPaise());
+    events.publishEvent(new PaymentEvents.PaymentCaptured(p.orderId(), c.providerRef()));
+  }
+
+  private MeterRegistry metrics;
+
+  /** Optional (plain unit tests run without it): counts wrong-amount and duplicate payments by kind. */
+  @Autowired(required = false)
+  void setMetrics(MeterRegistry metrics) { this.metrics = metrics; }
+
+  /**
+   * Handles money that must not stay with the shop: queues a full refund of exactly that provider payment, records and
+   * audits the anomaly, counts it and lets the order module tell the customer and the staff. Does nothing when this
+   * provider payment was already dealt with (a replayed webhook) or has no reference to refund.
+   */
+  private void anomaly(PaymentRepository.Payment p, PaymentEvent.Captured c, String kind, String reason) {
+    if (c.providerRef() == null || repo.anomalyRefundExists(c.providerRef(), reason)) {
+      log.warn("Payment anomaly skipped kind={} payment={} ref={}", kind, p.id(), c.providerRef());
+      return;
+    }
+    Instant now = clock.instant();
+    repo.insertRefund(p.id(), c.amountPaise(), "PENDING", null, reason, c.providerRef(), now);
+    repo.insertAnomaly(p.id(), p.orderId(), kind, p.amountPaise(), c.amountPaise(), c.providerRef(), now);
+    audit.log(null, "PAYMENT_ANOMALY", "payment", p.id(), kind + " expectedPaise=" + p.amountPaise() + " receivedPaise="
+        + c.amountPaise() + " ref=" + c.providerRef());
+    Metrics.count(metrics, "mall.payments.anomalies", "Wrong-amount and duplicate online payments, by kind", "kind", kind, 1);
+    log.warn("event=payment-anomaly kind={} orderId={} paymentId={} expectedPaise={} receivedPaise={} providerRef={}", kind,
+        p.orderId(), p.id(), p.amountPaise(), c.amountPaise(), c.providerRef());
+    events.publishEvent(new PaymentEvents.PaymentAnomaly(p.orderId(), kind, p.amountPaise(), c.amountPaise()));
+    afterCommit(() -> sendQueuedRefunds(AFTER_COMMIT_REFUNDS));
+  }
+
+  /** The admin's list of wrong-amount and duplicate payments, newest first. */
+  public Page<PaymentRepository.AnomalyRow> anomalies(int page, int size) {
+    return repo.anomalyPage(Math.max(0, page), Page.clampSize(size));
   }
 
   public static final int MAX_REFUND_TRIES = 10;
@@ -184,12 +237,12 @@ public class PaymentService {
   }
 
   /** The admin's view of refunds (status PENDING, PROCESSING, ISSUED or FAILED; blank for all), newest first. */
-  public com.vijay.mall.common.Page<PaymentRepository.RefundRow> refunds(String status, int page, int size) {
+  public Page<PaymentRepository.RefundRow> refunds(String status, int page, int size) {
     String s = status == null || status.isBlank() ? null : status.trim().toUpperCase();
     if (s != null && !List.of("PENDING", "PROCESSING", "ISSUED", "FAILED").contains(s)) {
       throw ApiException.validation("status", "PENDING, PROCESSING, ISSUED or FAILED");
     }
-    return repo.refundPage(s, Math.max(0, page), com.vijay.mall.common.Page.clampSize(size));
+    return repo.refundPage(s, Math.max(0, page), Page.clampSize(size));
   }
 
   /** Gives a FAILED refund a fresh run of tries (after the cause, such as a provider outage, has been dealt with). */
@@ -233,7 +286,11 @@ public class PaymentService {
     for (PaymentRepository.PendingRefund r : repo.pendingRefunds(limit)) {
       if (!repo.claimRefund(r.id(), clock.instant())) continue; // another server has it
       try {
-        String ref = registry.byProvider(r.provider()).refund(r.providerRef(), r.amountPaise(), r.reason());
+        PaymentGateway gateway = registry.byProvider(r.provider());
+        // A refund that was tried before may have gone through while its answer was lost: look first, never send it twice.
+        String ref = r.attempts() > 0 ? gateway.findRefund(r.providerRef(), r.id().toString()).orElse(null) : null;
+        if (ref != null) log.info("Refund already at the provider payment={} ref={}", r.paymentId(), ref);
+        else ref = gateway.refund(r.providerRef(), r.amountPaise(), r.reason(), r.id().toString());
         repo.refundIssued(r.id(), ref, clock.instant());
         log.info("Refund sent payment={} amount={} ref={}", r.paymentId(), r.amountPaise(), ref);
       } catch (RuntimeException e) {

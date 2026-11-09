@@ -261,7 +261,7 @@ class CatalogServiceCoverageTest {
     when(products.variantInfo(any())).thenReturn(Map.of(baseId, new VariantInfo("Std", 3), other, new VariantInfo("Mini", 1)));
     stubInsert(created, g);
 
-    var out = service.addVariant(baseId, new CatalogService.VariantInput(" Big ", " 2 kg ", null, 300, 250, null, 8, 0, null), actor);
+    var out = service.addVariant(baseId, new CatalogService.VariantInput(" Big ", " 2 kg ", null, 300, 250, null, 8, -1, null), actor);
 
     assertThat(out.id()).isEqualTo(created);
     verify(products).insert(eq(cat), eq("Mango"), eq("કેરી"), eq("desc"), eq(300L), eq(250L), eq("kg"), eq("2 kg"), eq(true),

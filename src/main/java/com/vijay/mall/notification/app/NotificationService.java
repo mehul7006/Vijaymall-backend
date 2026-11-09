@@ -95,11 +95,32 @@ public class NotificationService {
           };
           notify(UUID.fromString(p.path("userId").asString()), "Return accepted", "Order " + no + ": " + how, "ORDER", no);
         }
+        case "PAYMENT_ANOMALY" -> paymentAnomaly(p);
         default -> { }
       }
     } catch (Exception e) {
       log.error("Notification failed for {}: {}", m.type(), e.getMessage());
     }
+  }
+
+  /** A wrong-amount or duplicate payment is being refunded: the customer is told what to do, the staff are told what happened. */
+  private void paymentAnomaly(JsonNode p) {
+    String no = p.path("orderNo").asString();
+    String expected = rupees(p.path("expectedPaise").asLong());
+    String received = rupees(p.path("receivedPaise").asLong());
+    boolean duplicate = "DUPLICATE".equals(p.path("kind").asString());
+    String customer;
+    String staff;
+    if (duplicate) {
+      customer = "We received a second payment of Rs " + received + " for order " + no + ". It is being refunded to your original payment method.";
+      staff = "Order " + no + " was paid twice. The duplicate payment of Rs " + received + " is being refunded automatically.";
+    } else {
+      customer = "We received Rs " + received + " instead of Rs " + expected + " for order " + no + ". It is being refunded to your original payment method."
+          + (p.path("payable").asBoolean(false) ? " Please pay again." : "");
+      staff = "Order " + no + ": a payment of Rs " + received + " arrived instead of Rs " + expected + ". It is being refunded automatically.";
+    }
+    notify(UUID.fromString(p.path("userId").asString()), duplicate ? "Duplicate payment" : "Payment amount did not match", customer, "ORDER", no);
+    for (UUID admin : profiles.staffIds()) notify(admin, "Payment problem", staff, "PAYMENT", no);
   }
 
   /** Flash sale news goes to every staff member (admins and cashiers). */

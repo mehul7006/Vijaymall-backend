@@ -2,6 +2,8 @@ package com.vijay.mall.it;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vijay.mall.pos.domain.InvoiceNumbers;
+import com.vijay.mall.pos.domain.Money;
 import com.vijay.mall.support.IntegrationTestBase;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -9,8 +11,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.web.client.RestClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 
 /** A counter that sold while offline catches up: real bills, the original sale time, safe to resend, nothing blocks anything. */
@@ -92,6 +96,7 @@ class PosOfflineSyncIT extends IntegrationTestBase {
     assertThat(results.get(0).get("status")).as("the money is in the drawer: the bill must exist").isEqualTo("CREATED");
     assertThat(stockOf(pid)).as("what was there is taken, never below zero").isZero();
 
+    assertThat((List<Map>) results.get(0).get("exceptions")).extracting(e -> e.get("kind")).containsExactly("OVERSOLD");
     var audit = (List<Map>) get("/api/v1/admin/audit-log?action=OFFLINE_OVERSOLD&entity=pos_sale&size=5", adminToken()).getBody().get("items");
     assertThat(audit).anySatisfy(a -> assertThat(a.get("entityId")).isEqualTo(results.get(0).get("saleId")));
     var online = call(org.springframework.http.HttpMethod.POST, "/api/v1/pos/sales", cashier,
@@ -134,5 +139,194 @@ class PosOfflineSyncIT extends IntegrationTestBase {
 
     assertThat(get("/api/v1/pos/sync/status", token(freshEmail())).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     assertThat(post("/api/v1/pos/sync/sales", token(freshEmail()), Map.of("sales", List.of())).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+  }
+
+  // ---------- bills sent with what the till really charged (rung) ----------
+
+  private Map line(Object pid, int qty, long price, int gst, long discount) {
+    Map<String, Object> l = new HashMap<>();
+    l.put("productId", pid);
+    l.put("qty", qty);
+    l.put("unitPricePaise", price);
+    l.put("gstPercent", gst);
+    l.put("discountPaise", discount);
+    return l;
+  }
+
+  private Map rungBill(String key, Instant soldAt, List<Map> lines, long pay) {
+    Map<String, Object> b = new HashMap<>();
+    b.put("idempotencyKey", key);
+    if (soldAt != null) b.put("soldAt", soldAt.toString());
+    b.put("rung", Map.of("lines", lines));
+    b.put("payments", List.of(Map.of("mode", "CASH", "amountPaise", pay)));
+    return b;
+  }
+
+  private int catalogGst(Object pid) {
+    Map quote = post("/api/v1/pos/quote", cashier(), Map.of("items", List.of(Map.of("productId", pid, "qty", 1)))).getBody();
+    return ((Number) ((Map) ((List) quote.get("lines")).get(0)).get("gstPercent")).intValue();
+  }
+
+  private long catalogPrice(Object pid) {
+    return jdbc.queryForObject("select price_paise from product where id = ?::uuid", Long.class, pid.toString());
+  }
+
+  private List<Map> openExceptions() {
+    return (List<Map>) get("/api/v1/admin/pos/offline-exceptions?status=OPEN&size=50", adminToken()).getBody().get("items");
+  }
+
+  @Test
+  void aBillRungAtAnOldPriceIsRecordedAtThatPriceStockIsTakenAndTheManagerCanReviewTheDifferenceOnce() {
+    String cashier = cashier();
+    Object pid = rice();
+    int gst = catalogGst(pid);
+    long old = catalogPrice(pid);
+    int before = stockOf(pid);
+    jdbc.update("update product set price_paise = ? where id = ?::uuid", old + 1000, pid.toString());
+    try {
+      String key = UUID.randomUUID().toString();
+      Instant soldAt = Instant.now().minusSeconds(3600);
+      var r = upload(cashier, List.of(rungBill(key, soldAt, List.of(line(pid, 2, old, gst, 0)), 2 * old))).get(0);
+      assertThat(r.get("status")).isEqualTo("CREATED");
+      List<Map> found = (List<Map>) r.get("exceptions");
+      assertThat(found).extracting(e -> e.get("kind")).containsExactly("PRICE_CHANGED");
+      assertThat((String) found.get(0).get("detail")).contains(Money.plain(old)).contains(Money.plain(old + 1000));
+      assertThat((String) r.get("invoiceNo")).contains(InvoiceNumbers.financialYear(soldAt));
+      assertThat(stockOf(pid)).as("the goods left the shelf").isEqualTo(before - 2);
+
+      var sale = get("/api/v1/pos/sales/" + r.get("saleId"), cashier).getBody();
+      assertThat(((Number) sale.get("totalPaise")).longValue()).as("as rung, not at today's price").isEqualTo(2 * old);
+      assertThat(((Number) ((Map) ((List) sale.get("items")).get(0)).get("unitPricePaise")).longValue()).isEqualTo(old);
+      assertThat(jdbc.queryForObject("select needs_review from pos_sale where id = ?::uuid", Boolean.class, r.get("saleId").toString())).isTrue();
+      String receipt = (String) get("/api/v1/pos/sales/" + r.get("saleId") + "/receipt?width=48", cashier).getBody().get("text");
+      assertThat(receipt).contains(Money.plain(old)).contains(Money.plain(2 * old)).doesNotContain(Money.plain(2 * (old + 1000)));
+
+      var again = upload(cashier, List.of(rungBill(key, soldAt, List.of(line(pid, 2, old, gst, 0)), 2 * old))).get(0);
+      assertThat(again.get("status")).isEqualTo("DUPLICATE");
+      assertThat(again.get("saleId")).isEqualTo(r.get("saleId"));
+      assertThat((List<Map>) again.get("exceptions")).hasSize(1);
+      assertThat(stockOf(pid)).isEqualTo(before - 2);
+
+      // the manager's list: admin only
+      Map mine = openExceptions().stream().filter(e -> r.get("saleId").equals(e.get("saleId"))).findFirst().orElseThrow();
+      assertThat(mine.get("invoiceNo")).isEqualTo(r.get("invoiceNo"));
+      assertThat(mine.get("kind")).isEqualTo("PRICE_CHANGED");
+      assertThat(mine.get("cashierName")).isNotNull();
+      assertThat(mine.get("productName")).isEqualTo("Basmati Rice");
+      assertThat(mine.get("expected")).isEqualTo(String.valueOf(old + 1000));
+      assertThat(mine.get("actual")).isEqualTo(String.valueOf(old));
+      assertThat(Instant.parse((String) mine.get("soldAt"))).isBetween(soldAt.minusSeconds(2), soldAt.plusSeconds(2));
+      String url = "/api/v1/admin/pos/offline-exceptions";
+      assertThat(get(url, cashier).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+      assertThat(get(url, token(freshEmail())).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+      assertThat(get(url, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+      assertThat(post(url + "/" + mine.get("id") + "/review", cashier, Map.of("note", "x")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+      assertThat(get(url + "?status=NOPE", adminToken()).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+      var reviewed = post(url + "/" + mine.get("id") + "/review", adminToken(), Map.of("note", "price list was old"));
+      assertThat(reviewed.getStatusCode()).isEqualTo(HttpStatus.OK);
+      assertThat(reviewed.getBody().get("reviewedAt")).isNotNull();
+      assertThat(reviewed.getBody().get("reviewNote")).isEqualTo("price list was old");
+      var second = post(url + "/" + mine.get("id") + "/review", adminToken(), Map.of("note", "again"));
+      assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+      assertThat(second.getBody().get("code")).isEqualTo("ALREADY_REVIEWED");
+      assertThat(post(url + "/" + UUID.randomUUID() + "/review", adminToken(), Map.of()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+      assertThat(openExceptions()).noneMatch(e -> e.get("id").equals(mine.get("id")));
+      var done = (List<Map>) get(url + "?status=reviewed&size=50", adminToken()).getBody().get("items");
+      assertThat(done).anyMatch(e -> e.get("id").equals(mine.get("id")));
+
+      String scrape = RestClient.builder().baseUrl("http://localhost:" + managementPort).defaultStatusHandler(_ -> true, (_, _) -> { }).build()
+          .get().uri("/actuator/prometheus").retrieve().body(String.class);
+      assertThat(scrape).contains("mall_pos_offline_exceptions_open").contains("mall_pos_offline_exceptions_stale")
+          .containsPattern("mall_pos_offline_exceptions_recorded_total\\{[^}]*kind=\"PRICE_CHANGED\"");
+    } finally {
+      jdbc.update("update product set price_paise = ? where id = ?::uuid", old, pid.toString());
+    }
+  }
+
+  @Test
+  void anAsRungBillWithDiscountsAndOversoldStockIsRecordedWithEveryException() {
+    String cashier = cashier();
+    Object pid = rice();
+    int gst = catalogGst(pid);
+    long price = catalogPrice(pid);
+    jdbc.update("update inventory set qty_on_hand = 1 where product_id = ?::uuid", pid.toString());
+    Map b = rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 3, price, gst, 100)), 3 * price - 100 - 50);
+    b.put("manualDiscount", Map.of("amountPaise", 50, "reason", "regular customer"));
+    var r = upload(cashier, List.of(b)).get(0);
+    assertThat(r.get("status")).isEqualTo("CREATED");
+    assertThat((List<Map>) r.get("exceptions")).extracting(e -> e.get("kind")).containsExactlyInAnyOrder("DISCOUNT", "DISCOUNT", "OVERSOLD");
+    assertThat(stockOf(pid)).isZero();
+    var sale = get("/api/v1/pos/sales/" + r.get("saleId"), cashier).getBody();
+    assertThat(((Number) sale.get("totalPaise")).longValue()).isEqualTo(3 * price - 150);
+    assertThat(((Number) sale.get("manualDiscountPaise")).longValue()).isEqualTo(50);
+    var audit = (List<Map>) get("/api/v1/admin/audit-log?action=OFFLINE_OVERSOLD&entity=pos_sale&size=5", adminToken()).getBody().get("items");
+    assertThat(audit).anySatisfy(a -> assertThat(a.get("entityId")).isEqualTo(r.get("saleId")));
+    assertThat(openExceptions()).anyMatch(e -> r.get("saleId").equals(e.get("saleId")) && "OVERSOLD".equals(e.get("kind")));
+    restock("Basmati Rice", 100);
+  }
+
+  @Test
+  void aNewGstRateAndAProductSwitchedOffAreExceptionsNotRejections() {
+    String cashier = cashier();
+    Object pid = rice();
+    int gst = catalogGst(pid);
+    long price = catalogPrice(pid);
+    jdbc.update("update product set active = false where id = ?::uuid", pid.toString());
+    try {
+      int till = gst == 18 ? 12 : 18;
+      var r = upload(cashier, List.of(rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, till, 0)), price))).get(0);
+      assertThat(r.get("status")).isEqualTo("CREATED");
+      assertThat((List<Map>) r.get("exceptions")).extracting(e -> e.get("kind")).containsExactlyInAnyOrder("GST_CHANGED", "PRODUCT_INACTIVE");
+      var sale = get("/api/v1/pos/sales/" + r.get("saleId"), cashier).getBody();
+      assertThat(((Number) ((Map) ((List) sale.get("items")).get(0)).get("gstPercent")).intValue()).isEqualTo(till);
+    } finally {
+      jdbc.update("update product set active = true where id = ?::uuid", pid.toString());
+    }
+  }
+
+  @Test
+  void aBillThatMatchesTheCatalogHasNoExceptionsAndLegacyAndAsRungBillsMixInOneBatch() {
+    String cashier = cashier();
+    Object pid = rice();
+    int gst = catalogGst(pid);
+    long price = catalogPrice(pid);
+    Map cart = Map.of("items", List.of(Map.of("productId", pid, "qty", 1)));
+    var results = upload(cashier, List.of(rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, gst, 0)), price),
+        bill(UUID.randomUUID().toString(), null, cart, priceOf(cashier, cart))));
+    assertThat(results).extracting(x -> x.get("status")).containsExactly("CREATED", "CREATED");
+    assertThat((List<Map>) results.get(0).get("exceptions")).isEmpty();
+    assertThat((List<Map>) results.get(1).get("exceptions")).isEmpty();
+  }
+
+  @Test
+  void aMalformedAsRungBillIsRejectedAndNothingIsRecorded() {
+    String cashier = cashier();
+    Object pid = rice();
+    int gst = catalogGst(pid);
+    long price = catalogPrice(pid);
+    int before = stockOf(pid);
+    Map withCoupon = rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, gst, 0)), price);
+    withCoupon.put("cart", Map.of("customerMobile", "9000000001", "couponCode", "DIWALI"));
+    Map withCredit = rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, gst, 0)), price);
+    withCredit.put("payments", List.of(Map.of("mode", "CREDIT", "amountPaise", price)));
+    withCredit.put("cart", Map.of("customerMobile", "9000000001"));
+    var results = upload(cashier, List.of(
+        rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, gst, 0)), price + 1),
+        rungBill(UUID.randomUUID().toString(), null, List.of(line(UUID.randomUUID(), 1, price, gst, 0)), price),
+        rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 0, price, gst, 0)), price),
+        rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, -1, gst, 0)), price),
+        rungBill(UUID.randomUUID().toString(), null, List.of(line(pid, 1, price, 7, 0)), price),
+        rungBill(UUID.randomUUID().toString(), Instant.now().minusSeconds(10 * 86400L), List.of(line(pid, 1, price, gst, 0)), price),
+        rungBill(" ", null, List.of(line(pid, 1, price, gst, 0)), price),
+        withCoupon, withCredit));
+    assertThat(results).allSatisfy(x -> {
+      assertThat(x.get("status")).isEqualTo("REJECTED");
+      assertThat(x.get("errorCode")).isEqualTo("VALIDATION_FAILED");
+      assertThat((List<Map>) x.get("exceptions")).isEmpty();
+    });
+    assertThat((String) results.get(7).get("message")).contains("coupon");
+    assertThat((String) results.get(8).get("message")).contains("credit");
+    assertThat(stockOf(pid)).isEqualTo(before);
   }
 }
