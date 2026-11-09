@@ -175,3 +175,12 @@ Each step ships with the frontend guide section, tests and the performance check
 5. **Label printer.** Which make and size, and from where do staff print (phone, counter PC)?
 6. **Loose and weighed items.** Do you use a weighing scale that prints barcodes?
 7. **Priority and timing.** Confirm the order in section 7, or move something earlier.
+
+## 9. Owner decisions (2026-11-09) and what they mean for the design
+
+1. **Lots and online price.** Lot-based stock is accepted. Online must never show two prices for one item: the shop shows the price of the current (oldest) lot only. What happens when one order needs units from two lots with different prices stays open until the lot work starts; the recommended default is to cap the quantity per order at what is left in the current lot ("only N at this price") and keep a setting for the alternative (split into two bill lines).
+2. **Barcode scanning must be lot-aware.** Scanning a barcode finds the variant; the system then picks the lot (oldest first, or earliest expiry for dated goods), uses that lot's price and MRP, records the lot on the bill line, and the till shows a notice when the next unit will be at a new price.
+3. **GST mode is decided per purchase**, not fixed in the code: each purchase carries `gstMode` (`REGULAR`: creditable GST is kept out of cost; `COMPOSITION`: GST is part of cost; `NONE`: no GST), with a shop default that the admin can change on any purchase.
+4. **Payment vendors.** A new Razorpay account is coming and a Paytm swipe machine (which can show a QR for the amount). Everything is written against **generic ports** (payment gateway, settlement provider, card/UPI terminal), with a generic/manual implementation now and one adapter per brand later (Razorpay first, Paytm when the brand and its API access are confirmed).
+5. **Weighing-scale barcodes.** No scale printer today. The label and scan code keeps a switch and an interface for variable-measure barcodes, disabled for now.
+
