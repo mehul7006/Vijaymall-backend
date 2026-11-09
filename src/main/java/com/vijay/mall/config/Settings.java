@@ -24,7 +24,7 @@ public final class Settings {
   /** Sections of the config screen. */
   public enum Group {
     PAYMENT("Online payment"), PUSH("Push notifications"), SMS("SMS login codes"), EMAIL("E-mail login codes"),
-    PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), SECURITY("Security"),
+    PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), INVENTORY("Stock and lots"), SECURITY("Security"),
     COUPONS("Coupons and returns");
 
     /** The heading shown to the admin. */
@@ -244,6 +244,30 @@ public final class Settings {
           + "the cost. NONE: purchases carry no GST. The admin can still pick another mode on each purchase.",
       "app.purchase.gst-mode", "REGULAR", "REGULAR", "COMPOSITION", "NONE");
 
+  // ---- stock lots
+  /**
+   * What an online order does when it needs more units than remain in the current lot of a lot-priced item. Only CAP exists today:
+   * the quote refuses the excess ("only N available at this price"). SPLIT (price per lot into separate order lines) is not
+   * supported yet and is refused as a value.
+   */
+  public static final Def INVENTORY_LOT_CROSS_POLICY = choice("inventory.lotCrossPolicy", Group.INVENTORY, "Online orders across lots",
+      "CAP: an online order cannot take more units than are left at the current price of a lot-priced item; the customer is told how many "
+          + "are available at this price. (SPLIT, pricing the order per lot, is not supported yet.)", "app.inventory.lot-cross-policy", "CAP", "CAP");
+
+  /** How the cost of goods sold is worked out from stock lots. */
+  public static final Def INVENTORY_COSTING_METHOD = choice("inventory.costingMethod", Group.INVENTORY, "Costing method",
+      "FIFO: a sale takes the cost of the oldest lot (earliest expiry first for items that track expiry). Weighted average may be added later.",
+      "app.inventory.costing-method", "FIFO", "FIFO");
+
+  /** Days ahead the daily expiry alert looks (1 to 365). */
+  public static final Def INVENTORY_EXPIRY_ALERT_DAYS = number("inventory.expiryAlertDays", Group.INVENTORY, "Expiry alert window (days)",
+      "Every day at 03:15 staff are told about lots that expire within this many days.", "app.inventory.expiry-alert-days", "30", 1, 365);
+
+  /** Whether lots past their expiry date are written off by the daily job. */
+  public static final Def INVENTORY_AUTO_WRITE_OFF = flag("inventory.autoWriteOffExpired", Group.INVENTORY, "Write off expired lots automatically",
+      "When on, the daily job at 03:15 takes lots past their expiry date out of stock (history reason EXPIRY_WRITE_OFF). Off by default: staff decide.",
+      "app.inventory.auto-write-off-expired", "false");
+
   // ---- security
   /** Name of the proxy header that carries the real client address, used by the rate limiter. */
   public static final Def CLIENT_IP_HEADER = text("security.clientIpHeader", Group.SECURITY, "Real client address header",
@@ -274,7 +298,8 @@ public final class Settings {
       FCM_SERVICE_ACCOUNT, SMS_CHANNEL, SMS_HTTP_URL, SMS_HTTP_METHOD, SMS_HTTP_HEADERS, SMS_HTTP_BODY, SMS_SENDER_ID, SMS_DLT_TEMPLATE_ID,
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,
-      GST_ROUND_OFF, PURCHASE_GST_MODE, CLIENT_IP_HEADER, CACHE_ENABLED, COUPON_ALLOW_ON_FLASH, RETURNS_COUPON_POLICY);
+      GST_ROUND_OFF, PURCHASE_GST_MODE, INVENTORY_LOT_CROSS_POLICY, INVENTORY_COSTING_METHOD, INVENTORY_EXPIRY_ALERT_DAYS, INVENTORY_AUTO_WRITE_OFF,
+      CLIENT_IP_HEADER, CACHE_ENABLED, COUPON_ALLOW_ON_FLASH, RETURNS_COUPON_POLICY);
 
   /** Every setting: the fixed ones followed by one cache lifetime per cache. */
   public static final List<Def> ALL = Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();

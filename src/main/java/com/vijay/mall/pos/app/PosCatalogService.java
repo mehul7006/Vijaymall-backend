@@ -6,6 +6,8 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.inventory.domain.Lot;
+import com.vijay.mall.inventory.domain.LotInfo;
 import com.vijay.mall.pos.app.PosViews.PosAttributes;
 import com.vijay.mall.pos.app.PosViews.PosProduct;
 import com.vijay.mall.pos.app.PosViews.Scan;
@@ -74,7 +76,8 @@ public class PosCatalogService {
         UUID id = repo.productByBarcode(p.code()).orElseThrow(() -> ApiException.notFound("Barcode"));
         PosProduct product = one(id);
         if (product.soldBy() == SoldBy.WEIGHT) throw ApiException.validation("code", "weighed item: enter the weight");
-        yield new Scan(product, 1, product.soldBy().lineAmount(product.pricePaise(), 1));
+        yield new Scan(product, 1, product.soldBy().lineAmount(product.pricePaise(), 1),
+            inventory.lotInfo(id, product.pricePaise(), product.mrpPaise()).orElse(null));
       }
       case ScannedCode.Weighed w -> {
         ProductPos pos = repo.findByPlu(normalizePlu(w.plu())).orElseThrow(() -> ApiException.notFound("Item code"));
@@ -82,7 +85,8 @@ public class PosCatalogService {
         if (product.soldBy() != SoldBy.WEIGHT) throw ApiException.validation("code", "this item code is not a weighed item");
         long grams = w.mode() == WeighedMode.WEIGHT_GRAMS ? w.value() : product.soldBy().qtyForAmount(product.pricePaise(), w.value());
         if (grams <= 0 || grams > 100_000) throw ApiException.validation("code", "weight on the label is out of range");
-        yield new Scan(product, (int) grams, product.soldBy().lineAmount(product.pricePaise(), (int) grams));
+        yield new Scan(product, (int) grams, product.soldBy().lineAmount(product.pricePaise(), (int) grams),
+            inventory.lotInfo(pos.productId(), product.pricePaise(), product.mrpPaise()).orElse(null));
       }
     };
   }
@@ -165,13 +169,15 @@ public class PosCatalogService {
     Map<UUID, ProductPos> pos = repo.forProducts(ids);
     var stocks = inventory.stocks(ids);
     Map<UUID, String> variants = catalog.posVariantNames(ids);
+    Map<UUID, List<Lot>> lotPriced = inventory.pricedLots(ids);
     return items.stream().map(p -> {
       ProductPos a = pos.get(p.id());
       String variant = variants.getOrDefault(p.id(), "");
       String pack = p.packSize() == null ? "" : p.packSize();
       return new PosProduct(p.id(), p.nameEn(), p.nameGu(), p.pricePaise(), p.mrpPaise(), a.soldBy(), a.gstPercent(), a.hsn(),
           a.plu(), a.soldBy() == SoldBy.WEIGHT, stocks.get(p.id()).qty(), p.imageUrl(), p.coinRedeemable(), p.earnsCoins(),
-          repo.barcodesOf(p.id()), pack, p.unit() == null ? "" : p.unit(), variant, DisplayNames.of(p.nameEn(), variant, pack));
+          repo.barcodesOf(p.id()), pack, p.unit() == null ? "" : p.unit(), variant, DisplayNames.of(p.nameEn(), variant, pack),
+          LotInfo.of(lotPriced.getOrDefault(p.id(), List.of()), true, p.pricePaise(), p.mrpPaise()).orElse(null));
     }).toList();
   }
 

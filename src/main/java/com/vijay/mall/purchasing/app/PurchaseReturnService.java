@@ -132,7 +132,7 @@ public class PurchaseReturnService {
     repo.insert(new PurchaseReturnRepository.Return(id, purchaseId, null, null, null, noteNo, reason, total, actor, now), idemKey, items);
     for (var item : items) {
       purchases.addReturnedQty(item.purchaseItemId(), item.qty());
-      inventory.adjust(item.productId(), -item.qty(), "PURCHASE_RETURN", actor, id);
+      inventory.returnToSupplier(item.productId(), item.qty(), purchaseId, id, actor);
     }
     purchases.addReturned(purchaseId, total.totalPaise());
     audit.log(actor, "PURCHASE_RETURN", "purchase", purchaseId, noteNo + " credit=" + total.totalPaise() + " " + reason);

@@ -343,7 +343,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     // Confirming is the moment the shop commits its shelf stock. If it is gone, this throws OUT_OF_STOCK, the whole
     // change rolls back and the order stays where it was, so staff can reject it (which refunds the customer).
     if (target.holdsStock() && !row.stockReserved()) {
-      inventory.reserve(repo.items(row.id()).stream().map(i -> new InventoryService.Item(i.productId(), i.qty())).toList(), row.id());
+      repo.setItemCosts(inventory.reserve(repo.itemRows(row.id()).stream().map(i -> new InventoryService.Item(i.productId(), i.qty(), i.id())).toList(), row.id()));
       repo.setStockReserved(row.id(), true);
     }
     if (!repo.updateStatus(row.id(), target.name(), row.version(), now)) {
@@ -365,7 +365,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
 
   private void onCancelled(OrderRepository.Row row) {
     if (row.stockReserved()) {
-      inventory.release(repo.items(row.id()).stream().map(i -> new InventoryService.Item(i.productId(), i.qty())).toList(), row.id());
+      inventory.release(repo.itemRows(row.id()).stream().map(i -> new InventoryService.Item(i.productId(), i.qty(), i.id())).toList(), row.id());
       repo.setStockReserved(row.id(), false);
     }
     promotions.release(row.id());

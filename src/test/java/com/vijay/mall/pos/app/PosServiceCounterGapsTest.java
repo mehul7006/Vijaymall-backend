@@ -71,7 +71,10 @@ class PosServiceCounterGapsTest {
     shop = mock(ShopService.class);
     settings = mock(RuntimeSettings.class);
     InvoiceCounterRepository counters = mock(InvoiceCounterRepository.class);
-    service = new PosService(catalog, quotes, mock(InventoryService.class), mock(WalletService.class), mock(PromotionService.class), users,
+    InventoryService inventory = mock(InventoryService.class);
+    org.mockito.Mockito.when(inventory.takeWhatIsLeftCosted(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new InventoryService.Taken(List.of(), java.util.Map.of()));
+    service = new PosService(catalog, quotes, inventory, mock(WalletService.class), mock(PromotionService.class), users,
         shop, sales, mock(PosHoldRepository.class), counters, mock(AuditService.class), JsonMapper.builder().build(),
         new TransactionTemplate(mock(PlatformTransactionManager.class)), Clock.fixed(NOW, ZoneOffset.UTC), mock(CreditService.class));
     when(shop.get()).thenReturn(PosTestData.shop());

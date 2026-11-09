@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -67,13 +68,22 @@ public final class PosRecords {
      */
     public record SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
                                  long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
-                                 long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise) {
-        /** A line with no coupon share (no coupon, or one that did not cover it). */
+                                 long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise,
+                                 @JsonIgnore Long costPaise) {
+        /** A line with a coupon share but no known stock cost (bills from before stock lots, tests). */
+        public SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
+                              long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
+                              long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise) {
+            this(id, productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, hsn,
+                taxablePaise, cgstPaise, sgstPaise, returnedQty, couponSharePaise, null);
+        }
+
+        /** A line with no coupon share (no coupon, or one that did not cover it) and no known stock cost. */
         public SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
                               long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
                               long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty) {
             this(id, productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, hsn,
-                taxablePaise, cgstPaise, sgstPaise, returnedQty, 0);
+                taxablePaise, cgstPaise, sgstPaise, returnedQty, 0, null);
         }
 
         /** Units that can still be returned: sold minus already returned. */

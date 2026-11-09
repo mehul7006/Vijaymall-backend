@@ -274,8 +274,8 @@ public class PosReturnService {
     for (ReturnItemRecord i : items) {
       int bad = Math.min(i.qty(), defectiveQty.getOrDefault(i.saleItemId(), 0));
       UUID product = byId.get(i.saleItemId()).productId();
-      if (i.qty() - bad > 0) backOnShelf.add(new InventoryService.Item(product, i.qty() - bad));
-      if (bad > 0) damaged.add(new InventoryService.Item(product, bad));
+      if (i.qty() - bad > 0) backOnShelf.add(new InventoryService.Item(product, i.qty() - bad, i.saleItemId()));
+      if (bad > 0) damaged.add(new InventoryService.Item(product, bad, i.saleItemId()));
     }
     if (!backOnShelf.isEmpty()) inventory.release(backOnShelf, returnId, "POS_RETURN");
     if (defective != null && !damaged.isEmpty()) defective.record(damaged, "POS_RETURN", returnId, cashierId, in.reason());

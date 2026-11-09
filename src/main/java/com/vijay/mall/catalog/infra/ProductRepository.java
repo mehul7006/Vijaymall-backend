@@ -382,7 +382,7 @@ public class ProductRepository {
   @Transactional
   public void purge(UUID id) {
     em.flush();
-    for (String table : List.of("cart_item", "wishlist_item", "product_barcode", "product_pos", "stock_movement", "inventory")) {
+    for (String table : List.of("cart_item", "wishlist_item", "product_barcode", "product_pos", "stock_allocation", "stock_lot", "stock_movement", "inventory")) {
       em.createNativeQuery("delete from " + table + " where product_id = :id").setParameter("id", id).executeUpdate();
     }
     em.createNativeQuery("delete from product where id = :id").setParameter("id", id).executeUpdate();

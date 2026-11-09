@@ -93,6 +93,7 @@ public class PosSaleRepository {
       r.sgstPaise = i.sgstPaise();
       r.returnedQty = 0;
       r.couponSharePaise = i.couponSharePaise();
+      r.costPaise = i.costPaise();
       items.save(r);
     });
     s.payments().forEach(p -> {
@@ -214,7 +215,7 @@ public class PosSaleRepository {
 
   private static SaleItemRecord toItem(PosSaleItemEntity i) {
     return new SaleItemRecord(i.id, i.productId, i.name, SoldBy.valueOf(i.soldBy), i.qty, i.unitPricePaise, i.linePaise,
-        i.discountPaise, i.netPaise, i.gstPercent, i.hsn, i.taxablePaise, i.cgstPaise, i.sgstPaise, i.returnedQty, i.couponSharePaise);
+        i.discountPaise, i.netPaise, i.gstPercent, i.hsn, i.taxablePaise, i.cgstPaise, i.sgstPaise, i.returnedQty, i.couponSharePaise, i.costPaise);
   }
 
   /** The credit note created with this idempotency key, if any. */

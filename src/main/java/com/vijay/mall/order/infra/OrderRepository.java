@@ -202,6 +202,19 @@ public class OrderRepository {
     orders.saveAndFlush(e);
   }
 
+  private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+  /** Optional (plain unit tests run without it): used to write the cost of many lines in one round trip. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setJdbc(org.springframework.jdbc.core.JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+  /** Records what each line cost (whole paise, from the stock lots the units came out of), by order line id, in one round trip. */
+  @Transactional
+  public void setItemCosts(Map<UUID, Long> costs) {
+    if (jdbc == null || costs.isEmpty()) return;
+    jdbc.batchUpdate("update order_item set cost_paise = ? where id = ?", costs.entrySet().stream().map(e -> new Object[] {e.getValue(), e.getKey()}).toList());
+  }
+
   /** Inserts one order line. */
   @Transactional
   public void insertItem(UUID orderId, NewItem i) {

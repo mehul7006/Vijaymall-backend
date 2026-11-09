@@ -235,8 +235,8 @@ public class OrderReturnService {
       }
       refund += lineRefund;
       stored.add(new OrderReturnRepository.Line(l.id(), returning, lineRefund, back, p.plan().couponSharePaise()[k]));
-      if (back) restock.add(new InventoryService.Item(l.productId(), returning));
-      else defectiveGoods.add(new InventoryService.Item(l.productId(), returning));
+      if (back) restock.add(new InventoryService.Item(l.productId(), returning, l.id()));
+      else defectiveGoods.add(new InventoryService.Item(l.productId(), returning, l.id()));
     }
     if (prior.refundPaise() + refund > order.total()) {
       throw ApiException.conflict("REFUND_EXCEEDS_ORDER", "More than the order was worth", Map.of("totalPaise", order.total()));

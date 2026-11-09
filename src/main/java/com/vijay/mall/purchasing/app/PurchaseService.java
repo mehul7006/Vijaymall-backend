@@ -326,7 +326,7 @@ public class PurchaseService {
     repo.insert(header, idemKey, lines, first);
 
     applyToVariants(actor, id, items);
-    receiveStock(actor, id, items);
+    receiveStock(actor, id, lines, receivedDate);
     audit.log(actor, "PURCHASE", "purchase", id, supplier.name() + " " + invoice + " total=" + math.totalPaise());
     return id;
   }
@@ -416,10 +416,17 @@ public class PurchaseService {
 
   /**
    * The one place where a received delivery becomes stock: each line adds its paid and free units (reason PURCHASE, linked to the
-   * delivery). The stock-lot work replaces this method's {@code inventory.adjust(...)} call to open a lot with the line's landed cost instead.
+   * delivery) and opens a stock lot carrying the line's landed unit cost (four decimals of a paisa), pack MRP, lot selling price, batch
+   * and expiry. The lot is dated by the received date (the moment of recording when that is today) so that first-in-first-out follows
+   * the date the goods arrived. Editing or cancelling a recorded delivery is out of scope: it would need a check that none of the
+   * lot has been sold or returned yet.
    */
-  private void receiveStock(UUID actor, UUID purchaseId, List<ItemInput> items) {
-    for (ItemInput l : items) inventory.adjust(l.productId(), l.qty() + (l.freeQty() == null ? 0 : l.freeQty()), "PURCHASE", actor, purchaseId);
+  private void receiveStock(UUID actor, UUID purchaseId, List<Line> lines, LocalDate receivedDate) {
+    Instant receivedAt = receivedDate.equals(today()) ? clock.instant() : receivedDate.atTime(12, 0).atZone(InvoiceNumbers.SHOP_ZONE).toInstant();
+    for (Line l : lines) {
+      inventory.receive(new InventoryService.Receipt(l.productId(), l.qty() + l.freeQty(), l.id(), receivedAt, l.landedUnitCost(), l.mrpPaise(),
+          l.sellingPricePaise(), l.batchNo(), l.expiryDate()), purchaseId, actor);
+    }
   }
 
   /** Records a payment against a delivery. Needs an Idempotency-Key. 409 {@code ALREADY_PAID} when nothing is due; 422 {@code PAYMENT_EXCEEDS_DUE} above the due amount. */

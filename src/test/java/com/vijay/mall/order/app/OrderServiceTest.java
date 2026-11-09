@@ -71,6 +71,7 @@ class OrderServiceTest {
 
   private final UUID user = UUID.randomUUID();
   private final UUID product = UUID.randomUUID();
+  private final UUID line = UUID.randomUUID();
   private final UUID addressId = UUID.randomUUID();
 
   @BeforeEach
@@ -375,12 +376,12 @@ class OrderServiceTest {
     OrderRepository.Row r = row("CONFIRMED", "ONLINE", "CAPTURED", 20, 7, false, user);
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
-    when(repo.items(r.id())).thenReturn(List.of(new OrderViews.Item(product, "Rice", 2, 5000, 10000)));
+    when(repo.itemRows(r.id())).thenReturn(List.of(new OrderRepository.ItemRow(line, product, "Rice", 2, 0, 5000, 10000, 0)));
     when(payments.refund(eq(r.id()), anyString())).thenReturn(true);
 
     service.customerCancel(user, r.id());
 
-    verify(inventory).release(List.of(new InventoryService.Item(product, 2)), r.id());
+    verify(inventory).release(List.of(new InventoryService.Item(product, 2, line)), r.id());
     verify(promotions).release(r.id());
     verify(wallet).reverse(user, r.id());
     verify(payments).refund(eq(r.id()), anyString());
@@ -440,7 +441,7 @@ class OrderServiceTest {
   // ---------- stock is taken when staff confirm ----------
   private void stubItems(OrderRepository.Row r) {
     when(repo.find(r.id())).thenReturn(Optional.of(r));
-    when(repo.items(r.id())).thenReturn(List.of(new OrderViews.Item(product, "Rice", 2, 5000, 10000)));
+    when(repo.itemRows(r.id())).thenReturn(List.of(new OrderRepository.ItemRow(line, product, "Rice", 2, 0, 5000, 10000, 0)));
   }
 
   @Test
@@ -449,7 +450,7 @@ class OrderServiceTest {
     stubItems(placed);
     when(repo.updateStatus(any(), eq("CONFIRMED"), anyLong(), any())).thenReturn(true);
     service.adminChangeStatus(placed.id(), OrderStatus.CONFIRMED, null, user);
-    verify(inventory).reserve(List.of(new InventoryService.Item(product, 2)), placed.id());
+    verify(inventory).reserve(List.of(new InventoryService.Item(product, 2, line)), placed.id());
     verify(repo).setStockReserved(placed.id(), true);
 
     OrderRepository.Row confirmed = row("CONFIRMED", "COD", "NONE", 0, 7, false, user);
@@ -498,7 +499,7 @@ class OrderServiceTest {
     when(profiles.get(any())).thenReturn(new User(user, "a@b.c", "A", null, "CUSTOMER"));
     assertThrows(ApiException.class, () -> service.adminReject(r.id(), "  ", user));
     service.adminReject(r.id(), "sold out", user);
-    verify(inventory).release(List.of(new InventoryService.Item(product, 2)), r.id());
+    verify(inventory).release(List.of(new InventoryService.Item(product, 2, line)), r.id());
     verify(payments).refund(eq(r.id()), anyString());
     verify(repo).setCancelInfo(r.id(), "SHOP", "REJECTED_BY_SHOP", "sold out");
   }
