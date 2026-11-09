@@ -81,7 +81,9 @@ public class AdminSettlementController {
 
   /**
    * Imports an acquirer or bank statement CSV (multipart). Column names default to date, reference, amount, fee, tax, description; send
-   * dateColumn, referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn to map another file. Importing the same file again changes nothing.
+   * dateColumn, referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn to map another file. {@code format=PAYTM} reads the Paytm
+   * dashboard Settlement Report (also picked automatically by its header; {@code GENERIC} forces the column mapping). Importing the same file again
+   * changes nothing.
    */
   @PostMapping("/import")
   public SettlementService.ImportResult importCsv(@RequestPart("file") MultipartFile file, @RequestParam UUID moneyAccountId,
@@ -90,9 +92,10 @@ public class AdminSettlementController {
                                                   @RequestParam(required = false) String amountColumn, @RequestParam(required = false) String feeColumn,
                                                   @RequestParam(required = false) String taxColumn, @RequestParam(required = false) String descriptionColumn,
                                                   @RequestParam(required = false) String dateFormat, @RequestParam(required = false) String amountUnit,
-                                                  @RequestParam(required = false) String delimiter) throws IOException {
+                                                  @RequestParam(required = false) String delimiter,
+                                                  @RequestParam(required = false) String format) throws IOException {
     return settlements.importCsv(CurrentUser.id(), file.getBytes(), provider, moneyAccountId, utr, new SettlementService.CsvMapping(dateColumn,
-        referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn, dateFormat, amountUnit, delimiter));
+        referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn, dateFormat, amountUnit, delimiter), format);
   }
 
   /** One settlement. */

@@ -3,6 +3,7 @@ package com.vijay.mall.pos.domain;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Plain data shapes shared by the POS layers. */
@@ -57,9 +58,16 @@ public final class PosRecords {
 
     /**
      * One stored payment on a bill or refund: mode, amount in paise, reference, the card machine payment it came from, the money
-     * account it went to and the terminal id.
+     * account it went to and the terminal id. {@code detail} holds what the machine reported about the payer (masked), kept as JSON
+     * on the line; it is null for a line that has none.
      */
-    public record PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId, UUID moneyAccountId, String terminalId) {
+    public record PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId, UUID moneyAccountId, String terminalId,
+                                Map<String, String> detail) {
+        /** A stored payment with no payer detail. */
+        public PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId, UUID moneyAccountId, String terminalId) {
+            this(mode, amountPaise, reference, terminalPaymentId, moneyAccountId, terminalId, null);
+        }
+
         /** A stored payment with no card machine payment, money account or terminal. */
         public PaymentRecord(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null, null, null); }
 

@@ -31,10 +31,10 @@ public class AdminPaymentTerminalController {
    * @param terminalId the Paytm terminal id, 8 letters or digits (needed to add; ignored on change)
    * @param name the name shown at the till
    * @param active whether the till may use it
-   * @param moneyAccountId the money account it settles into (optional)
+   * @param settlesToAccountId the BANK money account the machine's account pays out into (optional)
    */
   @Schema(name = "PaymentTerminalBody")
-  public record Body(@Size(max = 20) String terminalId, @NotBlank @Size(max = 60) String name, Boolean active, UUID moneyAccountId) {}
+  public record Body(@Size(max = 20) String terminalId, @NotBlank @Size(max = 60) String name, Boolean active, UUID settlesToAccountId) {}
 
   private final PaymentTerminalService service;
 
@@ -47,17 +47,17 @@ public class AdminPaymentTerminalController {
     return service.list(page, size);
   }
 
-  /** Adds a machine (201). 409 {@code DUPLICATE_TERMINAL} when the terminal id exists. */
+  /** Adds a machine and its money account (201). 409 {@code DUPLICATE_TERMINAL} when the terminal id exists. */
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
   public TerminalView create(@Valid @RequestBody Body b) {
-    return service.create(CurrentUser.id(), new TerminalInput(b.terminalId(), b.name(), b.active(), b.moneyAccountId()));
+    return service.create(CurrentUser.id(), new TerminalInput(b.terminalId(), b.name(), b.active(), b.settlesToAccountId()));
   }
 
-  /** Renames a machine, switches it on or off, sets its money account. */
+  /** Renames a machine, switches it on or off, sets the bank its account pays out into. */
   @PutMapping("/{id}")
   public TerminalView update(@PathVariable UUID id, @Valid @RequestBody Body b) {
-    return service.update(CurrentUser.id(), id, new TerminalInput(b.terminalId(), b.name(), b.active(), b.moneyAccountId()));
+    return service.update(CurrentUser.id(), id, new TerminalInput(b.terminalId(), b.name(), b.active(), b.settlesToAccountId()));
   }
 
   /** Switches a machine off. */

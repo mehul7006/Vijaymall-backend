@@ -12,6 +12,7 @@ import com.vijay.mall.payment.domain.SettlementProvider.ItemKind;
 import com.vijay.mall.payment.domain.SettlementProvider.Listing;
 import com.vijay.mall.payment.domain.SettlementProvider.PaymentDetail;
 import com.vijay.mall.payment.domain.SettlementProvider.Summary;
+import com.vijay.mall.payment.domain.StatementParser;
 import com.vijay.mall.payment.infra.MoneyAccountRepository;
 import com.vijay.mall.payment.infra.SettlementRepository;
 import com.vijay.mall.payment.infra.SettlementRepository.ExceptionRow;
@@ -23,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,14 +32,18 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Pulls settlements from the payment providers (daily, and when a provider says one was processed), imports statement CSVs, matches
@@ -81,10 +87,15 @@ public class SettlementService {
   private final AuditService audit;
   private final Clock clock;
   private final TransactionTemplate tx;
+  private final List<StatementParser> parsers;
+  private final JsonMapper json;
 
   /** Creates the service. */
   public SettlementService(SettlementRepository repo, SettlementProviderRegistry registry, MoneyAccountService accounts,
-                           MoneyAccountRepository accountRepo, RuntimeSettings settings, AuditService audit, Clock clock, TransactionTemplate tx) {
+                           MoneyAccountRepository accountRepo, RuntimeSettings settings, AuditService audit, Clock clock, TransactionTemplate tx,
+                           List<StatementParser> parsers, JsonMapper json) {
+    this.parsers = parsers;
+    this.json = json;
     this.repo = repo;
     this.registry = registry;
     this.accounts = accounts;
@@ -179,7 +190,7 @@ public class SettlementService {
     if (!p.configured()) return;
     try {
       Optional<Detail> d = p.settlementDetail(settlementId);
-      if (d.isPresent() && !alreadyComplete(p.provider(), d.get().summary())) store(p.provider(), d.get(), "GATEWAY_API", accounts.gatewayAccountFor(p.provider()).orElse(null));
+      if (d.isPresent() && !alreadyComplete(p.provider(), d.get().summary())) store(p.provider(), d.get(), "GATEWAY_API", accounts.settlementAccountFor(p.provider()).orElse(null));
     } catch (RuntimeException e) {
       log.warn("Settlement webhook sync failed provider={} settlement={} : {}", p.provider(), settlementId, e.getMessage());
     }
@@ -193,7 +204,7 @@ public class SettlementService {
   private int storeIfNew(SettlementProvider p, Summary s) {
     if (alreadyComplete(p.provider(), s)) return -1;
     Detail d = p.settlementDetail(s.id()).orElse(new Detail(s, List.of()));
-    return store(p.provider(), d, "GATEWAY_API", accounts.gatewayAccountFor(p.provider()).orElse(null));
+    return store(p.provider(), d, "GATEWAY_API", accounts.settlementAccountFor(p.provider()).orElse(null));
   }
 
   // ---------- store and match ----------
@@ -213,10 +224,10 @@ public class SettlementService {
   }
 
   private boolean storeItem(String provider, UUID settlementId, Summary s, Item i, Instant now) {
-    Matched m = match(i);
+    Matched m = match(provider, i);
     Optional<UUID> itemId = repo.insertItem(new SettlementRepository.Item(UUID.randomUUID(), settlementId, i.kind().name(), i.entityId(), m.paymentId(),
         m.refundId(), m.posPaymentId(), i.grossPaise(), i.feePaise(), i.taxPaise(), i.netPaise(), i.method(), i.settledAt(), i.utr(), i.reference(),
-        m.ok()));
+        m.ok(), i.detail() == null || i.detail().isEmpty() ? null : json.writeValueAsString(i.detail())));
     if (itemId.isEmpty()) return false;
     if (m.ok() && m.paymentId() != null) {
       repo.markPaymentSettled(m.paymentId(), s.id(), i.utr(), i.settledAt(), i.feePaise(), i.taxPaise(), i.netPaise(), i.method(), now);
@@ -235,7 +246,7 @@ public class SettlementService {
   /** How an item matched: ok, or not (a mismatch carries the expected amount). Ids are set for whatever was found. */
   private record Matched(boolean ok, boolean mismatch, UUID paymentId, UUID refundId, UUID posPaymentId, Long expectedPaise) {}
 
-  private Matched match(Item i) {
+  private Matched match(String provider, Item i) {
     return switch (i.kind()) {
       case ADJUSTMENT, FEE -> new Matched(true, false, null, null, null, null);
       case REFUND -> {
@@ -250,7 +261,13 @@ public class SettlementService {
           Match x = pay.get();
           yield x.amountPaise() == i.grossPaise() ? new Matched(true, false, x.id(), null, null, null) : new Matched(false, true, x.id(), null, null, x.amountPaise());
         }
-        Optional<Match> pos = i.reference() == null || i.reference().isBlank() ? Optional.empty() : repo.freePosPaymentByReference(i.reference(), i.grossPaise());
+        List<String> refs = Stream.of(i.reference(), i.altReference()).filter(r -> r != null && !r.isBlank()).distinct().toList();
+        Optional<Match> pos = Optional.empty();
+        for (String r : refs) {
+          if (pos.isEmpty()) pos = repo.freePosPaymentByReference(r, i.grossPaise());
+        }
+        if (pos.isEmpty() && !refs.isEmpty()) pos = repo.freePosPaymentByMachineRef(refs, i.grossPaise());
+        if (pos.isEmpty()) pos = stickerUpi(provider, i);
         if (pos.isPresent()) {
           Match x = pos.get();
           yield x.amountPaise() == i.grossPaise() ? new Matched(true, false, null, null, x.id(), null) : new Matched(false, true, null, null, x.id(), x.amountPaise());
@@ -258,6 +275,17 @@ public class SettlementService {
         yield new Matched(false, false, null, null, null, null);
       }
     };
+  }
+
+  /**
+   * A UPI payment on the vendor's QR sticker has no payment of ours behind it, so it is matched to the counter UPI line of that vendor's account with
+   * the same amount on the day the customer paid, but only when that line is the only candidate: with two it is better to ask a person.
+   */
+  private Optional<Match> stickerUpi(String provider, Item i) {
+    String day = i.detail() == null ? null : i.detail().get("transactionDate");
+    if (!"upi".equals(i.method()) || day == null || day.length() < 10) return Optional.empty();
+    List<Match> candidates = repo.freeStickerUpiPayments(provider, i.grossPaise(), LocalDate.parse(day.substring(0, 10)));
+    return candidates.size() == 1 ? Optional.of(candidates.get(0)) : Optional.empty();
   }
 
   // ---------- overdue ----------
@@ -286,35 +314,83 @@ public class SettlementService {
    * @param utr optional bank reference of the whole payout
    */
   public ImportResult importCsv(UUID actor, byte[] bytes, String provider, UUID accountId, String utr, CsvMapping mapping) {
+    return importCsv(actor, bytes, provider, accountId, utr, mapping, null);
+  }
+
+  /**
+   * Imports a statement in a vendor's own format when it has one. {@code format} {@code PAYTM} reads the Paytm dashboard Settlement Report (the
+   * lines carry their own UTR, commission, GST and net; the provider is {@code paytm}); blank picks the vendor format by the file's header and falls back
+   * to the column mapping; {@code GENERIC} always uses the column mapping.
+   *
+   * @throws ApiException 400 {@code VALIDATION_FAILED} for an unknown format; 400 {@code CSV_INVALID} for an unreadable file
+   */
+  public ImportResult importCsv(UUID actor, byte[] bytes, String provider, UUID accountId, String utr, CsvMapping mapping, String format) {
     if (accountId == null) throw ApiException.validation("moneyAccountId", "required");
     accountRepo.find(accountId).orElseThrow(() -> ApiException.validation("moneyAccountId", "no such money account"));
-    String code = provider == null || provider.isBlank() ? "manual" : provider.strip().toLowerCase(Locale.ROOT);
+    StatementParser parser = parserFor(bytes, format);
+    String code = parser != null ? parser.provider() : provider == null || provider.isBlank() ? "manual" : provider.strip().toLowerCase(Locale.ROOT);
     if (code.length() > 40) throw ApiException.validation("provider", "at most 40 characters");
-    List<SettlementCsv.Row> rows = SettlementCsv.parse(bytes, mapping);
+    List<Item> items;
+    int rows;
+    if (parser != null) {
+      if (bytes.length > SettlementCsv.MAX_BYTES) throw ApiException.fieldError("CSV_INVALID", "file", "larger than 2 MB");
+      StatementParser.Result r = parser.parse(bytes);
+      if (!r.problems().isEmpty()) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "CSV_INVALID", "The file has rows that cannot be read",
+            Map.of("fields", Map.of("file", r.problems().get(0)), "problems", r.problems()));
+      }
+      if (r.items().isEmpty()) throw ApiException.fieldError("CSV_INVALID", "file", "the file has no data rows");
+      if (r.items().size() > SettlementCsv.MAX_ROWS) throw ApiException.fieldError("CSV_INVALID", "file", "more than " + SettlementCsv.MAX_ROWS + " rows: split the file");
+      items = r.items();
+      rows = items.size();
+    } else {
+      List<SettlementCsv.Row> parsed = SettlementCsv.parse(bytes, mapping);
+      items = new ArrayList<>();
+      for (SettlementCsv.Row r : parsed) {
+        boolean credit = r.amountPaise() >= 0;
+        long gross = Math.abs(r.amountPaise());
+        items.add(new Item("row-" + r.line(), credit ? ItemKind.PAYMENT : ItemKind.ADJUSTMENT, null, null, gross, r.feePaise(), r.taxPaise(),
+            credit ? gross - r.feePaise() - r.taxPaise() : -gross, null, r.at(), utr, r.reference().isBlank() ? null : r.reference()));
+      }
+      rows = parsed.size();
+    }
     String sid = "csv-" + digest(bytes, accountId);
     Optional<SettlementRepository.Settlement> old = repo.find(code, sid);
     if (old.isPresent()) {
-      return new ImportResult(old.get().id(), true, rows.size(), 0, 0, old.get().netPaise());
-    }
-    List<Item> items = new ArrayList<>();
-    for (SettlementCsv.Row r : rows) {
-      boolean credit = r.amountPaise() >= 0;
-      long gross = Math.abs(r.amountPaise());
-      items.add(new Item("row-" + r.line(), credit ? ItemKind.PAYMENT : ItemKind.ADJUSTMENT, null, null, gross, r.feePaise(), r.taxPaise(),
-          credit ? gross - r.feePaise() - r.taxPaise() : -gross, null, r.at(), utr, r.reference().isBlank() ? null : r.reference()));
+      return new ImportResult(old.get().id(), true, rows, 0, 0, old.get().netPaise());
     }
     long gross = items.stream().filter(i -> i.kind() == ItemKind.PAYMENT).mapToLong(Item::grossPaise).sum();
     long fee = items.stream().mapToLong(Item::feePaise).sum();
     long tax = items.stream().mapToLong(Item::taxPaise).sum();
     long net = items.stream().mapToLong(Item::netPaise).sum();
-    Instant last = items.stream().map(Item::settledAt).max(Comparator.naturalOrder()).orElse(clock.instant());
-    Detail d = new Detail(new Summary(sid, utr == null || utr.isBlank() ? null : utr.strip(), gross, fee, tax, net, "IMPORTED", last), items);
+    Instant last = items.stream().map(Item::settledAt).filter(Objects::nonNull).max(Comparator.naturalOrder()).orElse(clock.instant());
+    String batchUtr = utr != null && !utr.isBlank() ? utr.strip() : parser == null ? null : commonUtr(items);
+    Detail d = new Detail(new Summary(sid, batchUtr, gross, fee, tax, net, "IMPORTED", last), items);
     store(code, d, "CSV", accountId);
     SettlementRepository.Settlement saved = repo.find(code, sid).orElseThrow();
     List<SettlementRepository.Item> stored = repo.items(saved.id());
     int matched = (int) stored.stream().filter(SettlementRepository.Item::matched).count();
-    audit.log(actor, "SETTLEMENT_IMPORT", "settlement", saved.id(), code + " rows=" + rows.size() + " matched=" + matched);
-    return new ImportResult(saved.id(), false, rows.size(), matched, stored.size() - matched, net);
+    audit.log(actor, "SETTLEMENT_IMPORT", "settlement", saved.id(), code + " rows=" + rows + " matched=" + matched);
+    return new ImportResult(saved.id(), false, rows, matched, stored.size() - matched, net);
+  }
+
+  /** The vendor parser for a file: the named format, else the one that recognises the header (unless GENERIC), else none. */
+  private StatementParser parserFor(byte[] bytes, String format) {
+    String f = format == null || format.isBlank() ? null : format.strip().toUpperCase(Locale.ROOT);
+    if ("GENERIC".equals(f)) return null;
+    if (f != null) {
+      return parsers.stream().filter(p -> p.format().equals(f)).findFirst()
+          .orElseThrow(() -> ApiException.validation("format", "GENERIC or " + parsers.stream().map(StatementParser::format).collect(Collectors.joining(" or "))));
+    }
+    String head = new String(bytes, 0, Math.min(bytes.length, 2000), StandardCharsets.UTF_8);
+    String header = head.lines().findFirst().orElse("");
+    return parsers.stream().filter(p -> p.recognises(header)).findFirst().orElse(null);
+  }
+
+  /** The UTR every line shares, or null when the lines went out in several payouts. */
+  private static String commonUtr(List<Item> items) {
+    List<String> utrs = items.stream().map(Item::utr).filter(u -> u != null && !u.isBlank()).distinct().limit(2).toList();
+    return utrs.size() == 1 ? utrs.get(0) : null;
   }
 
   private static String digest(byte[] bytes, UUID accountId) {

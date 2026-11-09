@@ -1,6 +1,5 @@
 package com.vijay.mall.payment.infra;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -15,12 +14,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class TerminalPaymentRepository {
   /** A terminal session as stored. */
-  @Schema(name = "TerminalPaymentRow")
   public record Row(UUID id, String reference, String provider, long amountPaise, String state, String mode, String instructions, String qrPayload,
-                    String qrImageUrl, String approvalCode, String rrn, UUID moneyAccountId, Instant createdAt) {}
+                    String qrImageUrl, String approvalCode, String rrn, UUID moneyAccountId, Instant createdAt, UUID posSaleId) {}
 
   private static final String COLUMNS = "id, reference, provider, amount_paise, state, mode, instructions, qr_payload, qr_image_url, approval_code, rrn, "
-      + "money_account_id, created_at";
+      + "money_account_id, created_at, pos_sale_id";
 
   private final JdbcClient jdbc;
 
@@ -30,7 +28,7 @@ public class TerminalPaymentRepository {
     Timestamp at = rs.getTimestamp("created_at");
     return new Row(rs.getObject("id", UUID.class), rs.getString("reference"), rs.getString("provider"), rs.getLong("amount_paise"), rs.getString("state"),
         rs.getString("mode"), rs.getString("instructions"), rs.getString("qr_payload"), rs.getString("qr_image_url"), rs.getString("approval_code"),
-        rs.getString("rrn"), rs.getObject("money_account_id", UUID.class), at.toInstant());
+        rs.getString("rrn"), rs.getObject("money_account_id", UUID.class), at.toInstant(), rs.getObject("pos_sale_id", UUID.class));
   }
 
   /** One session by id. */
@@ -59,5 +57,18 @@ public class TerminalPaymentRepository {
     return jdbc.sql("update card_terminal_session set state = :s, approval_code = coalesce(:ac, approval_code), rrn = coalesce(:rrn, rrn), updated_at = :now "
         + "where id = :id and state = 'PENDING'").param("s", state).param("ac", approvalCode).param("rrn", rrn).param("now", Timestamp.from(now))
         .param("id", id).update() == 1;
+  }
+
+  /** Locks one session for use on a bill. */
+  @Transactional
+  public Optional<Row> lock(UUID id) {
+    return jdbc.sql("select " + COLUMNS + " from card_terminal_session where id = :id for update").param("id", id).query(this::row).optional();
+  }
+
+  /** Records the bill that used the session. */
+  @Transactional
+  public void markUsed(UUID id, UUID saleId, Instant now) {
+    jdbc.sql("update card_terminal_session set pos_sale_id = :s, updated_at = :now where id = :id").param("s", saleId).param("now", Timestamp.from(now))
+        .param("id", id).update();
   }
 }

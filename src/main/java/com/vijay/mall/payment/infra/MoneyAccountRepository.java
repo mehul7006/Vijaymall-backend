@@ -71,6 +71,18 @@ public class MoneyAccountRepository {
         + "order by created_at, id limit 1").param("k", kind).param("p", provider).query(this::row).optional();
   }
 
+  /** The first active card machine or UPI account of a vendor, oldest first. */
+  public Optional<Account> firstActiveCounter(String provider) {
+    return jdbc.sql("select " + COLUMNS + " from money_account where active and provider = :p and kind in ('CARD_TERMINAL','UPI') order by created_at, id limit 1")
+        .param("p", provider).query(this::row).optional();
+  }
+
+  /** The account of this kind, vendor and identifier (a card machine by its terminal id), if any. */
+  public Optional<Account> findByIdentifier(String kind, String provider, String identifier) {
+    return jdbc.sql("select " + COLUMNS + " from money_account where kind = :k and provider = :p and identifier = :i order by created_at, id limit 1")
+        .param("k", kind).param("p", provider).param("i", identifier).query(this::row).optional();
+  }
+
   /** Active accounts of these kinds, oldest first. */
   public List<Account> activeForKinds(List<String> kinds) {
     return jdbc.sql("select " + COLUMNS + " from money_account where active and kind in (:k) order by created_at, id limit 200").param("k", kinds)
@@ -119,11 +131,13 @@ public class MoneyAccountRepository {
         .param("settles", a.settlesToAccountId()).param("note", a.note()).param("now", Timestamp.from(now)).update();
   }
 
-  /** Switches an account on or off. */
+  /** Switches an account on or off; a card machine that owns the account follows it, so the two always agree. */
   @Transactional
   public void setActive(UUID id, boolean active, Instant now) {
     jdbc.sql("update money_account set active = :a, updated_at = :now where id = :id").param("a", active).param("now", Timestamp.from(now))
         .param("id", id).update();
+    jdbc.sql("update payment_terminal set active = :a, updated_at = :now where money_account_id = :id and active <> :a").param("a", active)
+        .param("now", Timestamp.from(now)).param("id", id).update();
   }
 
   /** Deletes an account; the caller has checked {@link #referenced}. */

@@ -140,9 +140,9 @@ class PaytmTerminalIT extends IntegrationTestBase {
     assertThat(till).extracting(m -> m.get("name")).containsExactly("Counter 1", "Counter 2");
     assertThat(till).allMatch(m -> Boolean.FALSE.equals(m.get("default")));
 
-    UUID account = UUID.randomUUID();
-    var upd = call(HttpMethod.PUT, ADMIN_TERMINALS + "/" + id, adminToken(), Map.of("name", "Front desk", "active", true, "moneyAccountId", account), null);
-    assertThat(upd.getBody()).containsEntry("name", "Front desk").containsEntry("moneyAccountId", account.toString());
+    Map bank = post("/api/v1/admin/money-accounts", adminToken(), Map.of("name", "Paytm bank " + id, "kind", "BANK")).getBody();
+    var upd = call(HttpMethod.PUT, ADMIN_TERMINALS + "/" + id, adminToken(), Map.of("name", "Front desk", "active", true, "settlesToAccountId", bank.get("id")), null);
+    assertThat(upd.getBody()).containsEntry("name", "Front desk").containsEntry("moneyAccountId", t.get("moneyAccountId")).containsEntry("settlesToAccountId", bank.get("id"));
     assertThat(call(HttpMethod.PUT, ADMIN_TERMINALS + "/" + UUID.randomUUID(), adminToken(), Map.of("name", "x"), null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
     var page = get(ADMIN_TERMINALS + "?page=0&size=1", adminToken());
@@ -471,7 +471,7 @@ class PaytmTerminalIT extends IntegrationTestBase {
     var sale = sellWith(List.of(Map.of("mode", "CARD", "amountPaise", 12500, "terminalPaymentId", id)));
     assertThat(sale.getStatusCode()).as(String.valueOf(sale.getBody())).isEqualTo(HttpStatus.CREATED);
     String saleId = (String) sale.getBody().get("id");
-    assertThat(jdbc.queryForObject("select reference from pos_payment where sale_id = ?::uuid", String.class, saleId)).isEqualTo("PAYTM RRN 412345678901 AUTH A1B2C3");
+    assertThat(jdbc.queryForObject("select reference from pos_payment where sale_id = ?::uuid", String.class, saleId)).isEqualTo("412345678901");
     assertThat(jdbc.queryForObject("select terminal_payment_id::text from pos_payment where sale_id = ?::uuid", String.class, saleId)).isEqualTo(id);
     assertThat(get(PAYMENTS + "/" + id, cashier()).getBody()).containsEntry("posSaleId", saleId).containsEntry("canVoid", false);
 

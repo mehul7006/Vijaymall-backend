@@ -2,6 +2,7 @@ package com.vijay.mall.payment.app;
 
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.payment.domain.CardTerminal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -18,6 +19,12 @@ public class CardTerminalRegistry {
   public CardTerminalRegistry(List<CardTerminal> terminals) {
     this.byName = terminals.stream().collect(Collectors.toMap(CardTerminal::provider, Function.identity()));
   }
+
+  /** True when an adapter with this name exists, set up or not. */
+  public boolean knows(String name) { return name != null && byName.containsKey(name.strip().toLowerCase()); }
+
+  /** Every adapter, set up or not; used to find which one keeps a session id. */
+  public Collection<CardTerminal> all() { return byName.values(); }
 
   /** The terminal with this name; {@code 503 TERMINAL_NOT_CONFIGURED} when there is none or it is not set up. */
   public CardTerminal byProvider(String name) {

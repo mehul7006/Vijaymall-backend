@@ -36,7 +36,8 @@ import com.vijay.mall.pos.domain.CreditNoteData;
 import com.vijay.mall.pos.domain.PaymentRules;
 import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
-import com.vijay.mall.payment.paytm.app.TerminalPaymentService;
+import com.vijay.mall.payment.app.TerminalService;
+import com.vijay.mall.payment.domain.CardTerminal.Attachment;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
@@ -248,7 +249,11 @@ public class PosService implements ReferenceLookup {
     List<Pay> out = new ArrayList<>();
     for (int i = 0; i < pays.size(); i++) {
       Pay p = pays.get(i);
-      out.add(new Pay(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId(), moneyAccounts.counterAccount(p.mode(), p.moneyAccountId(),
+      if (p.terminalPaymentId() != null) { // the machine's own account is taken when the payment is attached
+        out.add(p);
+        continue;
+      }
+      out.add(new Pay(p.mode(), p.amountPaise(), p.reference(), null, moneyAccounts.counterAccount(p.mode(), p.moneyAccountId(),
           "payments[" + i + "].moneyAccountId", offline), p.terminalId()));
     }
     return out;
@@ -465,7 +470,7 @@ public class PosService implements ReferenceLookup {
     }
 
     UUID saleId = UUID.randomUUID();
-    List<Pay> paid = withTerminalPayments(pays, saleId, cashierId);
+    List<PaymentRecord> paid = withTerminalPayments(pays, saleId, cashierId);
     int earned = customerId == null ? 0 : (int) q.coinsToEarn();
     List<UUID> itemIds = bill.lines().stream().map(_ -> UUID.randomUUID()).toList();
     List<InventoryService.Item> taken = takenItems(bill, itemIds);
@@ -497,7 +502,7 @@ public class PosService implements ReferenceLookup {
     long[] couponShares = q.lines().size() == bill.lines().size()
         ? q.lines().stream().mapToLong(Quote.Line::couponDiscountPaise).toArray() : null; // the coupon's part of each line
     List<SaleItemRecord> items = saleItems(bill, itemIds, costs, couponShares);
-    List<PaymentRecord> payments = paid.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId(), p.moneyAccountId(), p.terminalId())).toList();
+    List<PaymentRecord> payments = paid;
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), payable, bill.tax().taxable(), bill.tax().cgst(),
         bill.tax().sgst(), earned, in.cashTenderedPaise(), change, soldAt, items, payments, PaymentRules.classify(payLines),
@@ -518,30 +523,37 @@ public class PosService implements ReferenceLookup {
     return saleId;
   }
 
-  private TerminalPaymentService terminalPayments;
+  private TerminalService terminalPayments;
 
   /** Optional (plain unit tests run without it): attaches paid card machine payments to the payment lines that name one. */
   @Autowired(required = false)
-  void setTerminalPayments(TerminalPaymentService terminalPayments) { this.terminalPayments = terminalPayments; }
+  void setTerminalPayments(TerminalService terminalPayments) { this.terminalPayments = terminalPayments; }
 
   /**
-   * Attaches the card machine payment of every line that names one (it must be paid, unused, of the line's amount and fit its
-   * mode) and fills an empty reference with the machine's RRN and authorisation code. Lines without one stay as they are.
+   * Attaches the card machine payment of every line that names one, whichever kind of machine took it (it must be paid, unused and of
+   * the line's amount; a Paytm payment must also fit the line's mode). The line then takes the machine's money account, terminal id,
+   * its reference (the RRN, unless the till sent one) and the masked payer detail. A line that names a different account than the machine's
+   * is refused. Lines without a machine payment get their default account as before.
    */
-  private List<Pay> withTerminalPayments(List<Pay> pays, UUID saleId, UUID cashierId) {
-    List<Pay> out = new ArrayList<>();
+  private List<PaymentRecord> withTerminalPayments(List<Pay> pays, UUID saleId, UUID cashierId) {
+    List<PaymentRecord> out = new ArrayList<>();
     for (int i = 0; i < pays.size(); i++) {
       Pay p = pays.get(i);
       if (p.terminalPaymentId() == null) {
-        out.add(p);
+        out.add(new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), null, p.moneyAccountId(), p.terminalId()));
         continue;
       }
       String field = "payments[" + i + "].terminalPaymentId";
       if (!"CARD".equals(p.mode()) && !"UPI".equals(p.mode())) throw ApiException.validation(field, "only a CARD or UPI line can use a card machine payment");
       if (terminalPayments == null) throw ApiException.validation(field, "the card machine is not available");
-      TerminalPaymentService.Confirmed c = terminalPayments.attach(p.terminalPaymentId(), saleId, p.amountPaise(), p.mode(), field, cashierId);
+      Attachment c = terminalPayments.attach(p.terminalPaymentId(), saleId, p.amountPaise(), p.mode(), field, cashierId);
+      if (p.moneyAccountId() != null && c.moneyAccountId() != null && !p.moneyAccountId().equals(c.moneyAccountId())) {
+        throw ApiException.validation("payments[" + i + "].moneyAccountId", "this payment was taken on another card machine than the account named");
+      }
+      UUID account = c.moneyAccountId() != null ? c.moneyAccountId() : p.moneyAccountId();
       String ref = p.reference() == null || p.reference().isBlank() ? c.reference() : p.reference();
-      out.add(new Pay(p.mode(), p.amountPaise(), ref, p.terminalPaymentId(), p.moneyAccountId(), p.terminalId()));
+      String terminal = c.terminalId() != null ? c.terminalId() : p.terminalId();
+      out.add(new PaymentRecord(p.mode(), p.amountPaise(), ref, p.terminalPaymentId(), account, terminal, c.detail()));
     }
     return out;
   }

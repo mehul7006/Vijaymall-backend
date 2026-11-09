@@ -57,6 +57,9 @@ public class MoneyAccountService {
     return repo.page(k, active, q == null || q.isBlank() ? null : q.strip(), Math.max(0, page), Page.clampSize(size));
   }
 
+  /** The accounts with these ids, keyed by id (unknown ids are left out). */
+  public Map<UUID, Account> byIds(List<UUID> ids) { return repo.findAll(ids); }
+
   /** One account, or 404. */
   public Account get(UUID id) { return repo.find(id).orElseThrow(() -> ApiException.notFound("Money account")); }
 
@@ -126,6 +129,35 @@ public class MoneyAccountService {
     }
     repo.delete(id);
     audit.log(actor, "DELETE", "money_account", id, a.name());
+  }
+
+  /**
+   * The CARD_TERMINAL account of a vendor machine, created or brought up to date; calling it again with the same terminal changes nothing
+   * more. A name another account already has gets the terminal id appended.
+   *
+   * @param settlesToAccountId the BANK account the machine pays out into, or null
+   * @param active whether the account is on; the machine and its account always agree
+   */
+  @Transactional
+  public Account ensureTerminalAccount(UUID actor, String provider, String terminalId, String name, UUID settlesToAccountId, boolean active) {
+    Optional<Account> old = repo.findByIdentifier("CARD_TERMINAL", provider, terminalId);
+    String unique = repo.nameTaken(name, old.map(Account::id).orElse(null)) ? name + " (" + terminalId + ")" : name;
+    Account saved = old.isPresent() ? update(actor, old.get().id(), new Input(unique, "CARD_TERMINAL", provider, terminalId, settlesToAccountId, old.get().note()))
+        : create(actor, new Input(unique, "CARD_TERMINAL", provider, terminalId, settlesToAccountId, "Card machine"));
+    if (saved.active() == active) return saved;
+    return active ? activate(actor, saved.id()) : deactivate(actor, saved.id());
+  }
+
+  /**
+   * The account for settlements of a provider: the configured gateway account when it is that provider's, else the provider's first active
+   * gateway account, else its first active card machine or UPI account; empty when it has none.
+   */
+  public Optional<UUID> settlementAccountFor(String provider) {
+    Optional<UUID> configured = parse(settings.get(Settings.PAYMENT_GATEWAY_ACCOUNT)).flatMap(repo::find).filter(Account::active)
+        .filter(a -> a.provider().equals(provider)).map(Account::id);
+    if (configured.isPresent()) return configured;
+    Optional<UUID> gateway = repo.firstActive("GATEWAY", provider).map(Account::id);
+    return gateway.isPresent() ? gateway : repo.firstActiveCounter(provider).map(Account::id);
   }
 
   /** Largest amount one hand-entered movement may carry: 10 crore rupees. */
@@ -217,7 +249,7 @@ public class MoneyAccountService {
   /** One way the cashier can take a payment: a vendor, optionally a terminal, and the account the money lands in. */
   public record Channel(String mode, UUID moneyAccountId, String provider, String name, String terminalId, String kind, @JsonProperty("default") boolean isDefault) {}
 
-  /** The active channels per mode (CASH, UPI, CARD), with the shop's default of each mode flagged. */
+  /** The active channels per mode (CASH, UPI, CARD), with the shop's default of each mode flagged (a mode with a single channel and no saved default flags that one). */
   public List<Channel> channels() {
     List<Channel> out = new ArrayList<>();
     for (String mode : List.of("CASH", "UPI", "CARD")) {
@@ -226,7 +258,7 @@ public class MoneyAccountService {
       boolean any = accs.stream().anyMatch(a -> configured.filter(a.id()::equals).isPresent());
       for (int i = 0; i < accs.size(); i++) {
         Account a = accs.get(i);
-        boolean def = any ? configured.filter(a.id()::equals).isPresent() : "CASH".equals(mode) && i == 0;
+        boolean def = any ? configured.filter(a.id()::equals).isPresent() : i == 0 && ("CASH".equals(mode) || accs.size() == 1);
         out.add(new Channel(mode, a.id(), a.provider(), a.name(), a.identifier().isEmpty() ? null : a.identifier(), a.kind(), def));
       }
     }

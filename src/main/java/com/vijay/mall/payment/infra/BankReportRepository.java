@@ -102,13 +102,20 @@ public class BankReportRepository {
   public record ReceiptTotal(String provider, UUID moneyAccountId, String accountName, String method, long receipts, long grossPaise, long feePaise,
                              long taxPaise) {}
 
+  /** Who paid on a counter line, from the masked detail the machine reported: network and last four digits, the masked UPI address, or the bank. */
+  private static final String PAYER_OF_LINE = "case when pp.detail ->> 'cardLast4' is not null then coalesce(pp.detail ->> 'cardScheme', 'CARD') || ' ****' "
+      + "|| (pp.detail ->> 'cardLast4') when pp.detail ->> 'upiVpa' is not null then pp.detail ->> 'upiVpa' else pp.detail ->> 'issuingBank' end";
+
   private static final String RECEIPT_ROWS = "with r as ("
       + "select 'ONLINE_ORDER' source, p.id, p.provider, p.money_account_id acc, null::text terminal_id, upper(coalesce(p.instrument, 'ONLINE')) method, "
       + "coalesce(p.card_network || ' ****' || p.card_last4, case when p.upi_vpa like '%@%' then left(p.upi_vpa, 2) || '***' || substring(p.upi_vpa from position('@' in p.upi_vpa)) end, p.bank) payer, "
       + "p.provider_ref reference, p.utr, p.amount_paise gross, p.fee_paise fee, p.tax_paise tax, p.net_paise net, p.status, p.settlement_ref, p.captured_at at, o.order_no doc "
       + "from payment p join orders o on o.id = p.order_id where p.captured_at >= :f and p.captured_at < :t and p.status in ('CAPTURED','REFUNDED') "
-      + "union all select 'POS_SALE', pp.id, coalesce(ma.provider, 'counter'), pp.money_account_id, pp.terminal_id, pp.mode, null, pp.reference, null, pp.amount_paise, "
-      + "null, null, null, 'COMPLETED', (select s.provider_settlement_id from settlement_item si join settlement s on s.id = si.settlement_id "
+      + "union all select 'POS_SALE', pp.id, coalesce(ma.provider, 'counter'), pp.money_account_id, pp.terminal_id, pp.mode, " + PAYER_OF_LINE + ", pp.reference, "
+      + "(select si.utr from settlement_item si where si.pos_payment_id = pp.id limit 1), pp.amount_paise, "
+      + "(select si.fee_paise from settlement_item si where si.pos_payment_id = pp.id limit 1), "
+      + "(select si.tax_paise from settlement_item si where si.pos_payment_id = pp.id limit 1), "
+      + "(select si.net_paise from settlement_item si where si.pos_payment_id = pp.id limit 1), 'COMPLETED', (select s.provider_settlement_id from settlement_item si join settlement s on s.id = si.settlement_id "
       + "where si.pos_payment_id = pp.id limit 1), sale.created_at, sale.invoice_no from pos_payment pp join pos_sale sale on sale.id = pp.sale_id "
       + "left join money_account ma on ma.id = pp.money_account_id where sale.created_at >= :f and sale.created_at < :t and pp.mode <> 'CREDIT') ";
   private static final String RECEIPT_FILTER = " where (cast(:prov as text) is null or r.provider = :prov) and (cast(:acc as uuid) is null or r.acc = :acc) "
@@ -194,7 +201,7 @@ public class BankReportRepository {
       + "and (cast(:before as timestamptz) is null or p.captured_at < :before) "
       + "union all select 'COUNTER', pp.id, sale.invoice_no, pp.money_account_id, pp.amount_paise, sale.created_at from pos_payment pp "
       + "join pos_sale sale on sale.id = pp.sale_id join money_account ma on ma.id = pp.money_account_id "
-      + "where pp.mode = 'CARD' and ma.kind in ('CARD_TERMINAL','GATEWAY') and not exists (select 1 from settlement_item si where si.pos_payment_id = pp.id) "
+      + "where ((pp.mode = 'CARD' and ma.kind in ('CARD_TERMINAL','GATEWAY')) or (pp.mode = 'UPI' and ma.kind = 'CARD_TERMINAL')) and not exists (select 1 from settlement_item si where si.pos_payment_id = pp.id) "
       + "and (cast(:before as timestamptz) is null or sale.created_at < :before)";
 
   /** Money received but not yet reported in a settlement, oldest first; {@code receivedBefore} limits it to the overdue ones. */
@@ -270,6 +277,28 @@ public class BankReportRepository {
   }
 
   // ---------- payer ----------
+  /**
+   * How one counter payment line was made, for the admin bill view. Everything is masked: the network and last four digits, the masked UPI address.
+   * {@code utr}, fee, tax and net come from the settlement once the line is in one.
+   */
+  public record SalePayerRow(UUID posPaymentId, String mode, String provider, long amountPaise, String reference, String terminalId, UUID moneyAccountId,
+                             String accountName, String payMethod, String cardScheme, String cardLast4, String issuingBank, String upiVpa, String authCode,
+                             String settlementRef, String utr, Long feePaise, Long taxPaise, Long netPaise, Instant settledAt) {}
+
+  /** How the payment lines of a counter bill were made, in the order they were taken. */
+  public List<SalePayerRow> payersOfSale(UUID saleId) {
+    return jdbc.sql("select pp.id, pp.mode, coalesce(ma.provider, 'counter') provider, pp.amount_paise, pp.reference, pp.terminal_id, pp.money_account_id, ma.name, "
+        + "pp.detail ->> 'payMethod' pay_method, pp.detail ->> 'cardScheme' scheme, pp.detail ->> 'cardLast4' last4, pp.detail ->> 'issuingBank' bank, "
+        + "pp.detail ->> 'upiVpa' vpa, pp.detail ->> 'authCode' auth, s.provider_settlement_id, si.utr, si.fee_paise, si.tax_paise, si.net_paise, "
+        + "coalesce(si.settled_at, s.settled_at) settled_at from pos_payment pp left join money_account ma on ma.id = pp.money_account_id "
+        + "left join settlement_item si on si.pos_payment_id = pp.id left join settlement s on s.id = si.settlement_id where pp.sale_id = :s "
+        + "order by pp.id limit 20").param("s", saleId).query((rs, i) -> new SalePayerRow(rs.getObject("id", UUID.class), rs.getString("mode"),
+            rs.getString("provider"), rs.getLong("amount_paise"), rs.getString("reference"), rs.getString("terminal_id"), rs.getObject("money_account_id", UUID.class),
+            rs.getString("name"), rs.getString("pay_method"), rs.getString("scheme"), rs.getString("last4"), rs.getString("bank"), rs.getString("vpa"),
+            rs.getString("auth"), rs.getString("provider_settlement_id"), rs.getString("utr"), nullableLong(rs, "fee_paise"), nullableLong(rs, "tax_paise"),
+            nullableLong(rs, "net_paise"), instant(rs, "settled_at"))).list();
+  }
+
   /** How the online payments of an order were made, newest first. */
   public List<PayerRow> payersOfOrder(UUID orderId) {
     return jdbc.sql("select p.id, p.provider, p.status, p.amount_paise, p.instrument, p.upi_vpa, p.card_network, p.card_last4, p.bank, p.fee_paise, p.tax_paise, "

@@ -7,6 +7,7 @@ import com.vijay.mall.payment.infra.BankReportRepository.PayerRow;
 import com.vijay.mall.payment.infra.BankReportRepository.ReceiptLine;
 import com.vijay.mall.payment.infra.BankReportRepository.ReceiptTotal;
 import com.vijay.mall.payment.infra.BankReportRepository.ReceiptRow;
+import com.vijay.mall.payment.infra.BankReportRepository.SalePayerRow;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -69,4 +70,8 @@ public class AdminBankReportController {
   /** How the order's online payments were made: UPI id, card network and last four digits, bank, fee and settlement. Never a full card number. */
   @GetMapping("/payments/by-order/{orderId}")
   public List<PayerRow> payers(@PathVariable UUID orderId) { return reports.payers(orderId); }
+
+  /** How the payment lines of a counter bill were made: machine, network and last four digits, masked UPI address, RRN, and the settlement once there is one. */
+  @GetMapping("/payments/by-sale/{saleId}")
+  public List<SalePayerRow> salePayers(@PathVariable UUID saleId) { return reports.salePayers(saleId); }
 }

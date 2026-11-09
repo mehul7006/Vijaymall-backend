@@ -2,6 +2,7 @@ package com.vijay.mall.payment.domain;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -36,10 +37,18 @@ public interface SettlementProvider {
    * @param taxPaise tax on the fee
    * @param netPaise the amount this line moved
    * @param method {@code upi}, {@code card}, {@code netbanking}, ... when known
-   * @param reference the cashier-visible reference (UPI ref, approval code, RRN) for imported rows; null otherwise
+   * @param reference the cashier-visible reference (UPI ref, approval code, RRN, a machine's order id) for imported rows; null otherwise
+   * @param altReference a second reference to match a counter line on (for Paytm the RRN next to the order id); null when there is none
+   * @param detail vendor-specific facts kept as JSON next to the line (machine id, serial number, payment mode, transaction date...); null when there are none
    */
   record Item(String entityId, ItemKind kind, String paymentRef, String refundRef, long grossPaise, long feePaise, long taxPaise,
-              long netPaise, String method, Instant settledAt, String utr, String reference) {}
+              long netPaise, String method, Instant settledAt, String utr, String reference, String altReference, Map<String, String> detail) {
+    /** A line with no second reference and no vendor detail. */
+    public Item(String entityId, ItemKind kind, String paymentRef, String refundRef, long grossPaise, long feePaise, long taxPaise, long netPaise,
+                String method, Instant settledAt, String utr, String reference) {
+      this(entityId, kind, paymentRef, refundRef, grossPaise, feePaise, taxPaise, netPaise, method, settledAt, utr, reference, null, null);
+    }
+  }
 
   /** A settlement with its lines. */
   record Detail(Summary summary, List<Item> items) {}

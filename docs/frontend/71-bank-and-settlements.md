@@ -8,12 +8,13 @@ Audience: Flutter and web teams. Read `00-overview.md` first (auth, error envelo
 - A **payment channel** is what the cashier picks at payment time: a vendor (`provider`, free code such as `razorpay`, `paytm`, `manual`), optionally a terminal id, and the money account that receives the money. Several vendors can be active at once; a channel is just an active money account.
 - Every receipt is tagged with a money account: online payments (the gateway account), counter lines (the chosen channel, else the shop default of the mode), refunds (follow their payment/bill). Old rows have no account and show as **Unassigned**.
 - Settlements are batches the provider or bank paid out (UTR, fee, GST on the fee, net). Items inside are matched to our payments by reference and amount; anything that does not add up goes to the **exception queue**.
-- Everything vendor-specific lives behind ports (`PaymentGateway`, `SettlementProvider`, `CardTerminal`). Razorpay is the only vendor adapter built. Paytm and others plug in later without changing any endpoint below.
+- Everything vendor-specific lives behind ports (`PaymentGateway`, `SettlementProvider`, `CardTerminal`, `StatementParser`). Razorpay (online gateway and settlements) and Paytm (wireless card machine, settlements and its Settlement Report file) are built; `manual` needs no vendor API. Several vendors are active at the same time and the cashier picks the channel for each payment. Paytm details are in `73-paytm-terminal.md`.
+- **One card-machine flow for every vendor.** The channel the cashier picks decides which machine is used: the provider of the channel's money account (`manual`, `paytm`, ...) selects the adapter. `pos.terminalProvider` is only the default for a channel whose provider has no adapter, or when no channel is named. The same four calls (start, poll, confirm/cancel, put the session id on the bill line) serve all of them.
 
 ## 2. Admin screens and flow
 
-1. **Accounts**: list/create/edit/deactivate money accounts (section 4.1). Create at least: the bank, the Razorpay gateway account (provider `razorpay`, settles to the bank), each counter UPI QR, each card machine (provider e.g. `paytm`, identifier = terminal id), keep "Cash drawer".
-2. **Defaults** (Config screen, `PUT /admin/config`): `pos.defaultAccount.CASH|UPI|CARD` (account id used when the till names none, and the pre-selected channel), `payment.gatewayAccountId` (account for online payments; blank = first active GATEWAY account of the payment's provider), `payment.onlineProvider` (gateway the customer app uses, blank = server default), `payment.settlementDays` (cycle, default 2), `pos.terminalProvider` (terminal adapter, default `manual`).
+1. **Accounts**: list/create/edit/deactivate money accounts (section 4.1). Create at least: the bank, the Razorpay gateway account (provider `razorpay`, settles to the bank), each counter UPI QR (a Paytm QR sticker is a `UPI` account with provider `paytm`), keep "Cash drawer". A **Paytm machine needs no hand-made account**: adding it on the machines screen (`/admin/payment-terminals`, optional `settlesToAccountId` = the bank) creates its `CARD_TERMINAL` account (provider `paytm`, identifier = terminal id, name = machine name) and keeps the two in step (switching either off switches the other off). A bank machine without an API is a `CARD_TERMINAL` account with provider `manual`.
+2. **Defaults** (Config screen, `PUT /admin/config`): `pos.defaultAccount.CASH|UPI|CARD` (account id used when the till names none, and the pre-selected channel), `payment.gatewayAccountId` (account for online payments; blank = first active GATEWAY account of the payment's provider), `payment.onlineProvider` (gateway the customer app uses, blank = server default), `payment.settlementDays` (cycle, default 2), `pos.terminalProvider` (the default terminal adapter, default `manual`: used only for a channel whose provider has no adapter or when the till names no channel).
 3. **Receipts** screen: summary cards from `/admin/receipts/summary`, drill into `/admin/receipts`.
 4. **Settlements** screen: list, open one to see its items, "Import statement" (CSV), "Sync now".
 5. **Exceptions** badge: open items from `/admin/settlements/exceptions?status=OPEN`; resolve each with a note.
@@ -24,10 +25,33 @@ Audience: Flutter and web teams. Read `00-overview.md` first (auth, error envelo
 ## 3. Till flow: choosing the vendor
 
 1. On entering the payment step call `GET /api/v1/pos/payment-channels` (cache per shift).
-2. For each mode the cashier taps (CASH / UPI / CARD) show that mode's channels; pre-select the one with `default: true`. Several channels per mode means several vendors (for example a Paytm machine and a bank machine, a PhonePe QR and a Paytm QR).
-3. Send the line with the chosen channel: `moneyAccountId` = channel's `moneyAccountId`, `terminalId` = channel's `terminalId`, `reference` = UPI ref / approval code / RRN the customer or machine shows.
-4. Card machine without an API (`manual` terminal): `POST /pos/terminal/payments` (amount) shows instructions; cashier charges on the machine; `POST .../{id}/confirm` with approval code and RRN; put them in the line's `reference`. A terminal adapter that reports results itself (future Paytm) returns `mode: "QR"` with `qrPayload` / `qrImageUrl` or `PUSH`; poll `GET .../{id}` until `state` is not `PENDING`.
+2. For each mode the cashier taps (CASH / UPI / CARD) show that mode's channels; pre-select the one with `default: true` (the saved default, or the only channel of the mode). Several channels per mode means several vendors (for example a Paytm machine and a bank machine, a PhonePe QR and a Paytm QR).
+3. **Cash, or a UPI/card line with no machine** (customer shows a UPI reference, an old card machine): send the line with the chosen channel: `moneyAccountId` = channel's `moneyAccountId`, `terminalId` = channel's `terminalId`, `reference` = the UPI ref / approval code / RRN.
+4. **A card or UPI machine** (the channel's `provider` has a terminal adapter, today `paytm` and `manual`):
+   1. `POST /api/v1/pos/terminal/payments` `{ amountPaise, reference, moneyAccountId = channel.moneyAccountId }` -> 201 session. `reference` is the till's key for the payment (use the cart or bill reference, new for every attempt); a repeat with the same reference and amount returns the same session.
+   2. Poll `GET /api/v1/pos/terminal/payments/{id}` every `pollAfterSeconds` while `open` is true (a `manual` session never changes by itself; the cashier presses Confirm).
+   3. `manual` machine: charge on the machine, then `POST .../{id}/confirm` `{ approvalCode, rrn? }`. `paytm` machine: nothing to type, the state turns `APPROVED` by itself.
+   4. When `state` is `APPROVED`, ring the sale with a payment line `{ mode, amountPaise, terminalPaymentId: <session id> }` (mode CARD, or UPI when `payMethod` is `UPI`). **That one id is all the sale needs**: the server takes the machine's money account, terminal id, the RRN as `reference` and the masked payer detail from the session. You may omit `moneyAccountId`/`terminalId`/`reference`; naming another account than the machine's is a 400.
 5. An old till that sends no account still works: CASH goes to the drawer, UPI/CARD to the configured default or stay Unassigned.
+
+### Session JSON (one shape for every vendor)
+
+```json
+{ "id": "uuid", "reference": "INV-1042", "provider": "paytm", "amountPaise": 12500,
+  "state": "PENDING", "providerStatus": "PENDING", "mode": "PUSH", "open": true,
+  "instructions": "Waiting for the customer to pay on the machine", "message": "Waiting for the customer to pay on the machine",
+  "qrPayload": null, "qrImageUrl": null, "approvalCode": null, "rrn": null,
+  "moneyAccountId": "uuid", "terminalId": "AB12CD34", "terminalName": "Counter 1",
+  "payMethod": null, "cardScheme": null, "maskedCard": null, "issuingBank": null, "upiVpa": null,
+  "canCancel": true, "cancelOnMachine": false, "canVoid": false, "pollAfterSeconds": 10,
+  "posSaleId": null, "createdAt": "...", "finishedAt": null }
+```
+
+- `state` is the generic word: `PENDING`, `APPROVED`, `DECLINED`, `CANCELLED`, `EXPIRED`. `providerStatus` is the machine vendor's own word (Paytm: REQUESTED, PENDING, UNKNOWN, SUCCESS, FAILED, CANCELLED, EXPIRED, VOIDED; for `manual` it equals `state`). Mapping for Paytm: REQUESTED/PENDING/UNKNOWN -> PENDING, SUCCESS -> APPROVED, FAILED -> DECLINED, CANCELLED and VOIDED -> CANCELLED, EXPIRED -> EXPIRED.
+- A Paytm `EXPIRED` session is still watched for 15 minutes: a late payment turns it `APPROVED`. Keep the id reachable ("check again") before taking another payment on that machine.
+- `cancelOnMachine` is true after the cashier pressed Cancel and the machine has not yet reported it: show "Press Cancel on the machine".
+- Fields after `moneyAccountId` are filled only for machines that report them (Paytm); `manual` sessions have them null.
+- Errors of the terminal calls: `TERMINAL_NOT_CONFIGURED` (503, adapter not set up), `REFERENCE_REUSED` (409), `TERMINAL_BUSY` (409, Paytm machine has an open payment; `details.openPaymentId`), `TERMINAL_REJECTED` (422), `CANCEL_ON_MACHINE` / `ALREADY_PAID` (409, Paytm cancel), `NOT_VOIDABLE` (409), `TERMINAL_CONFIRMS_ITSELF` (409), `TERMINAL_PAYMENT_CLOSED` (409). On the sale: `TERMINAL_PAYMENT_NOT_PAID` (422), `TERMINAL_PAYMENT_USED` (409), `TERMINAL_PAYMENT_AMOUNT` (422), `TERMINAL_PAYMENT_MODE` (422, Paytm payment taken by UPI on a CARD line or the reverse).
 
 ## 4. Endpoints
 
@@ -58,10 +82,12 @@ Validation errors: 400 `VALIDATION_FAILED` with `details.fields.{name|kind|provi
 ```
 Payment line (sale, offline sale, and refund lines) is additive: `{ mode, amountPaise, reference?, moneyAccountId?, terminalId? }`. Errors: 400 `fields["payments[i].moneyAccountId"]` when the account does not exist, is switched off (an offline bill keeps an account switched off after the sale), does not fit the mode (CASH needs a CASH account; UPI: UPI/GATEWAY/BANK; CARD: CARD_TERMINAL/GATEWAY/BANK) or is sent on a CREDIT line. Returns: a refund line follows the account of the bill's line of the same mode unless the refund line names one.
 
-Terminal (`/pos/terminal/payments`), session JSON `{ id, reference, provider, amountPaise, state (PENDING|APPROVED|DECLINED|CANCELLED|EXPIRED), mode (MANUAL|QR|PUSH), instructions, qrPayload, qrImageUrl, approvalCode, rrn, moneyAccountId, createdAt }`:
+Terminal (`/pos/terminal/payments`), session JSON as in section 3:
 
-- `POST /` body `{ amountPaise (1..100000000), reference? (60), moneyAccountId? }`, optional `Idempotency-Key`; 201. Same reference and amount returns the same session; same reference with another amount 409 `REFERENCE_REUSED`. 503 `TERMINAL_NOT_CONFIGURED` when the selected adapter is missing or not set up.
-- `GET /{id}` poll. `POST /{id}/confirm` `{ approvalCode (1-40), rrn? }` (manual terminals only; 409 `TERMINAL_CONFIRMS_ITSELF` otherwise; 409 `TERMINAL_PAYMENT_CLOSED` if cancelled). `POST /{id}/cancel` (a finished session is returned unchanged).
+- `POST /` body `{ amountPaise (1..100000000), reference? (60; a Paytm machine takes at most 50), moneyAccountId? }`; with an `Idempotency-Key` and no reference the reference is made from the key. 201. The adapter is the one of the chosen channel's provider. Same reference and amount returns the same session; the same reference with another amount or on another machine is 409 `REFERENCE_REUSED`. 503 `TERMINAL_NOT_CONFIGURED` when the adapter is missing or not set up. This call is not wrapped in a database transaction because a Paytm machine is called over the network.
+- `GET /{id}` poll (for a Paytm session it also checks the machine when a check is due). `POST /{id}/confirm` `{ approvalCode (1-40), rrn? }` (`manual` machines only; 409 `TERMINAL_CONFIRMS_ITSELF` otherwise; 409 `TERMINAL_PAYMENT_CLOSED` if cancelled). `POST /{id}/cancel` (a finished session is returned unchanged; a Paytm session answers 409 `CANCEL_ON_MACHINE` or `ALREADY_PAID`, see 73). `POST /{id}/void` (Paytm same-day void; 409 `NOT_VOIDABLE` for a machine that cannot).
+- The session id is what the sale line carries as `terminalPaymentId`. A Paytm session id is the Paytm payment id (no second row); a `manual` session id is its own row, marked used by the bill.
+- The Paytm-specific calls (`GET /pos/terminals`, `/pos/terminal-payments...`) remain as the provider-level API and read and write the very same rows.
 
 ### 4.3 Receipts: all vendors in one view (admin)
 
@@ -75,16 +101,20 @@ Terminal (`/pos/terminal/payments`), session JSON `{ id, reference, provider, am
 
 `GET /admin/bank-reports/receipts?from&to&page&size`: gross, refunded and net per account and method (`moneyAccountId` null = Unassigned). `GET /admin/bank-reports/fees?from&to`: per month and account `{ month "YYYY-MM", payments, grossPaise, feePaise, taxPaise (GST on fee: input credit), missingFee }`.
 
+`GET /admin/payments/by-sale/{saleId}` (counter bill): array of `{ posPaymentId, mode, provider, amountPaise, reference (RRN), terminalId, moneyAccountId, accountName, payMethod, cardScheme, cardLast4, issuingBank, upiVpa (masked), authCode, settlementRef, utr, feePaise, taxPaise, netPaise, settledAt }`. Card machine lines carry the masked payer detail in `pos_payment.detail` (JSON); a full card number is never stored or returned. Receipts rows of counter lines show it as `payer` (`VISA ****1111`, masked UPI id, or bank) and, once a statement matched them, `utr`, fee, tax and net.
+
 `GET /admin/payments/by-order/{orderId}`: array of `{ paymentId, provider, status, amountPaise, instrument, upiVpa, cardNetwork, cardLast4, bank, feePaise, taxPaise, netPaise, settlementRef, utr, settledAt, moneyAccountId, accountName, providerRef, capturedAt }`. Show only to admin; fields are null until the provider reported them.
 
 ### 4.4 Settlements (`/api/v1/admin/settlements`)
 
 - `GET /?from&to&accountId&provider&source(GATEWAY_API|CSV)&page&size`: Page of `{ id, provider, providerSettlementId, utr, grossPaise, feePaise, taxPaise, netPaise, status, settledAt, moneyAccountId, accountName, source, items, unmatchedItems }`.
 - `GET /{id}`, `GET /{id}/items?unmatchedOnly&page&size` (default size 50): item `{ id, kind (PAYMENT|REFUND|ADJUSTMENT|FEE), providerEntityId, grossPaise, feePaise, taxPaise, netPaise, method, settledAt, utr, reference, matched, paymentId, orderId, orderNo, refundId, posPaymentId, invoiceNo }`.
-- `GET /unsettled?overdueOnly&page&size`: Page of `{ row: { source ONLINE|COUNTER, id, reference (order no or invoice no), moneyAccountId, accountName, amountPaise, receivedAt }, expectedBy, overdue }`. Expected = received + `payment.settlementDays`; overdue after one more day. Counter lines appear only for CARD lines on CARD_TERMINAL/GATEWAY accounts.
+- `GET /unsettled?overdueOnly&page&size`: Page of `{ row: { source ONLINE|COUNTER, id, reference (order no or invoice no), moneyAccountId, accountName, amountPaise, receivedAt }, expectedBy, overdue }`. Expected = received + `payment.settlementDays`; overdue after one more day. Counter lines appear for CARD lines on CARD_TERMINAL/GATEWAY accounts and for UPI lines taken on a card machine.
 - `GET /exceptions?status(OPEN|RESOLVED)&kind(OVERDUE_UNSETTLED|UNMATCHED_ITEM|AMOUNT_MISMATCH)&page&size`: item `{ id, kind, settlementId, settlementItemId, paymentId, reference, expectedPaise, actualPaise, status, note, createdAt, resolvedAt }`. `POST /exceptions/{id}/resolve` `{ note (1-300) }` returns the item; resolving again changes nothing. An overdue exception closes itself (note "Settled") when the payment later settles.
 - `POST /sync` `{ provider, days? (1..60, default 7) }` returns `{ provider, settlementsSeen, settlementsStored, itemsStored, skipped }` (`skipped: true` = another server is already syncing). 404 unknown provider, 503 `SETTLEMENT_NOT_CONFIGURED`. The nightly job (04:30) and Razorpay's `settlement.processed` webhook do the same automatically.
-- `POST /import` multipart: `file` (CSV, 2 MB, 5000 rows), `moneyAccountId` (required), optional `provider` (default `manual`), `utr`, and column mapping `dateColumn, referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn` (defaults: date, reference, amount, fee, tax, description; names case-insensitive), `dateFormat` (e.g. `dd/MM/yyyy`; blank = ISO), `amountUnit` (RUPEES default, or PAISE), `delimiter` (comma default, `;` or `tab`). A negative amount is an adjustment (matched automatically); a positive row is matched by reference and amount to an online payment's provider payment id or a counter UPI/CARD line's reference. Result `{ settlementId, alreadyImported, rows, matched, unmatched, netPaise }`. The same file for the same account is a no-op (`alreadyImported: true`). 400 `CSV_INVALID` with `details.problems` (first 20 `"row N: …"`) or `VALIDATION_FAILED` on a mapping field.
+- `POST /import` multipart: `file` (CSV, 2 MB, 5000 rows), `moneyAccountId` (required), optional `format` (`PAYTM` = the Paytm dashboard Settlement Report, read with its own columns and picked automatically from its header when `format` is blank; `GENERIC` forces the column mapping), optional `provider` (default `manual`; forced to `paytm` for the Paytm format), `utr`, and, for the generic format, column mapping `dateColumn, referenceColumn, amountColumn, feeColumn, taxColumn, descriptionColumn` (defaults: date, reference, amount, fee, tax, description; names case-insensitive), `dateFormat` (e.g. `dd/MM/yyyy`; blank = ISO), `amountUnit` (RUPEES default, or PAISE), `delimiter` (comma default, `;` or `tab`). A negative amount is an adjustment (matched automatically); a positive row is matched by reference and amount to an online payment's provider payment id or a counter UPI/CARD line's reference. Result `{ settlementId, alreadyImported, rows, matched, unmatched, netPaise }`. The same file for the same account is a no-op (`alreadyImported: true`). 400 `CSV_INVALID` with `details.problems` (first 20 `"row N: …"`) or `VALIDATION_FAILED` on a mapping field or an unknown `format`.
+
+**Paytm Settlement Report format.** One settlement per file (provider `paytm`, `utr` = the UTR all lines share, else null). Each Paytm line keeps its own `utr`, settled date, commission as `feePaise`, GST as `taxPaise` and the settled amount as `netPaise`; `detail` (JSON on the item) holds transaction id, order id, type, status, transaction date, payment mode and, from the API, `posId` and `extSerialNo`. A sale (ACQUIRING) becomes a PAYMENT; a refund, chargeback or anything else becomes an ADJUSTMENT that takes money away; FAILED, PENDING and CANCELLED lines are left out. Matching of a sale, in this order: online payment by provider id; counter line whose `reference` equals the Paytm order id or RRN; Paytm machine payment whose RRN or order id (= payment id without dashes) is the line's; then, for a UPI line, the counter UPI line on a `UPI` account of provider `paytm` with the same amount on the transaction day when it is the only candidate (this is how UPI received on the QR sticker, which has no payment of ours behind it, is matched). Whatever does not match goes to the exception queue: `UNMATCHED_ITEM` (nothing found, or the sticker candidate is not unique), `AMOUNT_MISMATCH` (payment found, other amount; `expectedPaise` is our amount).
 
 ## 5. Dart-friendly model sketches
 
@@ -98,7 +128,8 @@ class ReceiptLine { String source, id, provider, method, status; String? moneyAc
 class Settlement { String id, provider, providerSettlementId, status, source; String? utr, moneyAccountId, accountName; DateTime? settledAt;
   int grossPaise, feePaise, taxPaise, netPaise, items, unmatchedItems; }
 class SettlementException { String id, kind, status; String? settlementId, paymentId, reference, note; int? expectedPaise, actualPaise; }
-class TerminalSession { String id, reference, provider, state, mode; int amountPaise; String? instructions, qrPayload, qrImageUrl, approvalCode, rrn; }
+class TerminalSession { String id, reference, provider, state, providerStatus, mode; int amountPaise, pollAfterSeconds; bool open, canCancel, cancelOnMachine, canVoid;
+  String? instructions, message, qrPayload, qrImageUrl, approvalCode, rrn, moneyAccountId, terminalId, terminalName, payMethod, cardScheme, maskedCard, issuingBank, upiVpa, posSaleId; }
 ```
 
 ## 6. Behaviour the frontend must know
@@ -110,25 +141,27 @@ class TerminalSession { String id, reference, provider, state, mode; int amountP
 - Payment lines from an old app version (no account) keep working.
 - The customer app picks the online gateway from `payment.onlineProvider`; there is no per-order override yet.
 
-## 7. Adding a vendor later (Paytm, Cashfree...)
+## 7. Adding a vendor later (Cashfree, PhonePe...)
 
 1. Payment gateway: implement `PaymentGateway` (create, session, parseWebhook, refund, fetchStatus) as a `@Component`; it appears in `PaymentGatewayRegistry` by `provider()`; select it with `payment.onlineProvider`.
-2. Settlements: implement `SettlementProvider` (`provider()` same code, `configured()`, `listSettlements`, `settlementDetail`, `fetchPaymentDetail`) as a `@Component`. The nightly job and `/admin/settlements/sync` pick it up automatically; each provider is synced on its own and one failing provider does not stop the others. Map the vendor's per-transaction UTR, commission, GST, payment mode and RRN into `Item`; put anything else vendor-specific in the nullable `detail` jsonb columns (`payment.detail`, `settlement_item.detail`).
-3. Terminal: implement `CardTerminal` (`requestPayment`, `status`, `cancel`; return `Mode.QR` with `qrPayload` or `qrImageUrl` for a QR, `Mode.PUSH` for a machine that prompts itself, `manualConfirmation()` false when it reports results) and set `pos.terminalProvider` to its code. No API detail of Paytm is assumed here.
+2. Settlements: implement `SettlementProvider` (`provider()` same code, `configured()`, `listSettlements`, `settlementDetail`, `fetchPaymentDetail`) as a `@Component`. The nightly job and `/admin/settlements/sync` pick it up automatically; each pullable provider is synced on its own and one failing provider does not stop the others (tested with two healthy providers, one throwing). Map the vendor's per-transaction UTR, commission, GST, payment mode and RRN into `Item` (`reference` and `altReference` are what a counter line is matched on); put anything else vendor-specific in `Item.detail` (stored as JSON). A vendor's own statement file: implement `StatementParser` (`format()`, `provider()`, `recognises(header)`, `parse`) and the CSV import offers it as `format=...` and picks it by header.
+3. Terminal: implement `CardTerminal` (`requestPayment`, `status`, `cancel`; `Mode.QR` with `qrPayload` or `qrImageUrl`, `Mode.PUSH` for a machine that prompts itself, `manualConfirmation()` false when it reports results). An adapter that keeps its own durable sessions (like Paytm) also overrides `requestPayment(Request)`, `find`, `cancel(actor, id)`, `voidPayment` and `attach`; the simple ones need nothing more. It is chosen by the provider code of the channel's money account.
 4. Create the matching money accounts (provider code, identifier = terminal id) and they show up as till channels.
 
 ## 8. Not verified without a live account
 
 `RazorpaySettlementProvider` was written from Razorpay's public API reference and tested only against canned HTTP responses. To check with the new Razorpay account: the list parameters (`from`/`to`/`count`/`skip`), that `fees` includes GST and `tax` is the GST part, the recon `combined` report fields (`credit`, `debit`, `fee`, `tax`, `settlement_id`, `settlement_utr`, `settled_at`) and that its `day` filter is the settlement date, the `settlement.processed` webhook payload shape (`payload.settlement.entity.id`), and that the account has the settlement/recon APIs enabled. The webhook must also subscribe to `settlement.processed`.
 
+Paytm (machine calls, the settlement API and the Settlement Report columns) has run only against an in-JVM fake and canned files; see "Before go-live" in `73-paytm-terminal.md`.
+
 ## 9. Implementation checklist
 
 - [ ] Accounts CRUD screen and the defaults in Config.
 - [ ] Till: load channels, per-mode chooser with default, send `moneyAccountId`/`terminalId`/`reference`.
-- [ ] Manual terminal confirm dialog (approval code, RRN); QR/PUSH polling for future adapters.
+- [ ] Card/UPI machine: start with the chosen channel's `moneyAccountId`, poll by `pollAfterSeconds`, manual confirm dialog (approval code, RRN) for `manual`, all states incl. `cancelOnMachine` and a late `EXPIRED` -> `APPROVED`; put the session id on the line as `terminalPaymentId`.
 - [ ] Receipts list + summary with filters; fees report; receipts-by-account report.
-- [ ] Settlements list/detail, CSV import with column mapping, sync button.
+- [ ] Settlements list/detail, CSV import (generic column mapping, or the Paytm Settlement Report format), sync button.
 - [ ] Exceptions queue with resolve note; unsettled/overdue tab.
 - [ ] Account book with running balance and manual entries.
-- [ ] Payer detail block on the admin order screen.
-- [ ] Handle errors: `ACCOUNT_IN_USE`, `DUPLICATE_ACCOUNT_NAME`, `LAST_CASH_ACCOUNT`, `CSV_INVALID`, `TERMINAL_NOT_CONFIGURED`, `SETTLEMENT_NOT_CONFIGURED`, `REFERENCE_REUSED`.
+- [ ] Payer detail block on the admin order screen and on the admin bill screen (`/admin/payments/by-sale/{saleId}`).
+- [ ] Handle errors: `ACCOUNT_IN_USE`, `DUPLICATE_ACCOUNT_NAME`, `LAST_CASH_ACCOUNT`, `CSV_INVALID`, `TERMINAL_NOT_CONFIGURED`, `SETTLEMENT_NOT_CONFIGURED`, `REFERENCE_REUSED`, `TERMINAL_BUSY`.

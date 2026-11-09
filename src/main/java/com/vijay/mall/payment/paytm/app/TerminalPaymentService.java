@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -83,6 +84,7 @@ public class TerminalPaymentService {
    * @param upiVpa payer UPI address, masked
    * @param posSaleId the bill that used it, or null
    * @param canCancel true while a cancel can be tried
+   * @param cancelOnMachine true when a cashier asked to cancel and Paytm has not yet reported the machine-side cancel
    * @param canVoid true when a same-day void is possible
    * @param pollAfterSeconds how long the till should wait before asking again
    * @param createdAt start
@@ -91,7 +93,7 @@ public class TerminalPaymentService {
   public record TerminalPaymentView(UUID id, UUID terminalRowId, String terminalId, String terminalName, long amountPaise, String reference,
                                     String status, boolean open, String message, String resultCode, String payMethod, String cardScheme,
                                     String maskedCard, String rrn, String authCode, String issuingBank, String upiVpa, UUID posSaleId,
-                                    boolean canCancel, boolean canVoid, int pollAfterSeconds, Instant createdAt, Instant finishedAt) {}
+                                    boolean canCancel, boolean cancelOnMachine, boolean canVoid, int pollAfterSeconds, Instant createdAt, Instant finishedAt) {}
 
   /**
    * A paid card-machine payment ready to be attached to a bill.
@@ -103,10 +105,13 @@ public class TerminalPaymentService {
    * @param rrn retrieval reference number
    * @param authCode authorisation code
    * @param terminalId vendor terminal id
-   * @param reference short text for the bill's payment line
+   * @param reference short text for the bill's payment line: the RRN, else {@code PAYTM} and the transaction id
+   * @param issuingBank issuing bank
+   * @param upiVpa payer UPI address, masked
+   * @param terminalRowId the machine row, whose money account the line is tagged with
    */
   public record Confirmed(UUID id, long amountPaise, String payMethod, String cardScheme, String maskedCard, String rrn, String authCode,
-                          String terminalId, String reference) {}
+                          String terminalId, String reference, String issuingBank, String upiVpa, UUID terminalRowId) {}
 
   private final TerminalPaymentJpa payments;
   private final PaymentTerminalJpa terminals;
@@ -232,6 +237,15 @@ public class TerminalPaymentService {
     }
     return v;
   }
+
+  /** The payment started with this idempotency key, if any (the generic till flow keys its payments by the till's reference). */
+  public Optional<TerminalPaymentView> byIdemKey(String idemKey) { return payments.findByIdemKey(idemKey).map(this::view); }
+
+  /** True when this id is one of our card machine payments. */
+  public boolean exists(UUID id) { return payments.existsById(id); }
+
+  /** The payment as {@link #get} reads it, or empty when the id is not a card machine payment (so another kind of session can answer). */
+  public Optional<TerminalPaymentView> find(UUID id) { return exists(id) ? Optional.of(get(id)) : Optional.empty(); }
 
   // ---------- reading and polling ----------
   /** The current state. An open payment that is due is checked with Paytm first, so a polling till works without the background job. */
@@ -495,8 +509,9 @@ public class TerminalPaymentService {
       throw ApiException.conflict("TERMINAL_PAYMENT_USED", "This card machine payment was already used for another bill",
           Map.of("fields", Map.of(field, "payment already used")));
     }
-    String ref = p.rrn != null ? "PAYTM RRN " + p.rrn + (p.authCode != null ? " AUTH " + p.authCode : "") : "PAYTM " + p.merchantTransactionId;
-    return new Confirmed(p.id, p.amountPaise, p.payMethod, p.cardScheme, p.maskedCard, p.rrn, p.authCode, p.terminalId, ref);
+    String ref = p.rrn != null ? p.rrn : "PAYTM " + p.merchantTransactionId;
+    return new Confirmed(p.id, p.amountPaise, p.payMethod, p.cardScheme, p.maskedCard, p.rrn, p.authCode, p.terminalId, ref, p.issuingBank,
+        maskVpa(p.upiVpa), p.paymentTerminalId);
   }
 
   // ---------- view ----------
@@ -508,7 +523,7 @@ public class TerminalPaymentService {
     String name = terminals.findById(p.paymentTerminalId).map(t -> t.name).orElse(p.terminalId);
     return new TerminalPaymentView(p.id, p.paymentTerminalId, p.terminalId, name, p.amountPaise, p.reference, p.status, open, p.message,
         p.resultCode, p.payMethod, p.cardScheme, p.maskedCard, p.rrn, p.authCode, p.issuingBank, maskVpa(p.upiVpa), p.posSaleId, open,
-        canVoid, cfg.pollSeconds(), p.createdAt, p.finishedAt);
+        open && p.cancelRequestedAt != null, canVoid, cfg.pollSeconds(), p.createdAt, p.finishedAt);
   }
 
   /** Keeps the first two characters of a UPI address and the handle: {@code ab***@okbank}. */

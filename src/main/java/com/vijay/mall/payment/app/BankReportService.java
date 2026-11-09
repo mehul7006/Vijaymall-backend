@@ -8,6 +8,7 @@ import com.vijay.mall.payment.infra.BankReportRepository;
 import com.vijay.mall.payment.infra.BankReportRepository.BookRow;
 import com.vijay.mall.payment.infra.BankReportRepository.FeeRow;
 import com.vijay.mall.payment.infra.BankReportRepository.PayerRow;
+import com.vijay.mall.payment.infra.BankReportRepository.SalePayerRow;
 import com.vijay.mall.payment.infra.BankReportRepository.ReceiptRow;
 import com.vijay.mall.payment.infra.BankReportRepository.SettlementItemRow;
 import com.vijay.mall.payment.infra.BankReportRepository.SettlementRow;
@@ -126,6 +127,9 @@ public class BankReportService {
     long opening = repo.openingBalance(account, r.from());
     return new Book(account, acc.name(), opening, repo.book(account, r.from(), r.to(), opening, Math.max(0, page), Page.clampSize(size)));
   }
+
+  /** How the payment lines of a counter bill were made (admin only; masked). */
+  public List<SalePayerRow> salePayers(UUID saleId) { return repo.payersOfSale(saleId); }
 
   /** How the order's online payments were made (admin only; never a full card number). */
   public List<PayerRow> payers(UUID orderId) { return repo.payersOfOrder(orderId); }

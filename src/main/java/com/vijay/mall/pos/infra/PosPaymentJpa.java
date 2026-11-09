@@ -15,4 +15,9 @@ import org.springframework.data.repository.query.Param;
 /** Spring Data access to {@code pos_payment}, the payment parts of counter bills. */
 interface PosPaymentJpa extends JpaRepository<PosPaymentEntity, UUID> {
   List<PosPaymentEntity> findBySaleIdIn(Collection<UUID> saleIds);
+
+  /** Stores the payer detail of a line as JSON. */
+  @Modifying
+  @Query(value = "update pos_payment set detail = cast(:detail as jsonb) where id = :id", nativeQuery = true)
+  int setDetail(@Param("id") UUID id, @Param("detail") String detail);
 }

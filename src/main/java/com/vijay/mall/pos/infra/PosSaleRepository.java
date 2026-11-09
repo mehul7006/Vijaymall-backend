@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Bills, their lines and payments, and the credit notes raised against them. */
@@ -28,6 +29,7 @@ public class PosSaleRepository {
   private final PosReturnJpa returns;
   private final PosReturnItemJpa returnItems;
   private final PosRefundJpa refunds;
+  private static final JsonMapper DETAIL_JSON = JsonMapper.builder().build();
 
   PosSaleRepository(PosSaleJpa sales, PosSaleItemJpa items, PosPaymentJpa payments,
                     PosReturnJpa returns, PosReturnItemJpa returnItems, PosRefundJpa refunds) {
@@ -106,7 +108,12 @@ public class PosSaleRepository {
       r.terminalPaymentId = p.terminalPaymentId();
       r.moneyAccountId = p.moneyAccountId();
       r.terminalId = p.terminalId();
-      payments.save(r);
+      if (p.detail() == null || p.detail().isEmpty()) {
+        payments.save(r);
+      } else {
+        payments.saveAndFlush(r);
+        payments.setDetail(r.id, DETAIL_JSON.writeValueAsString(p.detail()));
+      }
     });
     items.flush();
   }

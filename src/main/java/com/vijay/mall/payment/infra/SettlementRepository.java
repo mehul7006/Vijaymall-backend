@@ -3,10 +3,12 @@ package com.vijay.mall.payment.infra;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.persistence.BoundedCount;
 import com.vijay.mall.payment.domain.SettlementProvider;
+import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,7 +26,7 @@ public class SettlementRepository {
   /** One line of a settlement as stored. */
   public record Item(UUID id, UUID settlementId, String kind, String providerEntityId, UUID paymentId, UUID refundId, UUID posPaymentId,
                      long grossPaise, long feePaise, long taxPaise, long netPaise, String method, Instant settledAt, String utr,
-                     String reference, boolean matched) {}
+                     String reference, boolean matched, String detail) {}
 
   /** A payment, refund or counter line a settlement item can be matched to. */
   public record Match(UUID id, long amountPaise) {}
@@ -98,23 +100,23 @@ public class SettlementRepository {
   @Transactional
   public Optional<UUID> insertItem(Item i) {
     return jdbc.sql("insert into settlement_item (id, settlement_id, kind, provider_entity_id, payment_id, refund_id, pos_payment_id, gross_paise, "
-        + "fee_paise, tax_paise, net_paise, method, settled_at, utr, reference, matched) values (:id, :s, :k, :e, :pay, :ref, :pos, :g, :f, :t, :n, "
-        + ":m, :at, :utr, :rf, :matched) on conflict (settlement_id, kind, provider_entity_id) do nothing returning id")
+        + "fee_paise, tax_paise, net_paise, method, settled_at, utr, reference, matched, detail) values (:id, :s, :k, :e, :pay, :ref, :pos, :g, :f, :t, :n, "
+        + ":m, :at, :utr, :rf, :matched, cast(:detail as jsonb)) on conflict (settlement_id, kind, provider_entity_id) do nothing returning id")
         .param("id", i.id()).param("s", i.settlementId()).param("k", i.kind()).param("e", i.providerEntityId()).param("pay", i.paymentId())
         .param("ref", i.refundId()).param("pos", i.posPaymentId()).param("g", i.grossPaise()).param("f", i.feePaise()).param("t", i.taxPaise())
         .param("n", i.netPaise()).param("m", i.method()).param("at", ts(i.settledAt())).param("utr", i.utr()).param("rf", i.reference())
-        .param("matched", i.matched()).query(UUID.class).optional();
+        .param("matched", i.matched()).param("detail", i.detail()).query(UUID.class).optional();
   }
 
   /** The items of a settlement, in the order they were stored. */
   public List<Item> items(UUID settlementId) {
     return jdbc.sql("select id, settlement_id, kind, provider_entity_id, payment_id, refund_id, pos_payment_id, gross_paise, fee_paise, tax_paise, "
-        + "net_paise, method, settled_at, utr, reference, matched from settlement_item where settlement_id = :id order by kind, provider_entity_id limit 5001")
+        + "net_paise, method, settled_at, utr, reference, matched, detail::text detail from settlement_item where settlement_id = :id order by kind, provider_entity_id limit 5001")
         .param("id", settlementId).query((rs, n) -> new Item(rs.getObject("id", UUID.class), rs.getObject("settlement_id", UUID.class),
             rs.getString("kind"), rs.getString("provider_entity_id"), rs.getObject("payment_id", UUID.class), rs.getObject("refund_id", UUID.class),
             rs.getObject("pos_payment_id", UUID.class), rs.getLong("gross_paise"), rs.getLong("fee_paise"), rs.getLong("tax_paise"),
             rs.getLong("net_paise"), rs.getString("method"), instant(rs, "settled_at"), rs.getString("utr"), rs.getString("reference"),
-            rs.getBoolean("matched"))).list();
+            rs.getBoolean("matched"), rs.getString("detail"))).list();
   }
 
   // ---------- matching ----------
@@ -135,6 +137,30 @@ public class SettlementRepository {
     return jdbc.sql("select p.id, p.amount_paise from pos_payment p where p.reference = :r and p.mode in ('UPI','CARD') "
         + "and not exists (select 1 from settlement_item i where i.pos_payment_id = p.id) order by (p.amount_paise = :a) desc, p.id limit 1")
         .param("r", ref).param("a", amountPaise).query((rs, i) -> new Match(rs.getObject("id", UUID.class), rs.getLong("amount_paise"))).optional();
+  }
+
+  /**
+   * A counter line of a Paytm machine payment whose RRN or order id (the payment id without dashes) is one of {@code refs} and that no settlement
+   * item has claimed yet; the line with the same amount is preferred.
+   */
+  public Optional<Match> freePosPaymentByMachineRef(List<String> refs, long amountPaise) {
+    return jdbc.sql("select p.id, p.amount_paise from pos_payment p join terminal_payment t on t.id = p.terminal_payment_id "
+        + "where (t.rrn in (:r) or t.merchant_transaction_id in (:r)) and not exists (select 1 from settlement_item i where i.pos_payment_id = p.id) "
+        + "order by (p.amount_paise = :a) desc, p.id limit 1").param("r", refs).param("a", amountPaise)
+        .query((rs, i) -> new Match(rs.getObject("id", UUID.class), rs.getLong("amount_paise"))).optional();
+  }
+
+  /**
+   * Counter UPI lines of the amount, taken on {@code day} (India time) on a UPI account of this vendor, with no machine payment and no settlement item
+   * yet: a customer who paid the vendor's QR sticker has no payment of ours, so amount, day and vendor are all there is to match on. At most two are
+   * returned, which is enough to tell whether the answer is unique.
+   */
+  public List<Match> freeStickerUpiPayments(String provider, long amountPaise, LocalDate day) {
+    return jdbc.sql("select p.id, p.amount_paise from pos_payment p join pos_sale s on s.id = p.sale_id join money_account a on a.id = p.money_account_id "
+        + "where p.mode = 'UPI' and p.terminal_payment_id is null and p.amount_paise = :a and a.kind = 'UPI' and a.provider = :p "
+        + "and (s.created_at at time zone 'Asia/Kolkata')::date = :d and not exists (select 1 from settlement_item i where i.pos_payment_id = p.id) "
+        + "order by p.id limit 2").param("a", amountPaise).param("p", provider).param("d", Date.valueOf(day))
+        .query((rs, i) -> new Match(rs.getObject("id", UUID.class), rs.getLong("amount_paise"))).list();
   }
 
   /** Records on the payment where its money went and what it cost. */
