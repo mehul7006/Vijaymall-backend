@@ -143,6 +143,9 @@ app:
     cashier-discount-percent: ${POS_CASHIER_DISCOUNT_PERCENT:0}
     # true = billing needs an open cashier shift (drawer counted in).
     require-open-shift: ${POS_REQUIRE_OPEN_SHIFT:false}
+  notifications:
+    # Most admin broadcasts one admin may create per hour (429 RATE_LIMITED after that).
+    broadcast-per-hour: ${BROADCAST_PER_HOUR:20}
   rate-limit:
     # Header carrying the real client IP when behind a trusted proxy, e.g. CF-Connecting-IP. Empty = use the socket address.
     client-ip-header: ${CLIENT_IP_HEADER:}

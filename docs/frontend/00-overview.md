@@ -9,6 +9,7 @@ Audience: the Flutter app team, the web app team, and the LLM coding assistants 
 | `20-orders-payments-admin-config.md` | Cart quote, orders, returns, online payment and refunds, public shop details, shop profile, admin configuration screen, caches, logs, live events |
 | `30-pos-reports-purchasing.md` | Shop-counter POS, shifts, credit (udhar), offline sync, purchasing, stock takes, reports, audit log |
 | `40-flash-sales.md` | Flash sale module (added after it is merged) |
+| `60-admin-push-notifications.md` | Admin push notifications: broadcasts to users, role groups or condition-based customer segments, segment builder, previews, inbox kind `ANNOUNCEMENT` |
 
 The backend is one REST API over HTTPS. Base path: `/api/v1`. All bodies are JSON (`Content-Type: application/json`) except image uploads (`multipart/form-data`) and the live-event stream (`text/event-stream`).
 
@@ -21,7 +22,7 @@ The backend is one REST API over HTTPS. Base path: `/api/v1`. All bodies are JSO
 | `CASHIER` | Counter staff | POS screens (`/pos/**`) and order handling (`/admin/orders/**`) |
 | `ADMIN` | Shop owner | Everything, including all other `/admin/**` screens |
 
-Rules the UI should mirror: `/api/v1/admin/orders*` is open to ADMIN and CASHIER; every other `/api/v1/admin/**` is ADMIN only; `/api/v1/pos/**` is CASHIER and ADMIN. A CUSTOMER token on those paths gets 403. After login, the response carries `user.role`, so the app can choose which home screen to show. Hide screens a role cannot use, but never rely on hiding: the server enforces it.
+Rules the UI should mirror: `/api/v1/admin/orders*` is open to ADMIN and CASHIER; every other `/api/v1/admin/**` is ADMIN only (this includes `/api/v1/admin/notifications/**`: broadcasts, audience size, segments, segment preview and the condition catalog, see file 60); `/api/v1/pos/**` is CASHIER and ADMIN. A CUSTOMER token on those paths gets 403. After login, the response carries `user.role`, so the app can choose which home screen to show. Hide screens a role cannot use, but never rely on hiding: the server enforces it.
 
 ## 2. Authentication (passwordless OTP)
 

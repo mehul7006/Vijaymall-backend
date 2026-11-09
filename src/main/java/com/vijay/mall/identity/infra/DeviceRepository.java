@@ -1,6 +1,7 @@
 package com.vijay.mall.identity.infra;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
@@ -30,6 +31,9 @@ public class DeviceRepository {
 
   /** All push tokens registered to the user. */
   public List<String> tokensOf(UUID userId) { return jpa.tokensOf(userId); }
+
+  /** All push tokens registered to any of these users. */
+  public List<String> tokensOfAll(Collection<UUID> userIds) { return jpa.tokensOfAll(userIds); }
 
   /** Removes all of the user's push tokens (account deletion). */
   @Transactional

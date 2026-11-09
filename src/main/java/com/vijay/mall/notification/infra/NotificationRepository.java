@@ -17,7 +17,7 @@ public class NotificationRepository {
    * @param id notification id
    * @param title short headline
    * @param body message text
-   * @param kind what it is about: {@code ORDER}, {@code PAYMENT}, {@code FLASH} or {@code STOCK}
+   * @param kind what it is about: {@code ORDER}, {@code PAYMENT}, {@code FLASH}, {@code STOCK} or {@code ANNOUNCEMENT} (an admin broadcast)
    * @param ref the order number, sale id or product id it points to, may be null
    * @param read true once the user opened it
    * @param createdAt when it was created
