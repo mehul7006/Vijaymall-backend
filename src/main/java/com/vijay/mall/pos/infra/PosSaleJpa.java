@@ -11,6 +11,10 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code pos_sale}, the counter bills; looks them up by idempotency key, invoice number,
+ * customer mobile or time window.
+ */
 interface PosSaleJpa extends JpaRepository<PosSaleEntity, UUID> {
   Optional<PosSaleEntity> findByIdemKey(String idemKey);
 

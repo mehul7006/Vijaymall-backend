@@ -23,22 +23,44 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Sales for a date range (week, month, quarter or custom), online orders and counter bills together. Days are in the
- * shop's time zone. salesPaise and orders add both channels; refunds at the counter are listed apart, not subtracted.
+ * shop's time zone. salesPaise and orders add both channels; refunds (at the counter and on returned online orders) are listed
+ * apart, not subtracted.
  */
 @Service
 public class ReportSummaryService {
+  /**
+   * Sales of one day, both channels together.
+   * @param salesPaise online plus counter sales, in paise
+   * @param orders online orders plus counter bills
+   */
   public record DayRow(LocalDate date, long salesPaise, long orders) {}
 
   /** qty counts units only: items weighed at the counter add to salesPaise but not to qty. */
   public record TopProduct(UUID productId, String name, long qty, long salesPaise) {}
 
+  /**
+   * The sales summary of a period.
+   * @param from first day
+   * @param to last day, included
+   * @param salesPaise online plus counter sales, in paise
+   * @param orders online orders plus counter bills
+   * @param posRefundsPaise counter refunds in the period; listed apart and not subtracted from sales
+   * @param onlineRefundsPaise refunds on returned online orders in the period; listed apart like the counter refunds
+   * @param coinsIssued coins earned in the period
+   * @param byDay one entry per day of the period
+   * @param topProducts up to ten products by sales
+   * @param creditGivenPaise credit put on accounts by bills in the period
+   * @param creditRecoveredPaise credit paid off in the period
+   * @param outstandingCreditPaise what customers owe right now
+   */
   @Schema(name = "SalesSummary")
 
   public record Summary(LocalDate from, LocalDate to, long salesPaise, long orders, long onlineSalesPaise,
                         long onlineOrders, long posSalesPaise, long posBills, long posRefundsPaise, long coinsIssued,
                         List<DayRow> byDay, List<TopProduct> topProducts, long creditGivenPaise,
-                        long creditRecoveredPaise, long outstandingCreditPaise) {}
+                        long creditRecoveredPaise, long outstandingCreditPaise, long onlineRefundsPaise) {}
 
+  /** A first and last day, both included. */
   public record Range(LocalDate from, LocalDate to) {}
 
   static final ZoneId SHOP = ZoneId.of("Asia/Kolkata");
@@ -50,6 +72,7 @@ public class ReportSummaryService {
 
   private final Clock clock;
 
+  /** Creates the service. */
   public ReportSummaryService(Clock clock) { this.clock = clock; }
 
   /** Pure: picks the dates. An explicit from wins; otherwise period (week 7 days, month 30, quarter 90) ending today. */
@@ -74,6 +97,9 @@ public class ReportSummaryService {
     return new Range(start, end);
   }
 
+  /**
+   * Sales summary for the period (week 7 days, month 30, quarter 90, or explicit days; at most 366 days). Cached for a minute.
+   */
   @Transactional(readOnly = true)
   public Summary summary(String period, LocalDate from, LocalDate to) {
     Range r = range(period, from, to, clock.instant().atZone(SHOP).toLocalDate());
@@ -108,10 +134,11 @@ public class ReportSummaryService {
       days.add(new DayRow(d, o[0] + p[0], o[1] + p[1]));
     }
     long refunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM pos_return WHERE created_at >= :f AND created_at < :t", f, t);
+    long onlineRefunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM order_return WHERE created_at >= :f AND created_at < :t", f, t);
     long coins = scalar("SELECT COALESCE(SUM(coins), 0) FROM coin_ledger WHERE kind = 'EARN' AND created_at >= :f AND created_at < :t", f, t);
     return new Summary(r.from(), r.to(), onSales + posSales, onOrders + posBills, onSales, onOrders, posSales, posBills,
         refunds, coins, days, topProducts(f, t), creditSum("SALE", true, f, t), creditSum("PAYMENT", false, f, t),
-        ((Number) em.createNativeQuery("SELECT COALESCE(SUM(balance_paise), 0) FROM credit_account").getSingleResult()).longValue());
+        ((Number) em.createNativeQuery("SELECT COALESCE(SUM(balance_paise), 0) FROM credit_account").getSingleResult()).longValue(), onlineRefunds);
   }
 
   @SuppressWarnings("unchecked")

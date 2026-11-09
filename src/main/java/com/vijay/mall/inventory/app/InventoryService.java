@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class InventoryService {
   private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
+  /** One product and a quantity to take or give back. */
   public record Item(UUID productId, int qty) {}
 
   private final InventoryRepository repo;
@@ -37,6 +38,7 @@ public class InventoryService {
   /** Without a publisher no live events are sent (used by plain unit tests). */
   public InventoryService(InventoryRepository repo, Clock clock) { this(repo, clock, null); }
 
+  /** Main constructor used by Spring; the publisher is used to tell open screens that stock changed. */
   @Autowired
   public InventoryService(InventoryRepository repo, Clock clock, ApplicationEventPublisher events) {
     this.repo = repo;
@@ -80,6 +82,9 @@ public class InventoryService {
     }
   }
 
+  /**
+   * Creates the stock row of a new product (or resets an existing one) with the opening quantity and low-stock alert level. Writes no movement.
+   */
   @Transactional
   public void create(UUID productId, int qty, int lowThreshold) {
     repo.create(productId, qty, lowThreshold, clock.instant());
@@ -174,9 +179,11 @@ public class InventoryService {
     if (!failures.isEmpty()) throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
   }
 
+  /** Gives stock back for a cancelled order, recorded with the reason {@code CANCEL}. */
   @Transactional
   public void release(List<Item> items, UUID orderId) { release(items, orderId, "CANCEL"); }
 
+  /** Gives stock back (for example for a return) and records a positive movement with the given reason. */
   @Transactional
   public void release(List<Item> items, UUID orderId, String reason) {
     items.forEach(it -> {
@@ -202,9 +209,14 @@ public class InventoryService {
     return repo.quantity(productId);
   }
 
+  /** Sets the quantity at or below which the product counts as low on stock. */
   public void setLowThreshold(UUID productId, int low) { repo.setThreshold(productId, low); }
 
+  /** Units on hand; 0 for a product with no stock row. */
   public int quantity(UUID productId) { return repo.quantity(productId); }
+
+  /** Units on hand with the stock row locked until the transaction ends, so a sale cannot slip in between a count and its adjustment. */
+  public int quantityForUpdate(UUID productId) { return repo.quantityForUpdate(productId); }
 
   /** Stock rows for many products at once; products without a row count as empty. */
   public Map<UUID, InventoryRepository.Stock> stocks(Collection<UUID> productIds) {
@@ -218,6 +230,7 @@ public class InventoryService {
   /** How many products are at or below their alert level (for the operations metrics). */
   public long lowStockCount() { return repo.countLow(); }
 
+  /** Products at or below their alert level, emptiest first. Callers should drop retired products. */
   public List<InventoryRepository.Stock> lowStock(int limit) { return repo.lowStock(limit); }
 
   /** Stock history, newest first. productId null means all products. */

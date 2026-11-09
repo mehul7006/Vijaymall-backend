@@ -10,6 +10,7 @@ import javax.crypto.spec.SecretKeySpec;
 public final class RazorpaySignature {
   private RazorpaySignature() {}
 
+  /** Hex HMAC-SHA256 of {@code body} with {@code secret}. */
   public static String sign(String body, String secret) {
     try {
       Mac mac = Mac.getInstance("HmacSHA256");
@@ -20,6 +21,7 @@ public final class RazorpaySignature {
     }
   }
 
+  /** Checks a webhook signature in constant time; false when the signature or secret is missing or blank. */
   public static boolean verify(String body, String signature, String secret) {
     if (signature == null || secret == null || secret.isBlank()) return false;
     return MessageDigest.isEqual(sign(body, secret).getBytes(StandardCharsets.UTF_8),

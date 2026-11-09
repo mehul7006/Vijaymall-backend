@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.util.UUID;
 
+/** A row of {@code pos_payment}: one payment part (mode, amount, reference) of a counter bill. */
 @Entity
 @Table(name = "pos_payment")
 class PosPaymentEntity extends BaseEntity {
@@ -13,5 +14,6 @@ class PosPaymentEntity extends BaseEntity {
   long amountPaise;
   String reference;
 
+  /** Required by JPA; not for application code. */
   protected PosPaymentEntity() {}
 }

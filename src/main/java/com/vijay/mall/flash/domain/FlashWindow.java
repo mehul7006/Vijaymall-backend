@@ -7,6 +7,7 @@ import java.time.Instant;
 public final class FlashWindow {
   private FlashWindow() {}
 
+  /** Longest time a single sale may run. */
   public static final Duration MAX_LENGTH = Duration.ofDays(30);
   /** A start a little in the past is "now" (clock differences between the app and the server). */
   public static final Duration PAST_GRACE = Duration.ofMinutes(1);

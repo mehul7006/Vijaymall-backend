@@ -38,12 +38,20 @@ import tools.jackson.databind.json.JsonMapper;
 public class RuntimeSettings implements MeterBinder {
   private static final Logger log = LoggerFactory.getLogger(RuntimeSettings.class);
 
+  /**
+   * Where the value in force comes from: the admin's saved value, the server's environment, or the built-in default.
+   */
   public enum Source { DATABASE, ENVIRONMENT, DEFAULT }
 
   /** What the admin screen shows for one setting. value is null for secrets (use {@code set}). */
   public record Row(String key, String group, String groupLabel, String type, String label, String help, boolean secret, boolean set,
                     String value, String source, List<String> allowed, Long min, Long max, boolean restart) {}
 
+  /**
+   * One requested change.
+   * @param key the setting key, see {@link Settings}
+   * @param value the new value; blank clears the setting
+   */
   public record Change(String key, String value) {}
 
   private final AppSettingJpa jpa;
@@ -69,6 +77,7 @@ public class RuntimeSettings implements MeterBinder {
   private volatile Set<String> undecryptable = Set.of();
   private volatile boolean loaded;
 
+  /** Creates the service. */
   public RuntimeSettings(AppSettingJpa jpa, ConfigCrypto crypto, Environment env, AuditService audit, Clock clock, TransactionTemplate tx,
                          ApplicationEventPublisher events, JsonMapper json) {
     this.jpa = jpa;
@@ -125,8 +134,10 @@ public class RuntimeSettings implements MeterBinder {
     return d.fallback() == null ? "" : d.fallback();
   }
 
+  /** Whether the setting has a non-blank value from any source. */
   public boolean isSet(Def d) { return !get(d).isBlank(); }
 
+  /** The value as a whole number; the built-in default when the value cannot be read. */
   public int getInt(Def d) {
     try {
       return Integer.parseInt(get(d).trim());
@@ -135,6 +146,7 @@ public class RuntimeSettings implements MeterBinder {
     }
   }
 
+  /** The value as a long number; the built-in default when the value cannot be read. */
   public long getLong(Def d) {
     try {
       return Long.parseLong(get(d).trim());
@@ -143,8 +155,10 @@ public class RuntimeSettings implements MeterBinder {
     }
   }
 
+  /** The value as a boolean. */
   public boolean getBool(Def d) { return Boolean.parseBoolean(get(d).trim()); }
 
+  /** Where the value in force comes from. */
   public Source sourceOf(Def d) {
     ensureLoaded();
     if (stored.containsKey(d.key())) return Source.DATABASE;
@@ -153,6 +167,7 @@ public class RuntimeSettings implements MeterBinder {
   }
 
   // ---------- the admin screen ----------
+  /** Every setting as shown on the admin screen; the value of a secret is never included. */
   public List<Row> view() {
     List<Row> rows = new ArrayList<>();
     for (Def d : Settings.ALL) {

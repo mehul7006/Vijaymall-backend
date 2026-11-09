@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class FlashMetrics implements MeterBinder {
   private static final Logger log = LoggerFactory.getLogger(FlashMetrics.class);
+  /** How long the database counts are reused, in milliseconds. */
   static final long CACHE_MS = 15_000;
 
   private final FlashRepository repo;
@@ -20,6 +21,7 @@ public class FlashMetrics implements MeterBinder {
   private volatile FlashRepository.StateCounts counts = new FlashRepository.StateCounts(0, 0);
   private volatile long takenAt = Long.MIN_VALUE;
 
+  /** Creates the metrics binder. */
   public FlashMetrics(FlashRepository repo, Clock clock) {
     this.repo = repo;
     this.clock = clock;
@@ -38,6 +40,7 @@ public class FlashMetrics implements MeterBinder {
     return counts;
   }
 
+  /** Registers the two gauges, one for active and one for scheduled sales. */
   @Override
   public void bindTo(MeterRegistry registry) {
     Gauge.builder("mall.flash.sales", this, m -> m.counts().active()).description("Flash sales by state").tag("state", "active")

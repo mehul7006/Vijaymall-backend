@@ -28,8 +28,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/cart")
 public class CartBasketController {
+  /**
+   * One basket line as sent by the app.
+   * @param productId the product (pack) id
+   * @param qty units, 1 to {@link Cart#MAX_QTY}
+   */
   public record LineBody(@NotNull UUID productId, @Min(1) @Max(Cart.MAX_QTY) int qty) {}
 
+  /**
+   * Body of the basket save call; it replaces the whole stored basket.
+   * @param items the lines, at most {@link Cart#MAX_LINES}; repeated products are merged
+   * @param couponCode optional coupon code
+   * @param coinMode how coins are redeemed; {@code null} means none
+   * @param percent share of the coins to use, 0 to 100, only meaningful for the percent mode
+   */
   @Schema(name = "BasketBody")
 
   public record Body(@NotNull @Size(max = Cart.MAX_LINES) List<@Valid LineBody> items, String couponCode,
@@ -37,11 +49,17 @@ public class CartBasketController {
 
   private final CartService carts;
 
+  /** Creates the controller. */
   public CartBasketController(CartService carts) { this.carts = carts; }
 
+  /** Returns the signed-in customer's saved basket; a customer without one gets an empty basket, not a 404. */
   @GetMapping
   public Cart get() { return carts.get(CurrentUser.id()); }
 
+  /**
+   * Replaces the saved basket with what was sent (last write wins) and returns the stored result.
+   * <p>Fails with a validation error on {@code qty} when merged duplicates of one product exceed {@link Cart#MAX_QTY}.
+   */
   @PutMapping
   public Cart put(@Valid @RequestBody Body b) {
     Map<UUID, Integer> totals = new HashMap<>();
@@ -51,6 +69,7 @@ public class CartBasketController {
     return carts.replace(CurrentUser.id(), lines, b.couponCode(), b.coinMode(), b.percent());
   }
 
+  /** Empties the saved basket; answers {@code 204 No Content}, also when there was none. */
   @DeleteMapping
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete() { carts.clear(CurrentUser.id()); }

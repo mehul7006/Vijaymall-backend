@@ -17,17 +17,24 @@ public class StaffService {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service. */
   public StaffService(UserRepository users, AuditService audit, Clock clock) {
     this.users = users;
     this.audit = audit;
     this.clock = clock;
   }
 
+  /** All cashier accounts. */
   public List<User> list() { return users.byRole(User.CASHIER); }
 
   /** False for a blocked cashier. */
   public boolean isActive(UUID id) { return !users.isBlocked(id); }
 
+  /**
+   * Creates a cashier account for the email (or updates the existing non-admin account) and makes it active.
+   *
+   * @throws ApiException 400 for an invalid email or an email that belongs to an admin
+   */
   @Transactional
   public User create(String email, String name, String mobile, UUID actor) {
     String e = email == null ? "" : email.trim().toLowerCase();

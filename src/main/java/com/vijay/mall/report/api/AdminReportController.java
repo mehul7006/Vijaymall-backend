@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Owner reports (ADMIN only, everything under {@code /admin}): the dashboard, the sales summary for a period, the credit (udhar) report and the list of credit accounts.
+ */
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminReportController {
@@ -18,12 +21,16 @@ public class AdminReportController {
   private final ReportSummaryService summaries;
   private final CreditReportService creditReports;
 
+  /** Creates the controller. */
   public AdminReportController(ReportService reports, ReportSummaryService summaries, CreditReportService creditReports) {
     this.reports = reports;
     this.summaries = summaries;
     this.creditReports = creditReports;
   }
 
+  /**
+   * Today's sales and orders, new orders waiting, coins issued, the last seven days and the products low on stock; kept for 30 seconds.
+   */
   @GetMapping("/dashboard")
   public ReportService.Dashboard dashboard() { return reports.dashboard(); }
 

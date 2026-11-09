@@ -23,6 +23,11 @@ public record Product(UUID id, UUID categoryId, String nameEn, String nameGu, St
         earnsCoins, coinRedeemable, productGroupId, rating, reviewCount, null);
   }
 
+  /**
+   * Returns a copy of this product carrying the given flash-sale offer.
+   * @param offer the active flash-sale offer for this product, or null to clear it
+   * @return a new product; this instance is not changed
+   */
   public Product withFlash(FlashPricing.Offer offer) {
     return new Product(id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl, inStock, qtyAvailable,
         hotSale, earnsCoins, coinRedeemable, productGroupId, rating, reviewCount, offer);

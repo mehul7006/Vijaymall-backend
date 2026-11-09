@@ -25,6 +25,14 @@ public class AuditService {
   @Autowired(required = false)
   void setMetrics(MeterRegistry metrics) { this.metrics = metrics; }
 
+  /**
+   * Records an audited action in the caller's transaction and counts it in the {@code mall.audit.actions} metric.
+   * @param actorId the staff member or customer; {@code null} for the system
+   * @param action the kind of action, for example {@code CONFIG_CHANGE}
+   * @param entity the kind of record that was changed
+   * @param entityId the record's id (stored as text), or {@code null}
+   * @param change short description of the change; never put secrets here
+   */
   @Transactional
   public void log(UUID actorId, String action, String entity, Object entityId, String change) {
     AuditLogEntity e = new AuditLogEntity();

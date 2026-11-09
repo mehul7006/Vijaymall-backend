@@ -6,6 +6,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * A row of {@code pos_sale}: a counter bill, with its invoice number, amounts, GST split and the idempotency key it
+ * was created with.
+ */
 @Entity
 @Table(name = "pos_sale")
 class PosSaleEntity extends BaseEntity {
@@ -34,5 +38,6 @@ class PosSaleEntity extends BaseEntity {
   String status;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected PosSaleEntity() {}
 }

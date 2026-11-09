@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Parked baskets: stores, lists and deletes the baskets cashiers set aside at the till. */
 @Repository
 public class PosHoldRepository {
   private final PosHoldJpa jpa;
@@ -18,6 +19,7 @@ public class PosHoldRepository {
     return new HoldRecord(e.id, e.cashierId, e.label, e.customerMobile, e.payload, e.createdAt);
   }
 
+  /** Stores a parked basket and returns it. */
   @Transactional
   public HoldRecord insert(UUID cashierId, String label, String mobile, String payload, Instant now) {
     PosHoldEntity e = new PosHoldEntity();
@@ -30,10 +32,13 @@ public class PosHoldRepository {
     return toDomain(jpa.save(e));
   }
 
+  /** Every parked basket, newest first (shared by all cashiers). */
   public List<HoldRecord> all() { return jpa.findAllByOrderByCreatedAtDesc().stream().map(PosHoldRepository::toDomain).toList(); }
 
+  /** One parked basket by id. */
   public Optional<HoldRecord> find(UUID id) { return jpa.findById(id).map(PosHoldRepository::toDomain); }
 
+  /** Deletes a parked basket; false when there was none. */
   @Transactional
   public boolean delete(UUID id) {
     boolean exists = jpa.existsById(id);

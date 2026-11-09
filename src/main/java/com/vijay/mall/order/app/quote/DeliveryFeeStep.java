@@ -9,10 +9,14 @@ import com.vijay.mall.order.domain.QuoteStep;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * Quote step 400: adds the delivery fee unless the order is pickup or the amount after discounts reaches the free-delivery threshold. Fee and threshold come from the admin settings.
+ */
 @Component
 public class DeliveryFeeStep implements QuoteStep {
   private final AppProps.Delivery cfg;
 
+  /** Creates the step with the configured defaults. */
   public DeliveryFeeStep(AppProps props) { this.cfg = props.delivery(); }
 
   private RuntimeSettings settings;

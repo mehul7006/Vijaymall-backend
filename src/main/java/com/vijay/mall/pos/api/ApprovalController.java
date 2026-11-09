@@ -15,12 +15,19 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/me")
 public class ApprovalController {
+  /** Request body carrying the new approval PIN (4 to 8 digits). */
   public record PinBody(@NotBlank String pin) {}
 
   private final ApprovalService approvals;
 
+  /**
+   * Creates the controller.
+   *
+   * @param approvals manager PIN service
+   */
   public ApprovalController(ApprovalService approvals) { this.approvals = approvals; }
 
+  /** Sets or replaces the calling admin's approval PIN (204). Answers 400 unless the PIN is 4 to 8 digits. */
   @PutMapping("/approval-pin")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void setPin(@Valid @RequestBody PinBody b) { approvals.setPin(CurrentUser.id(), b.pin()); }

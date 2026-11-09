@@ -15,6 +15,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores coupons, their category limits and their redemptions, and exposes coupons as {@link Coupon} records. */
 @Repository
 public class CouponRepository {
   private final CouponJpa coupons;
@@ -77,14 +78,19 @@ public class CouponRepository {
     e.firstOrderOnly = c.firstOrderOnly();
   }
 
+  /** Every coupon, by code. */
   public List<Coupon> all() { return toDomains(coupons.findAllByOrderByCodeAsc()); }
 
+  /** Every coupon that is switched on, by code. */
   public List<Coupon> allActive() { return toDomains(coupons.findAllByActiveTrueOrderByCodeAsc()); }
 
+  /** The coupon with this id, if any. */
   public Optional<Coupon> find(UUID id) { return toDomain(coupons.findById(id)); }
 
+  /** The coupon with this (already normalised, upper-case) code, if any. */
   public Optional<Coupon> findByCode(String code) { return toDomain(coupons.findByCode(code)); }
 
+  /** Saves a new coupon with its category limits and returns its id; the used count starts at 0. */
   @Transactional
   public UUID insert(Coupon c) {
     CouponEntity e = new CouponEntity();
@@ -96,6 +102,7 @@ public class CouponRepository {
     return id;
   }
 
+  /** Overwrites a coupon's settings and replaces its category limits; the used count is kept. */
   @Transactional
   public void update(UUID id, Coupon c) {
     coupons.findById(id).ifPresent(e -> {
@@ -104,6 +111,7 @@ public class CouponRepository {
     });
   }
 
+  /** How many times the customer has used the coupon, not counting uses given back. */
   public int userUses(UUID couponId, UUID userId) {
     return (int) redemptions.countByCouponIdAndUserIdAndReleasedFalse(couponId, userId);
   }
@@ -122,6 +130,7 @@ public class CouponRepository {
   @Transactional
   public int takeUse(UUID couponId) { return coupons.takeUse(couponId); }
 
+  /** Records that an order used the coupon and the discount (in paise) it received. */
   @Transactional
   public void insertRedemption(UUID couponId, UUID userId, UUID orderId, long discount) {
     CouponRedemptionEntity r = new CouponRedemptionEntity();
@@ -133,10 +142,12 @@ public class CouponRepository {
     redemptions.save(r);
   }
 
+  /** The coupon an order currently holds, or empty if it has none or it was already given back. */
   public Optional<UUID> openRedemptionCoupon(UUID orderId) {
     return redemptions.findByOrderIdAndReleasedFalse(orderId).map(r -> r.couponId);
   }
 
+  /** Marks the order's redemption as given back and returns one use to the coupon's counter. */
   @Transactional
   public void releaseRedemption(UUID orderId, UUID couponId) {
     redemptions.findByOrderIdAndReleasedFalse(orderId).ifPresent(r -> r.released = true);
@@ -144,11 +155,14 @@ public class CouponRepository {
     coupons.giveBackUse(couponId);
   }
 
+  /** How many redemptions the coupon has ever had, released ones included. */
   public long redemptionCount(UUID couponId) { return redemptions.countByCouponId(couponId); }
 
+  /** Deletes a coupon that was never used. */
   @Transactional
   public void delete(UUID id) { coupons.deleteById(id); }
 
+  /** Switches a coupon off without deleting it (used when it has history). */
   @Transactional
   public void deactivate(UUID id) { coupons.deactivate(id); }
 }

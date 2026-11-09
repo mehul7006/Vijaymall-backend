@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Row of the {@code payment} table: one online payment attempt for an order, with the provider's order and payment references and its status.
+ */
 @Entity
 @Table(name = "payment")
 class PaymentEntity extends BaseEntity {
@@ -22,5 +25,6 @@ class PaymentEntity extends BaseEntity {
   Instant createdAt;
   Instant updatedAt;
 
+  /** For JPA. */
   protected PaymentEntity() {}
 }

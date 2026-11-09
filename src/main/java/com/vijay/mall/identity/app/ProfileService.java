@@ -23,6 +23,7 @@ public class ProfileService {
   private final DeviceRepository devices;
   private final Clock clock;
 
+  /** Creates the service with the user, address and device repositories (wired by Spring). */
   public ProfileService(UserRepository users, AddressRepository addresses, DeviceRepository devices, Clock clock) {
     this.users = users;
     this.addresses = addresses;
@@ -30,8 +31,19 @@ public class ProfileService {
     this.clock = clock;
   }
 
+  /**
+   * Returns a user by id.
+   * @throws com.vijay.mall.common.error.ApiException 404 when the user does not exist
+   */
   public User get(UUID id) { return users.findById(id).orElseThrow(() -> ApiException.notFound("User")); }
 
+  /**
+   * Saves the display name and mobile number.
+   * <p>
+   * The mobile must be 10 digits (or empty to clear it) and a number proven by OTP cannot be replaced here (409
+   * {@code MOBILE_VERIFIED}). A null name leaves the saved name unchanged.
+   * @return the saved profile
+   */
   @Transactional
   public User update(UUID id, String name, String mobile) {
     if (mobile != null && !mobile.isBlank() && !mobile.matches("\\d{10}")) {
@@ -46,12 +58,18 @@ public class ProfileService {
     return get(id);
   }
 
+  /** Lists the customer's addresses, default first, then oldest first. */
   public List<Address> addresses(UUID userId) { return addresses.list(userId); }
 
+  /**
+   * Returns one of the customer's addresses.
+   * @throws com.vijay.mall.common.error.ApiException 404 when it does not exist or belongs to someone else
+   */
   public Address address(UUID userId, UUID id) {
     return addresses.find(userId, id).orElseThrow(() -> ApiException.notFound("Address"));
   }
 
+  /** Adds an address. It becomes the default when it is marked so or when it is the customer's first one. */
   @Transactional
   public Address addAddress(UUID userId, Address in) {
     boolean makeDefault = in.isDefault() || addresses.count(userId) == 0;
@@ -59,6 +77,10 @@ public class ProfileService {
     return addresses.insert(userId, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), makeDefault), clock.instant());
   }
 
+  /**
+   * Edits an address. The default only moves by marking another address as default, so a customer who has
+   * addresses always has exactly one default.
+   */
   @Transactional
   public Address updateAddress(UUID userId, UUID id, Address in) {
     Address current = address(userId, id);
@@ -69,6 +91,7 @@ public class ProfileService {
     return address(userId, id);
   }
 
+  /** Deletes an address; when it was the default, the first remaining address becomes the default. */
   @Transactional
   public void deleteAddress(UUID userId, UUID id) {
     boolean wasDefault = addresses.find(userId, id).map(Address::isDefault).orElse(false);
@@ -82,16 +105,19 @@ public class ProfileService {
     }
   }
 
+  /** Stores a push token for the user; a token that was registered by someone else is re-assigned to this user. */
   @Transactional
   public void registerDevice(UUID userId, String token, String platform) {
     devices.upsert(userId, token, platform, clock.instant());
   }
 
+  /** Ids of the active admins, for example to address "new order" notifications. */
   public List<UUID> adminIds() { return users.adminIds(); }
 
   /** Active admins and counter staff: everyone who works the orders. */
   public List<UUID> staffIds() { return users.staffIds(); }
 
+  /** Push tokens of all the user's registered devices. */
   public List<String> deviceTokens(UUID userId) { return devices.tokensOf(userId); }
 
   /** Many users at once (for admin order lists). */

@@ -8,11 +8,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Cash-drawer shifts: opens, finds, closes and lists them. */
 @Repository
 public class PosShiftRepository {
   /** closedAt and the three cash figures are null while the shift is open. */
   public record Shift(UUID id, UUID cashierId, Instant openedAt, long openingFloatPaise, Instant closedAt,
                       Long expectedCashPaise, Long countedCashPaise, Long variancePaise, String note) {
+    /** True while the shift has not been closed. */
     public boolean open() { return closedAt == null; }
   }
 
@@ -25,10 +27,12 @@ public class PosShiftRepository {
         e.variancePaise, e.note);
   }
 
+  /** The cashier's open shift, if any. At most one can be open per cashier. */
   public Optional<Shift> open(UUID cashierId) {
     return jpa.findFirstByCashierIdAndClosedAtIsNull(cashierId).map(PosShiftRepository::toDomain);
   }
 
+  /** One shift by id. */
   public Optional<Shift> find(UUID id) { return jpa.findById(id).map(PosShiftRepository::toDomain); }
 
   /** Flushes at once so a second open shift for the same cashier fails here (unique index), inside the caller's transaction. */
@@ -42,6 +46,10 @@ public class PosShiftRepository {
     return toDomain(jpa.saveAndFlush(e));
   }
 
+  /**
+   * Closes the shift, storing the expected and counted cash and their difference (counted minus expected; negative
+   * means the drawer was short).
+   */
   @Transactional
   public void close(UUID id, Instant now, long expected, long counted, String note) {
     jpa.findById(id).ifPresent(e -> {

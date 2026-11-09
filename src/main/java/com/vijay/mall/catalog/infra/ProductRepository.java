@@ -17,6 +17,10 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Reads and writes products in the {@code product} table and hands them out as {@link ProductData}.
+ * <p>Holds the dynamic search queries for the customer list, the admin list and the product-group list.
+ */
 @Repository
 public class ProductRepository {
   private final ProductJpa jpa;
@@ -35,8 +39,10 @@ public class ProductRepository {
   /** The variant name ("Mango") and display order of a product within its group. */
   public record VariantInfo(String name, int order) {}
 
+  /** Finds a product by id, active or not. */
   public Optional<ProductData> find(UUID id) { return jpa.findById(id).map(ProductRepository::toDomain); }
 
+  /** Products with these ids (unknown ids are skipped); the order is not guaranteed. */
   public List<ProductData> findAll(List<UUID> ids) {
     if (ids.isEmpty()) return List.of();
     return jpa.findAllById(ids).stream().map(ProductRepository::toDomain).toList();
@@ -135,6 +141,7 @@ public class ProductRepository {
         .setParameter("id", idOrGroupId).getResultList().stream().map(ProductRepository::toDomain).toList();
   }
 
+  /** Variant name and display order for these products, keyed by id. */
   @Transactional(readOnly = true)
   public Map<UUID, VariantInfo> variantInfo(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
@@ -142,6 +149,7 @@ public class ProductRepository {
         e -> new VariantInfo(e.variantName == null ? "" : e.variantName, e.variantOrder)));
   }
 
+  /** Sets the variant name (null becomes empty) and the display order of a product within its group. */
   @Transactional
   public void setVariant(UUID id, String name, int order) {
     jpa.findById(id).ifPresent(e -> {
@@ -172,6 +180,7 @@ public class ProductRepository {
     return rows.size();
   }
 
+  /** Inserts a new product that starts as its own group, and returns its generated id. */
   @Transactional
   public UUID insert(UUID categoryId, String nameEn, String nameGu, String description, long mrp, long price,
                      String unit, String packSize, boolean active, boolean hotSale, Instant hotStart, Instant hotEnd,
@@ -185,6 +194,7 @@ public class ProductRepository {
     return jpa.save(e).id;
   }
 
+  /** Overwrites the editable fields of a product; does nothing when the id does not exist. */
   @Transactional
   public void update(UUID id, UUID categoryId, String nameEn, String nameGu, String description, long mrp, long price,
                      String unit, String packSize, boolean active, boolean hotSale, Instant hotStart, Instant hotEnd,
@@ -206,6 +216,7 @@ public class ProductRepository {
     });
   }
 
+  /** Stores the picture path on the product and stamps {@code updatedAt}. */
   @Transactional
   public void setImage(UUID id, String url, Instant now) {
     jpa.findById(id).ifPresent(e -> {
@@ -234,6 +245,7 @@ public class ProductRepository {
     e.updatedAt = now;
   }
 
+  /** Sets whether the product is sold at the counter only. */
   @Transactional
   public void setPosOnly(UUID id, boolean posOnly) { jpa.findById(id).ifPresent(e -> e.posOnly = posOnly); }
 
@@ -245,6 +257,7 @@ public class ProductRepository {
         .collect(Collectors.toSet());
   }
 
+  /** True when the product is counter-only; false when it is not or does not exist. */
   public boolean isPosOnly(UUID id) { return jpa.findById(id).map(e -> e.posOnly).orElse(false); }
 
   /** When any product (price, name, active...) last changed; null for an empty shop. */

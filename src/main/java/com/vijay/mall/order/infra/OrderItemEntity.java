@@ -6,6 +6,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.util.UUID;
 
+/**
+ * Row of {@code order_item}: one line of an order with name, price and flags copied at order time, plus how many units were returned.
+ */
 @Entity
 @Table(name = "order_item")
 class OrderItemEntity extends BaseEntity {
@@ -23,5 +26,6 @@ class OrderItemEntity extends BaseEntity {
   @Column(name = "earns_coins_snapshot") boolean earnsCoins;
   @Column(name = "coin_redeemable_snapshot") boolean coinRedeemable;
 
+  /** For JPA. */
   protected OrderItemEntity() {}
 }

@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code pos_refund_payment}, how credit notes were paid out. */
 interface PosRefundJpa extends JpaRepository<PosRefundPaymentEntity, UUID> {
   List<PosRefundPaymentEntity> findByReturnIdIn(Collection<UUID> returnIds);
 }

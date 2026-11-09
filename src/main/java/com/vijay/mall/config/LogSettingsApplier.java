@@ -32,6 +32,7 @@ public class LogSettingsApplier {
   private final RuntimeSettings settings;
   private final Supplier<ILoggerFactory> factory;
 
+  /** Creates the applier using the real logging system. */
   @Autowired
   public LogSettingsApplier(RuntimeSettings settings) {
     this(settings, LoggerFactory::getILoggerFactory);
@@ -42,11 +43,13 @@ public class LogSettingsApplier {
     this.factory = factory;
   }
 
+  /** Applies the saved logging settings once the application has started. */
   @EventListener(ApplicationReadyEvent.class)
   public void onReady() {
     apply();
   }
 
+  /** Re-applies the logging settings when a save touched one of them. */
   @EventListener
   public void onChanged(SettingsChanged event) {
     if (event.touches(Settings.LOG_LEVEL_APP) || event.touches(Settings.LOG_LEVEL_ROOT) || event.touches(Settings.LOG_LEVEL_SQL)

@@ -23,6 +23,12 @@ public class OfflineExceptionMetrics implements MeterBinder {
   private volatile long stale;
   private volatile long takenAt = Long.MIN_VALUE;
 
+  /**
+   * Creates the gauges.
+   *
+   * @param exceptions source of the open and stale counts
+   * @param clock clock used for the 15 second cache
+   */
   public OfflineExceptionMetrics(OfflineExceptionService exceptions, Clock clock) {
     this.exceptions = exceptions;
     this.clock = clock;
@@ -40,6 +46,7 @@ public class OfflineExceptionMetrics implements MeterBinder {
     }
   }
 
+  /** Registers the {@code mall.pos.offline.exceptions.open} and {@code mall.pos.offline.exceptions.stale} gauges. */
   @Override
   public void bindTo(MeterRegistry registry) {
     Gauge.builder("mall.pos.offline.exceptions.open", this, m -> { m.refresh(); return m.open; })

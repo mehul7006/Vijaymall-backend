@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -105,9 +106,22 @@ class PurchasingServicesTest {
     UUID id = UUID.randomUUID();
     stubStored(id);
     when(repo.findByIdem("key-2")).thenReturn(Optional.of(header(id)));
-    purchases.receive(actor, "key-2", input(new ItemInput(rice, 1, 1)));
+    purchases.receive(actor, "key-2", input(new ItemInput(dal, 20, 80), new ItemInput(rice, 100, 50)));
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any(), any());
     verify(repo, never()).insert(any(), any(), any(), anyLong(), any(), any(), any(), any());
+  }
+
+  @Test
+  void theSameKeyForADifferentDeliveryIsRefusedNotSwallowed() {
+    UUID id = UUID.randomUUID();
+    stubStored(id);
+    when(repo.findByIdem("key-3")).thenReturn(Optional.of(header(id)));
+    reused(() -> purchases.receive(actor, "key-3", input(new ItemInput(rice, 100, 51), new ItemInput(dal, 20, 80))), "IDEMPOTENCY_KEY_REUSED");
+    reused(() -> purchases.receive(actor, "key-3", input(new ItemInput(rice, 100, 50))), "IDEMPOTENCY_KEY_REUSED");
+    reused(() -> purchases.receive(actor, "key-3", new PurchaseService.Input("Other Supplier", "INV-77", null, List.of(new ItemInput(rice, 100, 50), new ItemInput(dal, 20, 80)))), "IDEMPOTENCY_KEY_REUSED");
+    reused(() -> purchases.receive(actor, "key-3", new PurchaseService.Input("Agro Traders", null, null, List.of(new ItemInput(rice, 100, 50), new ItemInput(dal, 20, 80)))), "IDEMPOTENCY_KEY_REUSED");
+    reused(() -> purchases.receive(actor, "key-3", new PurchaseService.Input("Agro Traders", "INV-77", null, null)), "IDEMPOTENCY_KEY_REUSED");
+    verify(inventory, never()).adjust(any(), anyInt(), anyString(), any(), any());
   }
 
   @Test
@@ -116,7 +130,7 @@ class PurchasingServicesTest {
     stubStored(id);
     when(repo.findByIdem("race")).thenReturn(Optional.empty(), Optional.of(header(id)));
     when(repo.insert(any(), any(), any(), anyLong(), eq("race"), any(), any(), any())).thenThrow(new DataIntegrityViolationException("dup"));
-    assertThat(purchases.receive(actor, "race", input(new ItemInput(rice, 1, 1))).id()).isEqualTo(id);
+    assertThat(purchases.receive(actor, "race", input(new ItemInput(rice, 100, 50), new ItemInput(dal, 20, 80))).id()).isEqualTo(id);
   }
 
   @Test
@@ -139,6 +153,10 @@ class PurchasingServicesTest {
     assertThatThrownBy(() -> purchases.receive(actor, "k", input(new ItemInput(rice, 1, PurchaseService.MAX_UNIT_COST + 1)))).isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> purchases.receive(actor, "k", input(new ItemInput(UUID.randomUUID(), 1, 1)))).isInstanceOf(ApiException.class);
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any(), any());
+  }
+
+  private void reused(Runnable r, String code) {
+    assertThatThrownBy(r::run).isInstanceOfSatisfying(ApiException.class, e -> Assertions.assertThat(e.code()).isEqualTo(code));
   }
 
   private void assertCode(Runnable r, String field) {
@@ -164,8 +182,8 @@ class PurchasingServicesTest {
   // ---------- stock take ----------
   @Test
   void aCountSetsStockToWhatWasFoundAndReportsOnlyTheDifferences() {
-    when(inventory.quantity(rice)).thenReturn(50);
-    when(inventory.quantity(dal)).thenReturn(10);
+    when(inventory.quantityForUpdate(rice)).thenReturn(50);
+    when(inventory.quantityForUpdate(dal)).thenReturn(10);
     var r = stockTake.apply(actor, " month end ", List.of(new StockTakeService.Count(rice, 47), new StockTakeService.Count(dal, 10)));
     verify(inventory).adjust(rice, -3, "STOCK_TAKE", actor);
     verify(inventory, never()).adjust(eq(dal), anyInt(), anyString(), any());
@@ -181,7 +199,7 @@ class PurchasingServicesTest {
 
   @Test
   void aCountHigherThanTheSystemAddsStock() {
-    when(inventory.quantity(rice)).thenReturn(5);
+    when(inventory.quantityForUpdate(rice)).thenReturn(5);
     stockTake.apply(actor, null, List.of(new StockTakeService.Count(rice, 9)));
     verify(inventory).adjust(rice, 4, "STOCK_TAKE", actor);
   }

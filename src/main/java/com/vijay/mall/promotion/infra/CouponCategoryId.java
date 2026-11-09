@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Composite primary key (coupon, category) of {@code coupon_category}. */
 class CouponCategoryId implements Serializable {
   UUID couponId;
   UUID categoryId;

@@ -35,6 +35,7 @@ public class HttpSmsSender implements SmsOtpSender {
   private final JsonMapper json;
   private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).version(HttpClient.Version.HTTP_1_1).build();
 
+  /** Creates the sender with the live settings and a JSON mapper (wired by Spring). */
   public HttpSmsSender(RuntimeSettings settings, JsonMapper json) {
     this.settings = settings;
     this.json = json;

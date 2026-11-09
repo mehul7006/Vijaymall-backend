@@ -8,11 +8,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Public endpoint that reads the reviews of a whole product (all its variants together). */
 @RestController
 @RequestMapping("/api/v1/product-groups/{id}/reviews")
 public class ProductGroupReviewController {
   private final ReviewService reviews;
 
+  /** Creates the controller with the review service. */
   public ProductGroupReviewController(ReviewService reviews) { this.reviews = reviews; }
 
   /** Public: the reviews of all variants of one product together, with one average and count. */

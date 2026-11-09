@@ -6,6 +6,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Table {@code coin_ledger}: every coin movement of every customer. An earning row doubles as a lot, with the coins
+ * still unspent in {@code remaining} and an expiry; the idempotency key makes each movement happen only once.
+ */
 @Entity
 @Table(name = "coin_ledger")
 class CoinLedgerEntity extends BaseEntity {
@@ -19,5 +23,6 @@ class CoinLedgerEntity extends BaseEntity {
   String idemKey;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected CoinLedgerEntity() {}
 }

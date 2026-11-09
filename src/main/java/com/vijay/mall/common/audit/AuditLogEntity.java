@@ -7,6 +7,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Row of the {@code audit_log} table: who (actor id, null for the system) did what to which record, with a free-text change description.
+ */
 @Entity
 @Table(name = "audit_log")
 class AuditLogEntity extends BaseEntity {
@@ -17,5 +20,6 @@ class AuditLogEntity extends BaseEntity {
   @Column(name = "change") String detail;
   Instant createdAt;
 
+  /** For JPA. */
   protected AuditLogEntity() {}
 }

@@ -51,10 +51,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class FlashSaleService {
   private static final Logger log = LoggerFactory.getLogger(FlashSaleService.class);
 
+  /** Most products allowed in one sale. */
   public static final int MAX_ITEMS = 200;
+  /** Longest sale name or banner text, in characters. */
   public static final int MAX_NAME = 80;
+  /** Longest sale description, in characters. */
   public static final int MAX_DESCRIPTION = 300;
+  /** Largest cap on units of one item. */
   public static final int MAX_QTY = 1_000_000;
+  /** Largest per-customer limit; 0 means no limit. */
   public static final int MAX_CUSTOMER_LIMIT = 999;
 
   /** discountKind/discountValue/maxQty/perCustomerLimit may be null: follow the sale, no cap, follow the sale. */
@@ -78,6 +83,7 @@ public class FlashSaleService {
   private final Clock clock;
   private final FlashPricingService pricing;
 
+  /** Creates the service. */
   public FlashSaleService(FlashRepository repo, CatalogService catalog, AuditService audit, LiveEvents live, Clock clock,
                           FlashPricingService pricing) {
     this.repo = repo;
@@ -89,6 +95,14 @@ public class FlashSaleService {
   }
 
   // ---------- create ----------
+  /**
+   * Creates a sale with its items, after checking the name, schedule, discounts, products and overlaps.
+   * <p>Takes the schedule lock so two staff members cannot put the same product in overlapping sales.
+   * @param in the new sale; {@code startsAt} null starts it now
+   * @param actor the staff member creating it
+   * @return the saved sale
+   * @throws ApiException validation errors, or conflict {@code FLASH_OVERLAP}
+   */
   @Transactional
   public SaleView create(CreateInput in, UUID actor) {
     Instant now = clock.instant();
@@ -155,6 +169,10 @@ public class FlashSaleService {
   }
 
   // ---------- update ----------
+  /**
+   * Changes the given fields of a sale that has not ended. A running sale can only be renamed, re-described or have its end moved.
+   * @throws ApiException conflict {@code FLASH_RUNNING}, {@code FLASH_NOT_ALLOWED} (ended or cancelled) or {@code FLASH_OVERLAP}, or validation errors
+   */
   @Transactional
   public SaleView update(UUID id, UpdateInput in, UUID actor) {
     Instant now = clock.instant();
@@ -219,6 +237,9 @@ public class FlashSaleService {
   }
 
   // ---------- items ----------
+  /**
+   * Adds one product to a sale that has not ended; rejects duplicates, inactive products, a discount that gives no lower price, and overlaps with other sales.
+   */
   @Transactional
   public SaleView addItem(UUID saleId, ItemInput in, UUID actor) {
     Instant now = clock.instant();
@@ -240,6 +261,9 @@ public class FlashSaleService {
     return get(saleId);
   }
 
+  /**
+   * Removes an item that has never sold; throws conflict {@code FLASH_ITEM_SOLD} when units were sold or the item has history.
+   */
   @Transactional
   public SaleView removeItem(UUID saleId, UUID itemId, UUID actor) {
     Instant now = clock.instant();
@@ -287,6 +311,9 @@ public class FlashSaleService {
   }
 
   // ---------- start / end / cancel / duplicate ----------
+  /**
+   * Moves a scheduled sale's start to now. Throws {@code FLASH_NOT_ALLOWED} unless it is scheduled, and {@code FLASH_OVERLAP} if that would clash with another sale.
+   */
   @Transactional
   public SaleView startNow(UUID id, UUID actor) {
     Instant now = clock.instant();
@@ -304,6 +331,7 @@ public class FlashSaleService {
     return get(id);
   }
 
+  /** Moves a running sale's end to now. Throws {@code FLASH_NOT_ALLOWED} unless it is running. */
   @Transactional
   public SaleView endNow(UUID id, UUID actor) {
     Instant now = clock.instant();
@@ -318,6 +346,9 @@ public class FlashSaleService {
     return get(id);
   }
 
+  /**
+   * Cancels a scheduled or running sale (an ended or cancelled one throws {@code FLASH_NOT_ALLOWED}). Units already sold keep their price.
+   */
   @Transactional
   public SaleView cancel(UUID id, UUID actor) {
     Instant now = clock.instant();
@@ -332,6 +363,10 @@ public class FlashSaleService {
     return get(id);
   }
 
+  /**
+   * Copies a sale and its items (sold counts reset) onto a new schedule.
+   * @param in optional new name, start and end; start defaults to now and the length to the original's, the name to the original with " (copy)" added
+   */
   @Transactional
   public SaleView duplicate(UUID id, DuplicateInput in, UUID actor) {
     Instant now = clock.instant();
@@ -361,6 +396,7 @@ public class FlashSaleService {
   }
 
   // ---------- read (staff) ----------
+  /** One sale with its items and their current sale prices; {@code NOT_FOUND} when unknown. */
   @Transactional(readOnly = true)
   public SaleView get(UUID id) {
     Sale s = sale(id);

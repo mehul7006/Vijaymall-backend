@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.util.UUID;
 
+/**
+ * Table {@code wallet_balance}: one row per customer holding the current coin balance, versioned for optimistic locking.
+ */
 @Entity
 @Table(name = "wallet_balance")
 class WalletBalanceEntity {
@@ -13,5 +16,6 @@ class WalletBalanceEntity {
   int coins;
   @Version long version;
 
+  /** Required by JPA; not for application code. */
   protected WalletBalanceEntity() {}
 }

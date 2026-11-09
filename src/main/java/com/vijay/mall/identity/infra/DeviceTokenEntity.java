@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** Table {@code device_token}: one Firebase push token of a phone, linked to the user who is signed in on it. */
 @Entity
 @Table(name = "device_token")
 class DeviceTokenEntity extends BaseEntity {
@@ -14,5 +15,6 @@ class DeviceTokenEntity extends BaseEntity {
   String platform;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected DeviceTokenEntity() {}
 }

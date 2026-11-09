@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/** JPA entity for the {@code unit_of_measure} table; the unit code is the primary key. */
 @Entity
 @Table(name = "unit_of_measure")
 class UnitEntity {
@@ -15,5 +16,6 @@ class UnitEntity {
   @Column(name = "sort_order") int sortOrder;
   boolean active;
 
+  /** No-argument constructor required by JPA; not for application code. */
   protected UnitEntity() {}
 }

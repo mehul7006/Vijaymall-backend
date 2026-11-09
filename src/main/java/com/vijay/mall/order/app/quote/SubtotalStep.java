@@ -11,10 +11,12 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/** Quote step 100: prices the lines (applying flash sale prices when one runs) and sums them into the subtotal. */
 @Component
 public class SubtotalStep implements QuoteStep {
   private final CatalogService catalog;
 
+  /** Creates the step. */
   public SubtotalStep(CatalogService catalog) { this.catalog = catalog; }
 
   private FlashPricing flash;

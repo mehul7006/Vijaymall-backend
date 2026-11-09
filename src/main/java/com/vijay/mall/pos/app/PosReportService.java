@@ -20,6 +20,7 @@ public class PosReportService {
   private final PosReportRepository repo;
   private final Clock clock;
 
+  /** Creates the service. */
   public PosReportService(PosReportRepository repo, Clock clock) {
     this.repo = repo;
     this.clock = clock;

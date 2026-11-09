@@ -15,12 +15,19 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/pos/sync")
 public class PosSyncController {
+  /** Request body for an offline upload: 1 to 50 bills. */
   public record UploadBody(@NotEmpty List<PosSyncService.OfflineSale> sales) {}
 
+  /** Response of an offline upload: one outcome per bill, in the order sent. */
   public record UploadResult(List<PosSyncService.Result> results) {}
 
   private final PosSyncService sync;
 
+  /**
+   * Creates the controller.
+   *
+   * @param sync offline sync service
+   */
   public PosSyncController(PosSyncService sync) { this.sync = sync; }
 
   /** The server's clock and the version of the product list; the till downloads again when the version is newer than its copy. */

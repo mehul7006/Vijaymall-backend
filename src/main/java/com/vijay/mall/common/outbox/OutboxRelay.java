@@ -27,6 +27,9 @@ public class OutboxRelay {
     this.clock = clock;
   }
 
+  /**
+   * Every 2 seconds publishes up to 50 undelivered events as {@link OutboxMessage}. Rows are locked with skip-locked, so several servers do not send the same event. An event is marked delivered even if a listener failed (the failure is logged).
+   */
   @Scheduled(fixedDelay = 2000)
   public void publishPending() {
     tx.executeWithoutResult(_ -> {

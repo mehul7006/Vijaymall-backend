@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Table {@code otp_challenge}: a hashed one-time code sent to an e-mail address or a mobile number, with its expiry, wrong-try count and consumed flag.
+ */
 @Entity
 @Table(name = "otp_challenge")
 class OtpChallengeEntity extends BaseEntity {
@@ -17,5 +20,6 @@ class OtpChallengeEntity extends BaseEntity {
   boolean consumed;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected OtpChallengeEntity() {}
 }

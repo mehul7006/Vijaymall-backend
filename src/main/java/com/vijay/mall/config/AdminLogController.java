@@ -19,19 +19,35 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminLogController {
   static final int MAX_FILES = 60;
 
+  /**
+   * A log file on disk.
+   * @param sizeBytes size in bytes
+   */
   public record LogFile(String name, long sizeBytes, Instant lastModified) {}
 
+  /**
+   * The logging set-up in force.
+   * @param levelApp level of the shop's own code
+   * @param levelRoot level of the libraries
+   * @param levelSql level of the SQL statement logger
+   * @param retentionDays days rotated files are kept
+   * @param fileLogging whether a rolling log file is in use
+   * @param folder the folder holding the log files; {@code null} without file logging
+   * @param files the newest files first, at most 60
+   */
   public record Status(String levelApp, String levelRoot, String levelSql, int retentionDays, boolean fileLogging, String folder,
                        List<LogFile> files) {}
 
   private final RuntimeSettings settings;
   private final LogSettingsApplier applier;
 
+  /** Creates the controller. */
   public AdminLogController(RuntimeSettings settings, LogSettingsApplier applier) {
     this.settings = settings;
     this.applier = applier;
   }
 
+  /** Current log levels, retention and the list of log files (names and sizes only, never contents). */
   @GetMapping("/status")
   public Status status() {
     LoggerContext ctx = applier.context();

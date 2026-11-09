@@ -23,6 +23,11 @@ public class AdminOfflineExceptionController {
 
   private final OfflineExceptionService exceptions;
 
+  /**
+   * Creates the controller.
+   *
+   * @param exceptions service holding the offline-bill exceptions
+   */
   public AdminOfflineExceptionController(OfflineExceptionService exceptions) { this.exceptions = exceptions; }
 
   /** status OPEN (default) or REVIEWED; newest first. */

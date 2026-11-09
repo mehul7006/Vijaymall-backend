@@ -16,10 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 /** Customer reviews of a product. The average and count are copied onto the product so cards can show them cheaply. */
 @Service
 public class ReviewService {
+  /** Longest review comment accepted, in characters. */
   static final int MAX_COMMENT = 1000;
 
   /** reviewer is the first name only; verified is true when the review was written for a delivered order. */
   public record Review(UUID id, int rating, String comment, String reviewer, Instant createdAt, boolean verified) {
+    /** A review not tied to a delivered order, so {@code verified} is false. */
     public Review(UUID id, int rating, String comment, String reviewer, Instant createdAt) {
       this(id, rating, comment, reviewer, createdAt, false);
     }
@@ -28,6 +30,11 @@ public class ReviewService {
   /** Whether the signed-in customer may review this product yet (it must have been delivered to them), and their review. */
   public record Mine(boolean canReview, Review review) {}
 
+  /**
+   * One page of reviews with the overall numbers.
+   * @param rating average rating over all matching reviews (0 when there are none)
+   * @param reviewCount total number of reviews, not only those on this page
+   */
   public record ReviewList(List<Review> items, int page, int size, long total, double rating, int reviewCount) {}
 
   private final ReviewRepository reviews;
@@ -36,6 +43,9 @@ public class ReviewService {
   private final PurchaseLookup purchases;
   private final Clock clock;
 
+  /**
+   * Creates the service. The purchase lookup is how the catalog asks the order module whether a product was delivered.
+   */
   public ReviewService(ReviewRepository reviews, CatalogService catalog, ProfileService profiles, PurchaseLookup purchases,
                        Clock clock) {
     this.reviews = reviews;
@@ -95,6 +105,7 @@ public class ReviewService {
     return new Review(r.id(), r.rating(), r.comment(), firstName(u), r.createdAt(), r.verified());
   }
 
+  /** The first word of the user's name for display, or {@code Customer} when the name is missing. */
   static String firstName(User u) {
     if (u == null || u.name() == null || u.name().isBlank()) return "Customer";
     return u.name().trim().split("\\s+")[0];

@@ -13,6 +13,9 @@ import org.springframework.http.HttpStatus;
  * (null = the feature is off and everything is priced at the list price).
  */
 public interface FlashPricing {
+  /**
+   * Where a sale happens: the customer app ({@code ONLINE}) or the shop counter ({@code POS}); a flash sale can be limited to one of them.
+   */
   enum Channel { ONLINE, POS }
 
   /**
@@ -32,6 +35,10 @@ public interface FlashPricing {
   class Refused extends ApiException {
     private final String reason;
 
+    /**
+     * Creates the conflict.
+     * @param reason why the offer no longer fits, see {@link #reason()}
+     */
     public Refused(String reason) {
       super(HttpStatus.CONFLICT, "PRICE_CHANGED", "A flash sale offer changed, please review the prices", Map.of("reason", reason));
       this.reason = reason;

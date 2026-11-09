@@ -10,6 +10,9 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code credit_account}, one row per customer holding the balance owed and the credit limit.
+ */
 interface CreditJpa extends JpaRepository<CreditAccountEntity, UUID> {
   /** Serialises everything that changes one customer's balance. */
   @Lock(LockModeType.PESSIMISTIC_WRITE)

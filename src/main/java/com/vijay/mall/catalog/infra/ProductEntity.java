@@ -7,6 +7,11 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * JPA entity for the {@code product} table. Each row is one sellable variant; variants of one product share
+ * {@code productGroupId}. Prices are integer paise, {@code rating} / {@code reviewCount} are copied from the reviews, and
+ * {@code posOnly} hides the item from the online shop. Stock is not stored here (see the inventory module).
+ */
 @Entity
 @Table(name = "product")
 class ProductEntity extends BaseEntity {
@@ -34,5 +39,6 @@ class ProductEntity extends BaseEntity {
   Instant createdAt;
   Instant updatedAt;
 
+  /** No-argument constructor required by JPA; not for application code. */
   protected ProductEntity() {}
 }

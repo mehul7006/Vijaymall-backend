@@ -24,6 +24,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+/**
+ * Turns every exception into the standard {@link ErrorBody}: business errors keep their status and code, bad input becomes {@code 400 VALIDATION_FAILED}, database constraint failures become 400 or {@code 409 ALREADY_EXISTS}, and anything unexpected becomes {@code 500 INTERNAL_ERROR} without leaking details.
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
   private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);

@@ -20,6 +20,7 @@ public class StartupSummary implements ApplicationRunner {
   private final Environment env;
   private final AppProps props;
 
+  /** Creates the summary. */
   public StartupSummary(Environment env, AppProps props) {
     this.env = env;
     this.props = props;

@@ -4,6 +4,7 @@ import com.vijay.mall.order.domain.QuoteContext;
 import com.vijay.mall.order.domain.QuoteStep;
 import org.springframework.stereotype.Component;
 
+/** Quote step 500: total = subtotal - coupon - coins + delivery fee, never below zero. */
 @Component
 public class TotalStep implements QuoteStep {
   @Override public int order() { return 500; }

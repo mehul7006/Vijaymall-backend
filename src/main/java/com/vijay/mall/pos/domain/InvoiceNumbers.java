@@ -6,6 +6,7 @@ import java.time.ZoneId;
 
 /** Indian financial year (April–March) and gap-free document numbers. */
 public final class InvoiceNumbers {
+    /** The shop's time zone (India). Financial years, invoice dates and the day report all follow it. */
     public static final ZoneId SHOP_ZONE = ZoneId.of("Asia/Kolkata");
 
     private InvoiceNumbers() { }
@@ -16,6 +17,7 @@ public final class InvoiceNumbers {
         return "%d-%02d".formatted(start, (start + 1) % 100);
     }
 
+    /** The financial year, such as {@code 2026-27}, that the instant falls in, judged in the shop's time zone. */
     public static String financialYear(Instant at) {
         return financialYear(at.atZone(SHOP_ZONE).toLocalDate());
     }

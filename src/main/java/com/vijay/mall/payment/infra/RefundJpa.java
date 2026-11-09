@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to the {@code refund} table, including the queue operations (claim, requeue). */
 interface RefundJpa extends JpaRepository<RefundEntity, UUID> {
   /** What has been or will be paid back for a payment; automatic refunds of other (wrong or duplicate) provider payments do not count. */
   @Query("select coalesce(sum(r.amountPaise), 0) from RefundEntity r where r.paymentId = :payment and r.status <> 'FAILED' and r.providerPaymentRef is null")

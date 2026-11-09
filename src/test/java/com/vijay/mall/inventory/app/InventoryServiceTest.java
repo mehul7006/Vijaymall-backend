@@ -143,6 +143,8 @@ class InventoryServiceTest {
     verify(repo).setThreshold(A, 4);
     when(repo.quantity(A)).thenReturn(9);
     assertThat(service.quantity(A)).isEqualTo(9);
+    when(repo.quantityForUpdate(A)).thenReturn(8);
+    assertThat(service.quantityForUpdate(A)).isEqualTo(8);
     when(repo.lowStock(5)).thenReturn(List.of(new Stock(A, 1, 5)));
     assertThat(service.lowStock(5)).containsExactly(new Stock(A, 1, 5));
     verify(repo, never()).movement(any(), anyInt(), any(), isNull(), isNull(), any());

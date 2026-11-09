@@ -28,6 +28,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Admin screens for the loyalty coins: earning rules and the shop-wide coin settings, under {@code /api/v1/admin}.
+ * Admin only (see SecurityConfig).
+ */
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminWalletController {
@@ -37,6 +41,17 @@ public class AdminWalletController {
   @Autowired
   void setOps(AdminOps ops) { this.ops = ops; }
 
+  /**
+   * Request body for creating or changing an earning rule. All money is in paise.
+   * @param name rule name shown to customers
+   * @param spendPaise the spend step, at least 1
+   * @param coins coins given for that spend, at least 1
+   * @param mode {@code PRO_RATA} or {@code SLAB}
+   * @param minOrderPaise minimum order value for the rule to apply; null means none
+   * @param startAt first moment the rule is live; null means no start limit
+   * @param endAt last moment the rule is live; null means no end limit
+   * @param active whether the rule is switched on; null means true
+   */
   public record RuleBody(@NotBlank String name, @Min(1) long spendPaise, @Min(1) long coins, @NotNull CoinMode mode,
                          @Min(0) Long minOrderPaise, Instant startAt, Instant endAt, Boolean active) {
     StoredRule toStored() {
@@ -45,6 +60,13 @@ public class AdminWalletController {
     }
   }
 
+  /**
+   * An earning rule as the admin sees it.
+   * @param id rule id
+   * @param mode {@code PRO_RATA} or {@code SLAB}
+   * @param minOrderPaise minimum order value in paise, 0 for none
+   * @param active whether the rule is switched on
+   */
   @Schema(name = "CoinRuleView")
 
   public record RuleView(UUID id, String name, long spendPaise, long coins, String mode, long minOrderPaise,
@@ -58,11 +80,17 @@ public class AdminWalletController {
 
   private final WalletService wallet;
 
+  /** Creates the controller with the wallet service (wired by Spring). */
   public AdminWalletController(WalletService wallet) { this.wallet = wallet; }
 
+  /** Lists every earning rule, by name. */
   @GetMapping("/coin-rules")
   public List<RuleView> rules() { return wallet.rules().stream().map(RuleView::of).toList(); }
 
+  /**
+   * Adds an earning rule (201). Repeating the call with the same {@code Idempotency-Key} header returns the same rule
+   * instead of creating a second one.
+   */
   @PostMapping("/coin-rules")
   @ResponseStatus(HttpStatus.CREATED)
   public RuleView create(@Valid @RequestBody RuleBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
@@ -71,18 +99,26 @@ public class AdminWalletController {
         ref -> wallet.rules().stream().filter(r -> r.id().toString().equals(ref)).findFirst().map(RuleView::of).orElse(null));
   }
 
+  /** Changes an earning rule. Fails with 404 when the rule does not exist. */
   @PutMapping("/coin-rules/{id}")
   public RuleView update(@PathVariable UUID id, @Valid @RequestBody RuleBody b) {
     return RuleView.of(wallet.updateRule(id, b.toStored(), CurrentUser.id()));
   }
 
+  /** Deletes an earning rule. */
   @DeleteMapping("/coin-rules/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete(@PathVariable UUID id) { wallet.deleteRule(id, CurrentUser.id()); }
 
+  /**
+   * Returns the coin settings: paise per coin, the maximum share of an order payable in coins, and the expiry in months.
+   */
   @GetMapping("/coin-settings")
   public CoinSettings settings() { return wallet.settings(); }
 
+  /**
+   * Saves the coin settings. Fails with 422 when a value is out of range (see {@link WalletService#saveSettings}).
+   */
   @PutMapping("/coin-settings")
   public CoinSettings save(@RequestBody CoinSettings s) { return wallet.saveSettings(s, CurrentUser.id()); }
 }

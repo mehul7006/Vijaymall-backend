@@ -24,13 +24,35 @@ import org.springframework.transaction.annotation.Transactional;
 /** Read-only numbers for the admin dashboard. "Today" is in the shop's time zone. */
 @Service
 public class ReportService {
+  /**
+   * Online sales of one day.
+   * @param salesPaise total of that day's counted online orders, in paise
+   */
   public record Day(LocalDate date, long salesPaise) {}
 
+  /**
+   * A product at or below its stock alert level.
+   * @param qty units left
+   */
   public record LowItem(UUID productId, String name, int qty) {}
 
+  /**
+   * Numbers on the admin dashboard. Online sales exclude cancelled and unpaid orders.
+   * @param salesTodayPaise online order value placed today, in paise
+   * @param ordersToday online orders placed today
+   * @param newOrders online orders currently in {@code PLACED} waiting for staff
+   * @param coinsIssuedToday coins earned today
+   * @param last7Days seven entries, oldest first
+   * @param lowStock up to ten products low on stock
+   * @param posSalesTodayPaise counter sales today, in paise
+   * @param posBillsToday counter bills today
+   * @param posRefundsTodayPaise counter refunds today, in paise
+   * @param onlineRefundsTodayPaise refunds given today on returned online orders, in paise; listed apart like the counter refunds,
+   *                                not subtracted from the sales figures above
+   */
   public record Dashboard(long salesTodayPaise, long ordersToday, long newOrders, long coinsIssuedToday,
                           List<Day> last7Days, List<LowItem> lowStock, long posSalesTodayPaise, long posBillsToday,
-                          long posRefundsTodayPaise) {}
+                          long posRefundsTodayPaise, long onlineRefundsTodayPaise) {}
 
   private static final ZoneId SHOP = ZoneId.of("Asia/Kolkata");
   private static final String COUNTED = "status NOT IN ('CANCELLED','PAYMENT_PENDING')";
@@ -42,6 +64,7 @@ public class ReportService {
   private final CatalogService catalog;
   private final Clock clock;
 
+  /** Creates the service. */
   public ReportService(InventoryService inventory, CatalogService catalog, Clock clock) {
     this.inventory = inventory;
     this.catalog = catalog;
@@ -54,6 +77,7 @@ public class ReportService {
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  /** Today's figures in the shop's time zone, cached for 30 seconds. */
   @Transactional(readOnly = true)
   public Dashboard dashboard() {
     LocalDate today = clock.instant().atZone(SHOP).toLocalDate();
@@ -72,8 +96,9 @@ public class ReportService {
     long posSales = scalar("SELECT COALESCE(SUM(total_paise), 0) FROM pos_sale WHERE created_at >= :d", dayStart);
     long posBills = scalar("SELECT count(*) FROM pos_sale WHERE created_at >= :d", dayStart);
     long posRefunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM pos_return WHERE created_at >= :d", dayStart);
+    long onlineRefunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM order_return WHERE created_at >= :d", dayStart);
 
-    return new Dashboard(sales, count, fresh, coins, lastSevenDays(today, from), lowStock(), posSales, posBills, posRefunds);
+    return new Dashboard(sales, count, fresh, coins, lastSevenDays(today, from), lowStock(), posSales, posBills, posRefunds, onlineRefunds);
   }
 
   /** Always seven entries, oldest first; days without orders show zero. */

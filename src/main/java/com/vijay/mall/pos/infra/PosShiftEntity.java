@@ -6,6 +6,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * A row of {@code pos_shift}: a cashier's cash-drawer shift, with the opening float and, once closed, the expected
+ * and counted cash.
+ */
 @Entity
 @Table(name = "pos_shift")
 class PosShiftEntity extends BaseEntity {
@@ -18,5 +22,6 @@ class PosShiftEntity extends BaseEntity {
   Long variancePaise;
   String note;
 
+  /** Required by JPA; not for application code. */
   protected PosShiftEntity() {}
 }

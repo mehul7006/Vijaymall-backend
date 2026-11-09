@@ -23,6 +23,7 @@ public enum OrderStatus {
     return all;
   }
 
+  /** Whether a move from this status to {@code target} is allowed. */
   public boolean canMoveTo(OrderStatus target, Fulfilment f) { return next(f).contains(target); }
 
   /** Delivered, picked up or cancelled: nothing can change any more. */

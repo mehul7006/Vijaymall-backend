@@ -43,10 +43,26 @@ public class OrderReturnService {
   @Autowired(required = false)
   void setDefective(DefectiveService defective) { this.defective = defective; }
 
+  /**
+   * One product the staff member returns.
+   * @param productId the product on the order
+   * @param qty units coming back, at most what is still returnable
+   * @param restock {@code false} to treat the units as defective (refund, but not back on the shelf); {@code null} or {@code true} puts them back
+   */
   public record ItemInput(UUID productId, int qty, Boolean restock) {}
 
+  /**
+   * What staff send to record a return.
+   * @param reason why, 1 to 200 characters
+   * @param items 1 to 100 products, each at most once
+   */
   public record Input(String reason, List<ItemInput> items) {}
 
+  /**
+   * One returned product as shown back.
+   * @param refundPaise the refund for these units, in paise
+   * @param restocked whether the units went back on the shelf
+   */
   public record ItemView(UUID productId, String name, int qty, long refundPaise, boolean restocked) {}
 
   /** refundMode is ONLINE (back to the customer's payment method), CASH (the shop hands it over; cash-on-delivery orders) or NONE. */
@@ -67,6 +83,7 @@ public class OrderReturnService {
   private final Clock clock;
   private final ApplicationEventPublisher events;
 
+  /** Creates the service. */
   public OrderReturnService(OrderRepository orders, OrderReturnRepository returns, InventoryService inventory, WalletService wallet,
                             PaymentService payments, OutboxService outbox, AuditService audit, TransactionTemplate tx, Clock clock,
                             ApplicationEventPublisher events) {
@@ -82,6 +99,14 @@ public class OrderReturnService {
     this.events = events;
   }
 
+  /**
+   * Records a return on a delivered or picked-up order, once per idempotency key (a retry returns the first result).
+   * <p>Refunds the returned lines' share of what was really paid, puts resellable units back on the shelf (others go to the defective ledger), and moves coins. Errors: {@code 409 ORDER_NOT_DELIVERED}, {@code 409 RETURN_EXCEEDS_SOLD}, {@code 409 REFUND_EXCEEDS_ORDER}, and validation errors for reason and items.
+   * @param actor the staff member recording the return
+   * @param orderId the order
+   * @param idemKey the required {@code Idempotency-Key}
+   * @param in the reason and lines
+   */
   public ReturnView create(UUID actor, UUID orderId, String idemKey, Input in) {
     if (idemKey == null || idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
     var existing = returns.findByIdem(idemKey);

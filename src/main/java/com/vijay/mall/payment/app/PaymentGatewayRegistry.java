@@ -16,11 +16,13 @@ public class PaymentGatewayRegistry {
   private final Map<String, PaymentGateway> byName;
   private final String onlineProvider;
 
+  /** Creates the registry from every gateway bean and the configured ONLINE provider name. */
   public PaymentGatewayRegistry(List<PaymentGateway> gateways, AppProps props) {
     this.byName = gateways.stream().collect(Collectors.toMap(PaymentGateway::provider, Function.identity()));
     this.onlineProvider = props.payment().onlineProvider();
   }
 
+  /** The gateway with this provider name (case-insensitive); {@code 404} if there is none. */
   public PaymentGateway byProvider(String name) {
     PaymentGateway g = byName.get(name == null ? "" : name.toLowerCase());
     if (g == null) throw ApiException.notFound("Payment provider");

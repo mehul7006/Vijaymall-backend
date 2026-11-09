@@ -33,6 +33,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class CreditService {
+  /** Longest note accepted on a repayment or adjustment, in characters. */
   static final int MAX_NOTE = 200;
 
   /** limitPaise 0 means credit is not enabled for this customer. */
@@ -65,6 +66,7 @@ public class CreditService {
 
   private void changed(UUID customerId, String reason, long delta) { if (live != null) live.credit(customerId, reason, delta); }
 
+  /** Creates the service. */
   public CreditService(CreditRepository credit, UserRepository users, InvoiceCounterRepository counters, ShopService shop,
                        AuditService audit, TransactionTemplate tx, Clock clock) {
     this.credit = credit;
@@ -77,6 +79,11 @@ public class CreditService {
   }
 
   // ---------- read ----------
+  /**
+   * The credit account of a customer: balance owed, limit and what is still available, all in paise.
+   *
+   * @throws ApiException 404 if the customer does not exist
+   */
   public AccountView account(UUID customerId) {
     User u = users.findById(customerId).orElseThrow(() -> ApiException.notFound("Customer"));
     return view(u, credit.find(customerId));
@@ -88,6 +95,12 @@ public class CreditService {
     return view(u, credit.find(u.id()));
   }
 
+  /**
+   * One customer's credit ledger, newest first.
+   *
+   * @param page zero-based page number (negative values count as 0)
+   * @param size page size (clamped to the allowed maximum)
+   */
   public Page<LedgerView> ledger(UUID customerId, int page, int size) {
     Page<CreditRepository.Entry> p = credit.ledger(customerId, Math.max(0, page), Page.clampSize(size));
     return new Page<>(p.items().stream().map(e -> new LedgerView(e.id(), e.kind(), e.deltaPaise(), e.balanceAfterPaise(),
@@ -128,6 +141,12 @@ public class CreditService {
     return CreditMath.returnAdjustment(creditOnBill, credit.returnedAgainst(saleId), refundPaise, a.balancePaise());
   }
 
+  /**
+   * Writes the ledger entry for goods returned from a bill bought on credit, which lowers what the customer owes.
+   *
+   * @param amountPaise how much of the refund cancelled credit (positive; stored as a negative entry)
+   * @param creditNoteNo credit note number shown as the entry reference
+   */
   public void recordReturn(UUID customerId, UUID saleId, UUID returnId, String creditNoteNo, long amountPaise,
                            UUID cashierId, Instant now) {
     credit.append(customerId, "RETURN", -amountPaise, creditNoteNo, saleId, returnId, null, "", cashierId, now);

@@ -16,6 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 /** Read side of the audit trail: who did what, when, filtered by any combination of person, action, record and time. */
 @Repository
 public class AuditQuery {
+  /**
+   * One audit trail entry.
+   * @param actorId the person who acted; {@code null} for the system
+   * @param action what was done, for example {@code ORDER_STATUS}
+   * @param entity the kind of record, for example {@code orders}
+   * @param entityId the record's id as text
+   * @param change short description of the change
+   * @param at when it happened
+   */
   public record Entry(UUID id, UUID actorId, String action, String entity, String entityId, String change, Instant at) {}
 
   @PersistenceContext

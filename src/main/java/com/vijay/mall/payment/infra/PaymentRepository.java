@@ -9,8 +9,16 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores payments, handled provider events, refunds, payment anomalies and the payment method switches. */
 @Repository
 public class PaymentRepository {
+  /**
+   * A payment as stored. Money is in paise.
+   * @param provider the gateway name, for example {@code razorpay}
+   * @param status {@code CREATED}, {@code CAPTURED}, {@code REFUNDED}, or an older failed/mismatch state
+   * @param providerOrderId the provider's order id
+   * @param providerRef the provider's payment id once captured
+   */
   public record Payment(UUID id, UUID orderId, String provider, long amountPaise, String status,
                         String providerOrderId, String providerRef) {}
 
@@ -18,6 +26,10 @@ public class PaymentRepository {
   public record AnomalyRow(UUID id, UUID paymentId, UUID orderId, String kind, long expectedPaise, long receivedPaise,
                            String providerRef, Instant createdAt) {}
 
+  /**
+   * Whether a payment method is switched on.
+   * @param code {@code COD} or {@code ONLINE}
+   */
   public record Setting(String code, boolean enabled) {}
 
   /** A refund waiting to be sent to the provider. */
@@ -43,6 +55,7 @@ public class PaymentRepository {
     return new Payment(e.id, e.orderId, e.provider, e.amountPaise, e.status, e.providerOrderId, e.providerRef);
   }
 
+  /** Inserts a new payment (normally with status {@code CREATED}). */
   @Transactional
   public void insert(UUID id, UUID orderId, String provider, String method, long amount, String status,
                      String providerOrderId, Instant now) {
@@ -59,18 +72,24 @@ public class PaymentRepository {
     payments.save(e);
   }
 
+  /** The payment for a provider's order id, if any. */
   public Optional<Payment> byProviderOrder(String provider, String providerOrderId) {
     return payments.findByProviderAndProviderOrderId(provider, providerOrderId).map(PaymentRepository::toDomain);
   }
 
+  /** The newest payment of an order, if any. */
   public Optional<Payment> latestForOrder(UUID orderId) {
     return payments.findFirstByOrderIdOrderByCreatedAtDesc(orderId).map(PaymentRepository::toDomain);
   }
 
+  /**
+   * Payments still {@code CREATED} since before {@code before}, oldest first, at most {@code limit}; the reconcile job asks the provider about them.
+   */
   public List<Payment> staleCreated(Instant before, int limit) {
     return payments.staleCreated(before, PageRequest.of(0, limit)).stream().map(PaymentRepository::toDomain).toList();
   }
 
+  /** Sets the status, stores the provider reference when one is given and replaces the failure reason. */
   @Transactional
   public void setStatus(UUID id, String status, String providerRef, String failure, Instant now) {
     payments.findById(id).ifPresent(e -> {
@@ -116,6 +135,7 @@ public class PaymentRepository {
   /** How many refunds are in this state (PENDING, PROCESSING, ISSUED, FAILED). */
   public long countRefunds(String status) { return refunds.countByStatus(status); }
 
+  /** Moves a {@code FAILED} refund back to {@code PENDING}; false when it was not failed. */
   @Transactional
   public boolean requeueFailedRefund(UUID id, Instant now) { return refunds.requeueFailed(id, now) == 1; }
 
@@ -125,12 +145,15 @@ public class PaymentRepository {
         .map(p -> new PendingRefund(r.id, p.id, p.provider, r.providerPaymentRef != null ? r.providerPaymentRef : p.providerRef, r.amountPaise, r.reason, r.attempts))).toList();
   }
 
+  /** Takes a pending refund for sending; only one caller wins, the others get false. */
   @Transactional
   public boolean claimRefund(UUID id, Instant now) { return refunds.claim(id, now) == 1; }
 
+  /** Returns refunds stuck in {@code PROCESSING} since before {@code before} to the queue; returns how many. */
   @Transactional
   public int requeueStuckRefunds(Instant before, Instant now) { return refunds.requeueStuck(before, now); }
 
+  /** Marks a refund as sent, with the provider's refund reference. */
   @Transactional
   public void refundIssued(UUID id, String providerRef, Instant now) {
     refunds.findById(id).ifPresent(r -> {
@@ -152,6 +175,7 @@ public class PaymentRepository {
     });
   }
 
+  /** Queues a refund of part or all of the payment row's own provider payment. */
   @Transactional
   public void insertRefund(UUID paymentId, long amount, String status, String ref, String reason, Instant now) {
     insertRefund(paymentId, amount, status, ref, reason, null, now);
@@ -174,12 +198,15 @@ public class PaymentRepository {
     refunds.save(e);
   }
 
+  /** Every payment method with its switch, in display order. */
   public List<Setting> settings() {
     return settings.findAllByOrderBySortOrderAsc().stream().map(s -> new Setting(s.code, s.enabled)).toList();
   }
 
+  /** Whether the method is switched on; an unknown code counts as off. */
   public boolean enabled(String code) { return settings.findById(code).map(s -> s.enabled).orElse(false); }
 
+  /** Switches a payment method on or off. */
   @Transactional
   public void setEnabled(String code, boolean enabled) { settings.findById(code).ifPresent(s -> s.enabled = enabled); }
 

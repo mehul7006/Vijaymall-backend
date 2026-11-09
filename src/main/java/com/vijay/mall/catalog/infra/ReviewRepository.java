@@ -11,10 +11,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores product reviews in the {@code product_review} table, with paging and rating summaries. */
 @Repository
 public class ReviewRepository {
   /** verified is true when the review was written for a delivered order. */
   public record Row(UUID id, UUID userId, int rating, String comment, Instant createdAt, boolean verified) {
+    /** A row not tied to a delivered order, so {@code verified} is false. */
     public Row(UUID id, UUID userId, int rating, String comment, Instant createdAt) {
       this(id, userId, rating, comment, createdAt, false);
     }
@@ -47,12 +49,14 @@ public class ReviewRepository {
     return toRow(jpa.saveAndFlush(e));
   }
 
+  /** One page of a product's reviews, newest first. */
   public Page<Row> page(UUID productId, int page, int size) {
     var result = jpa.findByProductId(productId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
     List<Row> rows = result.getContent().stream().map(ReviewRepository::toRow).toList();
     return new Page<>(rows, page, size, result.getTotalElements());
   }
 
+  /** The review this customer wrote for this product, if any. */
   public Optional<Row> find(UUID productId, UUID userId) {
     return jpa.findByProductIdAndUserId(productId, userId).map(ReviewRepository::toRow);
   }
@@ -64,12 +68,14 @@ public class ReviewRepository {
     return new Page<>(result.getContent().stream().map(ReviewRepository::toRow).toList(), page, size, result.getTotalElements());
   }
 
+  /** Average and count over several products together (zero and zero for an empty list). */
   public Summary summaryOf(Collection<UUID> productIds) {
     if (productIds.isEmpty()) return new Summary(0, 0);
     Double avg = jpa.averageOf(productIds);
     return new Summary(avg == null ? 0 : avg, (int) jpa.countByProductIdIn(productIds));
   }
 
+  /** Average and count of one product's reviews. */
   public Summary summary(UUID productId) {
     long count = jpa.countByProductId(productId);
     Double avg = jpa.average(productId);

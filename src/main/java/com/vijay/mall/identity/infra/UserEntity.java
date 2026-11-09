@@ -21,5 +21,6 @@ class UserEntity extends BaseEntity {
   Instant createdAt;
   Instant updatedAt;
 
+  /** Required by JPA; not for application code. */
   protected UserEntity() {}
 }

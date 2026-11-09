@@ -15,13 +15,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Product review endpoints: read reviews (public), check whether I may review, and write or replace my review. */
 @RestController
 @RequestMapping("/api/v1/products/{productId}/reviews")
 public class ReviewController {
+  /** Request body for a review: a rating from 1 to 5 and an optional comment of at most 1000 characters. */
   public record ReviewBody(@Min(1) @Max(5) int rating, @Size(max = 1000) String comment) {}
 
   private final ReviewService reviews;
 
+  /** Creates the controller with the review service. */
   public ReviewController(ReviewService reviews) { this.reviews = reviews; }
 
   /** Public: anyone can read reviews. */

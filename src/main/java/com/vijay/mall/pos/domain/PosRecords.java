@@ -8,12 +8,22 @@ import java.util.UUID;
 public final class PosRecords {
     private PosRecords() { }
 
+    /**
+     * The counter attributes of a product: whether it is sold by piece or by weight, its scale item code (PLU), GST
+     * percent and HSN code.
+     */
     public record ProductPos(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn) {
+        /** The attributes of a product nobody configured: sold by piece, no item code, 0% GST, no HSN. */
         public static ProductPos defaults(UUID productId) {
             return new ProductPos(productId, SoldBy.UNIT, null, 0, "");
         }
     }
 
+    /**
+     * The shop's own details and bill settings: name, address, phone, GSTIN, GST state code, UPI id, invoice prefix,
+     * receipt footer, weighing-scale prefix and mode, plus the tagline ({@code promise}) and the "about the shop"
+     * text ({@code details}) shown in the apps.
+     */
     public record ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
                               String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
                               WeighedMode weighedMode, String promise, String details) {
@@ -34,16 +44,27 @@ public final class PosRecords {
         }
     }
 
+    /** One stored payment on a bill or refund: mode, amount in paise and reference. */
     public record PaymentRecord(String mode, long amountPaise, String reference) { }
 
+    /**
+     * One stored line of a bill, money in paise: gross, discount, net and the GST split, plus how many units have
+     * been returned so far. {@code qty} is pieces, or grams for a weighed item.
+     */
     public record SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
                                  long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
                                  long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty) {
+        /** Units that can still be returned: sold minus already returned. */
         public int returnableQty() {
             return qty - returnedQty;
         }
     }
 
+    /**
+     * A stored counter bill: invoice number, who rang it and for which customer, amounts and GST split in paise,
+     * coupon, coin and manual discounts, round-off, payments (including any credit part), coins earned and the time
+     * it was sold. For an offline bill the time is when it was really rung up.
+     */
     public record SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
                              long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
                              long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
@@ -92,13 +113,23 @@ public final class PosRecords {
         }
     }
 
+    /** Converts stored payments into the shape {@link PaymentRules} checks. */
     static List<PaymentRules.Line> lines(List<PaymentRecord> payments) {
         return payments.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     }
 
+    /**
+     * One returned line of a credit note: which sold line, how many units, the refund for it and that refund's GST
+     * split, in paise.
+     */
     public record ReturnItemRecord(UUID saleItemId, int qty, long refundPaise, long taxablePaise, long cgstPaise,
                                    long sgstPaise) { }
 
+    /**
+     * A stored credit note for goods taken back from a bill: its number, reason, refund total and GST split in paise,
+     * coins clawed back or restored, the lines, how the refund was paid out and how much of it only reduced the
+     * customer's credit balance.
+     */
     public record ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
                                long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,
                                int coinsClawedBack, int coinsRestored, Instant createdAt,
@@ -116,6 +147,10 @@ public final class PosRecords {
     /** What earlier returns of one bill already moved, so a new return only moves its own share. */
     public record ReturnedSoFar(long grossPaise, int coinsClawedBack, int coinsRestored) { }
 
+    /**
+     * A basket parked at the till: who parked it, an optional label, the customer mobile, and the basket stored as
+     * JSON text.
+     */
     public record HoldRecord(UUID id, UUID cashierId, String label, String customerMobile, String payload,
                              Instant createdAt) { }
 }

@@ -24,6 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class OrderStreamController {
   private final OrderEventHub hub;
 
+  /** Creates the controller. */
   public OrderStreamController(OrderEventHub hub) { this.hub = hub; }
 
   /** The signed-in customer's own orders. A browser may pass the token as ?access_token= because EventSource cannot set headers. */

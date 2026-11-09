@@ -4,6 +4,7 @@ import java.time.Instant;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Reads and writes the single shop profile row. */
 @Repository
 public class ShopProfileRepository {
   /** hours is the stored JSON list of seven days; the service turns it into objects. */
@@ -14,12 +15,14 @@ public class ShopProfileRepository {
 
   ShopProfileRepository(ShopProfileJpa jpa) { this.jpa = jpa; }
 
+  /** The shop profile. */
   public Row get() {
     ShopProfileEntity e = jpa.findById(1).orElseThrow();
     return new Row(e.logoUrl, e.email, e.whatsapp, e.mapUrl, e.website, e.instagram, e.facebook, e.hours, e.holidayNote,
         e.onlineOrdersEnabled, e.onlineOrdersMessage, e.updatedAt);
   }
 
+  /** Overwrites the shop profile. */
   @Transactional
   public void save(Row r, Instant now) {
     ShopProfileEntity e = jpa.findById(1).orElseThrow();

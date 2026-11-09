@@ -8,14 +8,25 @@ public final class FlashMath {
 
   /** A sale price is never below Rs 1. */
   public static final long MIN_PRICE_PAISE = 100;
+  /** Smallest allowed percent-off value for a sale or item discount. */
   public static final int MIN_PERCENT = 1;
+  /** Largest allowed percent-off value for a sale or item discount. */
   public static final int MAX_PERCENT = 90;
 
   /** The discount that applies to an item: its own when it names one, else the sale's default. */
   public record Rule(FlashKind kind, long value) {
+    /** True when the rule really discounts something, that is its kind is not {@code NONE}. */
     public boolean usable() { return kind != FlashKind.NONE; }
   }
 
+  /**
+   * Picks the discount rule that applies to an item: the item's own rule when it names one, otherwise the sale's default.
+   * @param itemKind the item's own kind, or null / {@code NONE} to follow the sale
+   * @param itemValue the item's own value (percent, or fixed price in paise)
+   * @param saleKind the sale's default kind
+   * @param saleValue the sale's default value
+   * @return the rule to price with; it may be unusable when neither side has a discount
+   */
   public static Rule effective(FlashKind itemKind, long itemValue, FlashKind saleKind, long saleValue) {
     return itemKind != null && itemKind != FlashKind.NONE ? new Rule(itemKind, itemValue) : new Rule(saleKind, saleValue);
   }

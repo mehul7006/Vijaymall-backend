@@ -6,6 +6,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * A row of {@code credit_ledger}: one change to a customer's credit balance (sale, payment, return or adjustment)
+ * with the balance after it.
+ */
 @Entity
 @Table(name = "credit_ledger")
 class CreditLedgerEntity extends BaseEntity {
@@ -21,5 +25,6 @@ class CreditLedgerEntity extends BaseEntity {
   UUID actorId;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected CreditLedgerEntity() {}
 }

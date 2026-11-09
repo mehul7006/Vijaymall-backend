@@ -21,6 +21,7 @@ public class RateLimiter {
 
   private MeterRegistry metrics;
 
+  /** Creates the limiter. */
   public RateLimiter(Clock clock) { this.clock = clock; }
 
   /** Optional (plain unit tests run without it): counts the calls that were refused. */

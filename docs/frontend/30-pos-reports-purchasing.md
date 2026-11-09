@@ -976,3 +976,11 @@ The server stores the sale as an offline sale: `soldAt` is the sale time, the **
 - **Who**: admin only. **Request**: body `{ "note": string(optional, max 500) }`. **Response**: `200` the row with `reviewedBy`, `reviewedAt`, `reviewNote`.
 - **Errors**: 404 `NOT_FOUND`; 409 `ALREADY_REVIEWED` (each exception is reviewed once). Writes the audit entry `OFFLINE_EXCEPTION_REVIEWED`.
 - **Ops**: metrics `mall_pos_offline_exceptions_open`, `mall_pos_offline_exceptions_stale` (open for more than a day), `mall_pos_offline_exceptions_recorded_total{kind}`; alert `OfflineBillExceptionsUnreviewed`.
+
+
+---
+## Addendum: reports and purchases
+
+- **Refunds on returned online orders in the reports**: `GET /api/v1/admin/dashboard` gains `onlineRefundsTodayPaise`, and the sales summary (`GET /api/v1/admin/reports/summary`) gains `onlineRefundsPaise`: refunds given in the period on returned online orders (paise). Like the counter refunds (`posRefundsTodayPaise` / `posRefundsPaise`) they are **listed apart and not subtracted** from the sales figures: show net sales as sales minus both refund figures if you want a net view.
+- **`POST /api/v1/admin/purchases`**: a repeated `Idempotency-Key` returns the first delivery only if the request is the same delivery (supplier, invoice number and lines); the same key with a different delivery answers `409 IDEMPOTENCY_KEY_REUSED`.
+- **`POST /api/v1/admin/stock-takes`**: each product's stock row is locked while it is counted, so a sale cannot change the quantity between the read and the adjustment.

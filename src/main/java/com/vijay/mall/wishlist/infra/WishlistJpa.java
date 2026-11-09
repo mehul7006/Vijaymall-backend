@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code wishlist_item} rows, including the idempotent insert. */
 interface WishlistJpa extends JpaRepository<WishlistItemEntity, UUID> {
   List<WishlistItemEntity> findByUserIdOrderByCreatedAtDesc(UUID userId);
 

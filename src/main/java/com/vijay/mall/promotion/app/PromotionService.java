@@ -43,12 +43,16 @@ public class PromotionService {
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  /** Creates the service (wired by Spring). */
   public PromotionService(CouponRepository coupons, AuditService audit, Clock clock) {
     this.coupons = coupons;
     this.audit = audit;
     this.clock = clock;
   }
 
+  /**
+   * Trims and upper-cases a coupon code, so codes are matched regardless of how they were typed; null stays null.
+   */
   public static String normalize(String code) { return code == null ? null : code.trim().toUpperCase(); }
 
   private static ApiException invalid(String reason) {
@@ -61,6 +65,7 @@ public class PromotionService {
    * perLine is empty when the caller does not need the split.
    */
   public record Applied(long discountPaise, boolean worksWithCoins, List<Long> perLine) {
+    /** A discount without the per-line split. */
     public Applied(long discountPaise, boolean worksWithCoins) { this(discountPaise, worksWithCoins, List.of()); }
   }
 
@@ -117,8 +122,15 @@ public class PromotionService {
   }
 
   // ---------- admin ----------
+  /** Admin: every coupon, including inactive and used-up ones. */
   public List<Coupon> list() { return coupons.all(); }
 
+  /**
+   * Admin: validates and saves a coupon, audits it and tells open screens.
+   * <p>
+   * Needs a code, kind FLAT or PERCENT, a positive value (at most 100 for PERCENT), non-negative limits and an end date
+   * after the start. Fails with 422 when the code already exists.
+   */
   @Transactional
   public Coupon create(Coupon in, UUID actor) {
     check(in);
@@ -129,6 +141,9 @@ public class PromotionService {
     return coupons.find(id).orElseThrow();
   }
 
+  /**
+   * Admin: validates and changes a coupon with the same rules as create. Fails with 404 for an unknown coupon and 422 when the code belongs to another coupon.
+   */
   @Transactional
   public Coupon update(UUID id, Coupon in, UUID actor) {
     check(in);
@@ -141,6 +156,9 @@ public class PromotionService {
     return coupons.find(id).orElseThrow();
   }
 
+  /**
+   * Admin: removes a coupon. One that has ever been used is only switched off, so past orders keep their history.
+   */
   @Transactional
   public void delete(UUID id, UUID actor) {
     coupons.find(id).orElseThrow(() -> ApiException.notFound("Coupon"));

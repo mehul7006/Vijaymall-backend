@@ -31,6 +31,7 @@ public class FlashLifecycle {
   private final LiveEvents live;
   private final Clock clock;
 
+  /** Creates the job. */
   public FlashLifecycle(FlashRepository repo, OutboxService outbox, LiveEvents live, Clock clock) {
     this.repo = repo;
     this.outbox = outbox;
@@ -38,6 +39,9 @@ public class FlashLifecycle {
     this.clock = clock;
   }
 
+  /**
+   * Runs one pass: announces sales that have started or ended since the last pass, then asks open screens to refetch if anything changed.
+   */
   @Scheduled(fixedDelay = 60_000, initialDelay = 20_000)
   @Transactional
   public void tick() {

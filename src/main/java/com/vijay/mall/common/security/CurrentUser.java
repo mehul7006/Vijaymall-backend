@@ -16,7 +16,9 @@ public final class CurrentUser {
     return jwt;
   }
 
+  /** The signed-in user's id (the token subject); throws {@code 401 UNAUTHENTICATED} when there is no token. */
   public static UUID id() { return UUID.fromString(jwt().getSubject()); }
 
+  /** Whether the token's role is {@code ADMIN}; a cashier is not an admin. */
   public static boolean isAdmin() { return "ADMIN".equals(jwt().getClaimAsString("role")); }
 }

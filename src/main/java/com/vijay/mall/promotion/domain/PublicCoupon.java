@@ -25,6 +25,7 @@ public record PublicCoupon(String code, String kind, long value, long minOrderPa
         perUserLimit, categoryId == null ? List.of() : List.of(categoryId));
   }
 
+  /** Builds the customer-facing view of a coupon, leaving out the internal fields. */
   public static PublicCoupon from(Coupon c) {
     return new PublicCoupon(c.code(), c.kind(), c.value(), c.minOrderPaise(), c.maxDiscountPaise(), c.categoryId(),
         c.startAt(), c.endAt(), c.worksWithCoins(), c.firstOrderOnly(), c.perUserLimit(), c.categoryIds());

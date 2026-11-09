@@ -13,14 +13,21 @@ import org.springframework.transaction.annotation.Transactional;
 /** Customer credit: the account, its ledger, and the repayments taken at the counter. */
 @Repository
 public class CreditRepository {
+  /** A customer's credit account: the amount owed and the limit, in paise (a limit of 0 means credit is off). */
   public record Account(UUID userId, long balancePaise, long limitPaise) {}
 
+  /**
+   * One credit ledger line: its kind, the change in paise (positive means the customer owes more) and the balance
+   * after it, with the bill, return or repayment it came from.
+   */
   public record Entry(UUID id, String kind, long deltaPaise, long balanceAfterPaise, String refNo, UUID saleId,
                       UUID returnId, UUID paymentId, String note, UUID actorId, Instant at) {}
 
+  /** A repayment taken at the counter: receipt number, customer, cashier, total in paise and its payment parts. */
   public record Repayment(UUID id, String receiptNo, UUID userId, UUID cashierId, long amountPaise, String note,
                           Instant at, List<Line> lines) {}
 
+  /** One payment part of a repayment: mode, amount in paise and reference. */
   public record Line(String mode, long amountPaise, String reference) {}
 
   private final CreditJpa accounts;
@@ -49,6 +56,7 @@ public class CreditRepository {
     return new Account(e.userId, e.balancePaise, e.limitPaise);
   }
 
+  /** Sets the most the customer may owe, in paise, creating the account row if needed. 0 switches credit off. */
   @Transactional
   public void setLimit(UUID userId, long limitPaise, Instant now) {
     accounts.createIfAbsent(userId, now);
@@ -85,6 +93,7 @@ public class CreditRepository {
     return toEntry(ledgerJpa.save(e));
   }
 
+  /** How much credit earlier returns of this bill already cancelled, in paise. */
   public long returnedAgainst(UUID saleId) { return ledgerJpa.returnedAgainst(saleId); }
 
   /** Newest first. */
@@ -99,6 +108,10 @@ public class CreditRepository {
   }
 
   // ---------- repayments ----------
+  /**
+   * Stores a repayment with its payment parts and returns its id. A second insert with the same idempotency key fails
+   * on the unique key; the caller then reads the first one.
+   */
   @Transactional
   public UUID insertRepayment(UUID id, String receiptNo, String idemKey, UUID userId, UUID cashierId, long amount,
                               String note, Instant now, List<Line> parts) {
@@ -125,10 +138,12 @@ public class CreditRepository {
     return id;
   }
 
+  /** The repayment taken with this idempotency key, if any. */
   public Optional<Repayment> findRepaymentByIdem(String idemKey) {
     return payments.findByIdemKey(idemKey).map(this::assemble);
   }
 
+  /** One repayment by id. */
   public Optional<Repayment> findRepayment(UUID id) { return payments.findById(id).map(this::assemble); }
 
   private Repayment assemble(CreditPaymentEntity e) {

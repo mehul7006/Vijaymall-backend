@@ -41,6 +41,10 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import tools.jackson.databind.json.JsonMapper;
 
+/**
+ * Spring Security set-up: stateless bearer-token (JWT) authentication, CORS and the route rules.
+ * <p>Public: sign-in, payment webhooks, health and metrics, API docs, product images and the guest catalog reads. {@code /admin/orders} and {@code /admin/flash-sales} are open to ADMIN and CASHIER, every other {@code /admin} route to ADMIN only, {@code /pos} to CASHIER and ADMIN, and everything else needs a signed-in user.
+ */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {

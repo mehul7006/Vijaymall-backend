@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminRefundController {
   private final PaymentService payments;
 
+  /** Creates the controller. */
   public AdminRefundController(PaymentService payments) { this.payments = payments; }
 
   /** status = PENDING | PROCESSING | ISSUED | FAILED, or leave out for all. FAILED ones need a person. */
@@ -29,6 +30,9 @@ public class AdminRefundController {
     return payments.refunds(status, page, size);
   }
 
+  /**
+   * Puts a {@code FAILED} refund back in the queue for a fresh run of tries; {@code 409 REFUND_NOT_FAILED} for any other refund. Answers {@code 204 No Content} and writes an audit entry.
+   */
   @PostMapping("/{id}/retry")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void retry(@PathVariable UUID id) { payments.retryRefund(id, CurrentUser.id()); }

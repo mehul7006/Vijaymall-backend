@@ -40,6 +40,10 @@ public class PosSaleRepository {
   }
 
   // ---------- write ----------
+  /**
+   * Stores a bill with its lines and payments. {@code idemKey} is saved on the bill and is unique, so a retry cannot
+   * create a second bill.
+   */
   @Transactional
   public void insert(SaleRecord s, String idemKey) {
     PosSaleEntity e = new PosSaleEntity();
@@ -109,6 +113,10 @@ public class PosSaleRepository {
   @Transactional
   public boolean addReturned(UUID saleItemId, int qty) { return items.addReturned(saleItemId, qty) > 0; }
 
+  /**
+   * Stores a credit note with its lines and payout parts. {@code idemKey} is unique, so a retry cannot create a
+   * second credit note.
+   */
   @Transactional
   public void insertReturn(ReturnRecord r, String idemKey) {
     PosReturnEntity e = new PosReturnEntity();
@@ -152,8 +160,10 @@ public class PosSaleRepository {
   }
 
   // ---------- read ----------
+  /** One bill by id, with its lines and payments. */
   public Optional<SaleRecord> find(UUID id) { return sales.findById(id).map(e -> assemble(List.of(e)).get(0)); }
 
+  /** The bill created with this idempotency key, if any. */
   public Optional<SaleRecord> findByIdem(String idemKey) {
     return sales.findByIdemKey(idemKey).map(e -> assemble(List.of(e)).get(0));
   }
@@ -167,14 +177,17 @@ public class PosSaleRepository {
     return out;
   }
 
+  /** The bill with this invoice number, if any. */
   public Optional<SaleRecord> findByInvoiceNo(String invoiceNo) {
     return sales.findByInvoiceNo(invoiceNo).map(e -> assemble(List.of(e)).get(0));
   }
 
+  /** The 50 most recent bills of a customer mobile, newest first. */
   public List<SaleRecord> byMobile(String mobile) {
     return assemble(sales.findTop50ByCustomerMobileOrderByCreatedAtDesc(mobile));
   }
 
+  /** Up to 200 bills sold in the half-open period {@code [from, to)}, newest first. */
   public List<SaleRecord> between(Instant from, Instant to) {
     return assemble(sales.findTop200ByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(from, to));
   }
@@ -199,10 +212,12 @@ public class PosSaleRepository {
         i.discountPaise, i.netPaise, i.gstPercent, i.hsn, i.taxablePaise, i.cgstPaise, i.sgstPaise, i.returnedQty);
   }
 
+  /** The credit note created with this idempotency key, if any. */
   public Optional<ReturnRecord> findReturnByIdem(String idemKey) {
     return returns.findByIdemKey(idemKey).map(e -> assembleReturns(List.of(e)).get(0));
   }
 
+  /** The credit notes of a bill, oldest first. */
   public List<ReturnRecord> returnsOf(UUID saleId) { return assembleReturns(returns.findBySaleIdOrderByCreatedAt(saleId)); }
 
   /** Gross value and coins already moved by earlier credit notes of a bill. */

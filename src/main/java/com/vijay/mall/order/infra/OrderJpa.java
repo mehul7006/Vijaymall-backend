@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to the {@code orders} table. */
 interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
   Optional<OrderEntity> findByUserIdAndIdemKey(UUID userId, String idemKey);
 

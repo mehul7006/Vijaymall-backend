@@ -22,6 +22,7 @@ public class MobileAuthService {
   private final UserRepository users;
   private final Clock clock;
 
+  /** Creates the service with the mobile OTP and token services and the user repository (wired by Spring). */
   public MobileAuthService(MobileOtpService otp, TokenService tokens, UserRepository users, Clock clock) {
     this.otp = otp;
     this.tokens = tokens;
@@ -29,6 +30,14 @@ public class MobileAuthService {
     this.clock = clock;
   }
 
+  /**
+   * Verifies an SMS code and signs the user in, creating a customer when the number is new.
+   * @param rawMobile the number as typed; normalised to 10 digits
+   * @param code the code received by SMS
+   * @param deviceId optional device id stored with the refresh token
+   * @return fresh access and refresh tokens
+   * @throws com.vijay.mall.common.error.ApiException 422 {@code OTP_INVALID} for a bad code, 403 for a blocked user
+   */
   @Transactional(noRollbackFor = ApiException.class)
   public TokenService.AuthResult verify(String rawMobile, String code, String deviceId) {
     String mobile = MobileOtpService.require(rawMobile);

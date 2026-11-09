@@ -6,8 +6,18 @@ import java.util.UUID;
 
 /** Port every payment provider implements. The rest of the app only knows this interface. */
 public interface PaymentGateway {
+  /**
+   * What a provider needs to start a payment.
+   * @param orderNo the order number, sent as the receipt
+   * @param amountPaise the amount to collect, in paise
+   */
   record CreateRequest(UUID orderId, String orderNo, long amountPaise) {}
 
+  /**
+   * What the provider returned for a new payment.
+   * @param providerOrderId the provider's order id (null for cash-like providers)
+   * @param session what the app needs to open the payment screen
+   */
   record Created(String providerOrderId, PaymentSession session) {}
 
   /** False when the provider's keys are not set, so the method cannot take a payment yet. Cash-like providers need none. */
@@ -16,6 +26,7 @@ public interface PaymentGateway {
   /** Short lowercase name used in URLs and config, e.g. "razorpay". */
   String provider();
 
+  /** Creates the payment at the provider. */
   Created create(CreateRequest request);
 
   /** Rebuilds the app payload for an order that was already created at the provider. */

@@ -32,6 +32,9 @@ public class RazorpayGateway implements PaymentGateway {
   private final JsonMapper json;
   private final RestClient http;
 
+  /**
+   * Creates the gateway with short HTTP timeouts (5 s to connect, 15 s to read) against the configured Razorpay base URL.
+   */
   public RazorpayGateway(AppProps props, JsonMapper json) {
     this.cfg = props.payment();
     this.json = json;

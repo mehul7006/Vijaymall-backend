@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code coupon} rows, including the atomic use counting. */
 interface CouponJpa extends JpaRepository<CouponEntity, UUID> {
   List<CouponEntity> findAllByOrderByCodeAsc();
 

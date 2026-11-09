@@ -22,13 +22,24 @@ public final class OrderViews {
       this(productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, 0);
     }
 
+    /** A line without Gujarati name, pack label or coupon share. */
     public Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise) {
       this(productId, name, qty, unitPricePaise, lineTotalPaise, name, "");
     }
   }
 
+  /**
+   * One entry of an order's timeline.
+   * @param status the status that was reached
+   * @param at when
+   */
   public record Step(String status, Instant at) {}
 
+  /**
+   * One row of the customer's order list.
+   * @param totalPaise amount to pay, in paise
+   * @param itemCount total units on the order
+   */
   @Schema(name = "OrderSummary")
 
   public record Summary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
@@ -41,6 +52,15 @@ public final class OrderViews {
                              long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
                              long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {}
 
+  /**
+   * The customer's full view of one order.
+   * @param paymentSession how to pay, only while an online order waits for payment
+   * @param timeline status changes, oldest first
+   * @param slot the delivery or pickup window the customer chose
+   * @param cancelReason why it was cancelled or rejected, if it was
+   * @param coinBalance the customer's current coin balance
+   * @param paymentExpiresAt when an unpaid online order is cancelled; only set while it waits for payment
+   */
   public record View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
@@ -69,6 +89,7 @@ public final class OrderViews {
           paymentSession, timeline, placedAt, slot, cancelReason, null);
     }
 
+    /** Without slot, cancel reason, coin balance and payment deadline. */
     public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                 String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                 long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
@@ -80,5 +101,6 @@ public final class OrderViews {
     }
   }
 
+  /** An order as staff see it: the full order plus the customer's name and contact details. */
   public record AdminView(@JsonUnwrapped View order, String customerName, String customerEmail, String customerMobile) {}
 }

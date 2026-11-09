@@ -13,10 +13,16 @@ import org.springframework.stereotype.Repository;
 /** The ledger of returned goods that are not fit to sell. */
 @Repository
 public class DefectiveRepository {
+  /**
+   * A batch of returned goods in the defective ledger, with its review and final-decision details.
+   * <p>{@code status} is {@code PENDING_REVIEW}, {@code HELD}, {@code WRITTEN_OFF}, {@code RETURNED_TO_SUPPLIER} or {@code RESTOCKED};
+   * {@code source} says where it came from and {@code refId} is the return or order behind it.
+   */
   public record Row(UUID id, UUID productId, String productName, int qty, String source, UUID refId, String note, String status, Instant createdAt,
                     UUID createdBy, Instant reviewedAt, UUID reviewedBy, String reviewNote, Instant resolvedAt, UUID resolvedBy,
                     String resolveNote) {}
 
+  /** Per product: units confirmed defective and held, units waiting for review, and the number of open batches. */
   public record Summary(UUID productId, String productName, long heldQty, long pendingReviewQty, long batches) {}
 
   private static final String SELECT = "select d.id, d.product_id, p.name_en, d.qty, d.source, d.ref_id, d.note, d.status, d.created_at, d.created_by, "
@@ -24,8 +30,10 @@ public class DefectiveRepository {
 
   private final JdbcClient jdbc;
 
+  /** Creates the repository. */
   public DefectiveRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
+  /** Adds a new batch; the table gives it the starting status (waiting for review). */
   public void insert(UUID id, UUID productId, int qty, String source, UUID refId, String note, UUID actor, Instant now) {
     jdbc.sql("insert into defective_stock (id, product_id, qty, source, ref_id, note, created_at, created_by) values (:id, :p, :q, :s, :r, :n, :t, :a)")
         .param("id", id).param("p", productId).param("q", qty).param("s", source).param("r", refId).param("n", note).param("t", Timestamp.from(now))
@@ -40,6 +48,7 @@ public class DefectiveRepository {
         r.getObject("resolved_by", UUID.class), r.getString("resolve_note"));
   }
 
+  /** Finds one batch by id, with the product's English name. */
   public Optional<Row> find(UUID id) { return jdbc.sql(SELECT + "where d.id = :id").param("id", id).query((r, _) -> map(r)).optional(); }
 
   /** status and productId may be null (no filter). Newest first. */
@@ -48,6 +57,7 @@ public class DefectiveRepository {
         .param("s", status).param("p", productId).param("l", size).param("o", (long) page * size).query((r, _) -> map(r)).list();
   }
 
+  /** Number of batches matching the same filters as {@link #page}, for paging. */
   public long count(String status, UUID productId) {
     return jdbc.sql("select count(*) from defective_stock d where (cast(:s as text) is null or d.status = :s) and (cast(:p as uuid) is null or d.product_id = :p)")
         .param("s", status).param("p", productId).query(Long.class).single();
@@ -62,8 +72,10 @@ public class DefectiveRepository {
         new Summary(r.getObject("product_id", UUID.class), r.getString("name_en"), r.getLong("held"), r.getLong("pending"), r.getLong("n"))).list();
   }
 
+  /** Total units currently held as confirmed defective. */
   public long heldUnits() { return unitsIn("HELD"); }
 
+  /** Total units waiting for a review decision. */
   public long pendingReviewUnits() { return unitsIn("PENDING_REVIEW"); }
 
   private long unitsIn(String status) {

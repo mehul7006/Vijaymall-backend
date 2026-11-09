@@ -21,10 +21,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1")
 public class OrderReturnController {
+  /**
+   * Body of the return call.
+   * @param reason why the goods come back, 1 to 200 characters
+   * @param items the products and quantities, 1 to 100 entries
+   */
   public record ReturnBody(String reason, @NotEmpty List<OrderReturnService.ItemInput> items) {}
 
   private final OrderReturnService returns;
 
+  /** Creates the controller. */
   public OrderReturnController(OrderReturnService returns) { this.returns = returns; }
 
   /** Needs an Idempotency-Key so a retried request cannot refund twice. */
@@ -34,6 +40,7 @@ public class OrderReturnController {
     return returns.create(CurrentUser.id(), id, key, new OrderReturnService.Input(b.reason(), b.items()));
   }
 
+  /** Lists the returns recorded on any order, oldest first (ADMIN and CASHIER). */
   @GetMapping("/admin/orders/{id}/returns")
   public List<ReturnView> forStaff(@PathVariable UUID id) { return returns.forOrder(id, null); }
 

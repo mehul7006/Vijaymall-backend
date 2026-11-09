@@ -46,22 +46,37 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/pos")
 public class PosController {
+  /**
+   * Request body for a basket: the items, plus optional customer mobile, coupon code and coin redemption choice. The
+   * mobile is needed only to use a coupon or coins or to earn coins.
+   */
   public record CartBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
                          CoinRedemption.Mode coinMode, Integer percent) {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
   }
 
+  /**
+   * Request body for completing a bill: the basket, how it is paid, the cash handed over (for change) and an optional
+   * manual discount.
+   */
   public record SaleBody(@NotNull @Valid CartBody cart, List<Pay> payments, Long cashTenderedPaise,
                          PosViews.ManualDiscount manualDiscount) {
     SaleInput toInput() { return new SaleInput(cart.toCart(), payments, cashTenderedPaise, manualDiscount); }
   }
 
+  /** Request body for parking a basket: an optional label for the cashier and the basket itself. */
   public record HoldBody(String label, @NotNull @Valid CartBody cart) {}
 
+  /**
+   * Request body for a return against a bill: the sold lines and quantities coming back, a reason and how the refund
+   * is paid out.
+   */
   public record ReturnBody(@NotEmpty List<ReturnLine> items, String reason, List<Pay> refunds) {}
 
+  /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
   public record Receipt(int width, String text) {}
 
+  /** A UPI payment link (for the QR code) for an amount. */
   public record UpiLinkView(String link) {}
 
   private final PosCatalogService catalog;
@@ -70,6 +85,15 @@ public class PosController {
   private final PosReportService reports;
   private final ShopService shop;
 
+  /**
+   * Creates the controller.
+   *
+   * @param catalog counter product lookup
+   * @param pos billing, holds and receipts
+   * @param returns item-level returns
+   * @param reports day report
+   * @param shop shop settings
+   */
   public PosController(PosCatalogService catalog, PosService pos, PosReturnService returns, PosReportService reports,
                        ShopService shop) {
     this.catalog = catalog;
@@ -79,41 +103,62 @@ public class PosController {
     this.shop = shop;
   }
 
+  /** Returns the shop settings the till needs (name, address, GSTIN, UPI id, receipt footer, scale settings). */
   @GetMapping("/shop")
   public ShopSetting shop() { return shop.get(); }
 
+  /**
+   * Resolves a scanned barcode or weighed-scale label to a product, quantity and line price. Answers 404 for an
+   * unknown or inactive product so the cashier can search by name, and 400 for a malformed code.
+   */
   @GetMapping("/barcode/{code}")
   public Scan scan(@PathVariable String code) { return catalog.scan(code); }
 
+  /** Searches the products sellable at the counter by name, page by page. */
   @GetMapping("/products")
   public Page<PosProduct> products(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
                                    @RequestParam(defaultValue = "20") int size) {
     return catalog.search(q, page, size);
   }
 
+  /** Prices a basket (discounts, GST, coins, round-off) without recording anything. */
   @PostMapping("/quote")
   public BillView quote(@Valid @RequestBody CartBody body) { return pos.quote(body.toCart()); }
 
+  /**
+   * Completes a bill (201). Requires an {@code Idempotency-Key} header: repeating the same key returns the first bill
+   * instead of billing again. Takes stock, applies coins and coupon, books any credit portion and assigns the invoice
+   * number. A cashier needs a manager's PIN for a manual discount above their own limit.
+   */
   @PostMapping("/sales")
   @ResponseStatus(HttpStatus.CREATED)
   public SaleRecord sale(@RequestHeader("Idempotency-Key") String key, @Valid @RequestBody SaleBody body) {
     return pos.sale(CurrentUser.id(), CurrentUser.isAdmin(), key, body.toInput());
   }
 
+  /** Finds bills by invoice number, by customer mobile, or (by default) the bills of one day, newest first. */
   @GetMapping("/sales")
   public List<SaleRecord> sales(@RequestParam(required = false) String invoiceNo, @RequestParam(required = false) String mobile,
                                 @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
     return pos.search(invoiceNo, mobile, date);
   }
 
+  /** Returns one bill with its lines, payments and returns so far. Answers 404 if it does not exist. */
   @GetMapping("/sales/{id}")
   public SaleRecord sale(@PathVariable UUID id) { return pos.get(id); }
 
+  /** Returns the bill as printable text for the given paper width in characters. */
   @GetMapping("/sales/{id}/receipt")
   public Receipt receipt(@PathVariable UUID id, @RequestParam(defaultValue = "32") int width) {
     return new Receipt(width, pos.receipt(id, width));
   }
 
+  /**
+   * Takes goods back against a bill (201): issues a credit note, puts stock back (or into defective stock), adjusts
+   * coins and pays out the refund. Requires an {@code Idempotency-Key} header; a repeat returns the first return.
+   * Cashiers may only return recent bills (else 422 {@code RETURN_NEEDS_ADMIN}); asking for more than was sold
+   * answers 409 {@code RETURN_EXCEEDS_SOLD}.
+   */
   @PostMapping("/sales/{id}/returns")
   @ResponseStatus(HttpStatus.CREATED)
   public ReturnRecord refund(@PathVariable UUID id, @RequestHeader("Idempotency-Key") String key,
@@ -121,24 +166,33 @@ public class PosController {
     return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds()));
   }
 
+  /** Lists the returns already made against a bill. */
   @GetMapping("/sales/{id}/returns")
   public List<ReturnRecord> returnsOf(@PathVariable UUID id) { return returns.returnsOf(id); }
 
+  /**
+   * Builds the UPI link for a payment of {@code amountPaise}. Answers 422 {@code UPI_NOT_CONFIGURED} if the shop has
+   * no UPI id.
+   */
   @GetMapping("/upi-link")
   public UpiLinkView upiLink(@RequestParam long amountPaise, @RequestParam(required = false) String note) {
     return new UpiLinkView(pos.upiLink(amountPaise, note));
   }
 
+  /** Parks a basket so the cashier can serve someone else (201). */
   @PostMapping("/holds")
   @ResponseStatus(HttpStatus.CREATED)
   public HoldView hold(@Valid @RequestBody HoldBody body) { return pos.hold(CurrentUser.id(), body.label(), body.cart().toCart()); }
 
+  /** Lists the parked baskets, newest first. */
   @GetMapping("/holds")
   public List<HoldView> holds() { return pos.holds(); }
 
+  /** Returns one parked basket so it can be resumed. Answers 404 if it is gone. */
   @GetMapping("/holds/{id}")
   public HoldView getHold(@PathVariable UUID id) { return pos.getHold(id); }
 
+  /** Deletes a parked basket (204). Answers 404 if it is gone. */
   @DeleteMapping("/holds/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void discardHold(@PathVariable UUID id) { pos.discardHold(id); }

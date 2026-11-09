@@ -30,5 +30,6 @@ public record ReceiptData(
                 manualDiscountPaise, 0);
     }
 
+    /** One payment printed on the receipt: mode and amount in paise. */
     public record PaymentLine(String mode, long amountPaise) { }
 }

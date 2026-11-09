@@ -6,6 +6,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * Row of {@code outbox_event}: an event written with a business change and delivered later; {@code publishedAt} stays empty until the relay has handled it.
+ */
 @Entity
 @Table(name = "outbox_event")
 class OutboxEventEntity extends BaseEntity {
@@ -14,5 +17,6 @@ class OutboxEventEntity extends BaseEntity {
   Instant createdAt;
   Instant publishedAt;
 
+  /** For JPA. */
   protected OutboxEventEntity() {}
 }

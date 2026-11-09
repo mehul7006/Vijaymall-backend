@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** The admin-managed list of units. Products keep the unit's code; every screen reads the names from here. */
 @Service
 public class UnitService {
+  /** Unit code used when a product is saved without one. */
   static final String DEFAULT = "pc";
 
   private final UnitRepository units;
@@ -30,18 +31,19 @@ public class UnitService {
 
   private void changed() { if (live != null) live.area(CatalogChanged.UNITS); }
 
+  /** Creates the service. */
   public UnitService(UnitRepository units, AuditService audit) {
     this.units = units;
     this.audit = audit;
   }
 
-  /** Units a product can be given (for the pickers and the customer app). */
   private AppCaches caches;
 
   /** Optional (plain unit tests run without it). */
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  /** Units a product can be given (for the pickers and the customer app); served from a cache when one is available. */
   public List<UnitOfMeasure> active() {
     return caches == null ? units.allActive() : caches.get(AppCaches.Name.UNITS, "active", units::allActive);
   }
@@ -66,6 +68,11 @@ public class UnitService {
         .orElseThrow(() -> ApiException.validation("unit", "unknown unit '" + code.strip() + "'; add it under units first"));
   }
 
+  /**
+   * Adds a unit; the code is trimmed and kept as typed.
+   * @throws ApiException validation error when the code or English name is blank, the code is longer than 20 characters or
+   * {@code soldBy} is not {@code UNIT} / {@code WEIGHT}; {@code UNIT_EXISTS} (conflict) when the code exists ignoring case
+   */
   @Transactional
   public UnitOfMeasure create(UnitOfMeasure in, UUID actor) {
     UnitOfMeasure u = clean(in, in.code());

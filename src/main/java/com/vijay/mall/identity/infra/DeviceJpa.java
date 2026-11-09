@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code device_token} rows: lookup by push token, a user's tokens, and bulk deletes. */
 interface DeviceJpa extends JpaRepository<DeviceTokenEntity, UUID> {
   Optional<DeviceTokenEntity> findByFcmToken(String fcmToken);
 

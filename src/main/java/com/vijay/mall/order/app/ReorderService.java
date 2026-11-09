@@ -18,8 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class ReorderService {
+  /** Reason: the product was removed or is hidden. */
   public static final String UNAVAILABLE = "UNAVAILABLE";
+  /** Reason: the product has no stock left. */
   public static final String OUT_OF_STOCK = "OUT_OF_STOCK";
+  /** Reason: only part of the requested quantity is in stock. */
   public static final String LOW_STOCK = "LOW_STOCK";
 
   /**
@@ -30,16 +33,25 @@ public class ReorderService {
   public record Line(UUID productId, String name, String nameGu, String unitLabel, int requestedQty, int qty,
                      long unitPricePaise, boolean priceChanged, boolean available, String reason) {}
 
+  /**
+   * Result of the check.
+   * @param items one entry per line of the old order
+   * @param allAvailable {@code true} when every line can be added in full
+   */
   public record Reorder(UUID orderId, String orderNo, List<Line> items, boolean allAvailable) {}
 
   private final OrderRepository orders;
   private final CatalogService catalog;
 
+  /** Creates the service. */
   public ReorderService(OrderRepository orders, CatalogService catalog) {
     this.orders = orders;
     this.catalog = catalog;
   }
 
+  /**
+   * Checks each line of the customer's earlier order against the live catalog and stock; {@code 404} if the order is not theirs.
+   */
   @Transactional(readOnly = true)
   public Reorder check(UUID userId, UUID orderId) {
     OrderRepository.Row order = orders.find(orderId).filter(r -> r.userId().equals(userId))

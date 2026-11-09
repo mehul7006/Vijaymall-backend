@@ -19,8 +19,22 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Issues, rotates and revokes the tokens that keep a customer signed in.
+ * <p>
+ * The access token is a short-lived HS256 JWT carrying the user id and role. The refresh token is a random opaque
+ * string; only its SHA-256 hash is stored. Each refresh rotates the token, and presenting an already used one is treated
+ * as theft and revokes every token of that device.
+ */
 @Service
 public class TokenService {
+  /**
+   * What a successful sign-in or refresh returns to the app.
+   * @param accessToken the JWT to send as a Bearer token
+   * @param refreshToken the opaque token to get the next pair
+   * @param expiresInSeconds lifetime of the access token in seconds
+   * @param user the signed-in user
+   */
   public record AuthResult(String accessToken, String refreshToken, long expiresInSeconds, User user) {}
 
   private final JwtEncoder encoder;
@@ -30,6 +44,7 @@ public class TokenService {
   private final UserRepository users;
   private final SecureRandom random = new SecureRandom();
 
+  /** Creates the service (wired by Spring). */
   public TokenService(JwtEncoder encoder, AppProps props, Clock clock, RefreshTokenRepository refreshTokens,
                       UserRepository users) {
     this.encoder = encoder;
@@ -39,6 +54,11 @@ public class TokenService {
     this.users = users;
   }
 
+  /**
+   * Creates a new access token and refresh token for the user and stores the refresh token's hash.
+   * @param user the user to sign in
+   * @param deviceId optional device id kept with the refresh token
+   */
   @Transactional
   public AuthResult issue(User user, String deviceId) {
     Instant now = clock.instant();
@@ -76,6 +96,7 @@ public class TokenService {
     return issue(user, row.deviceId());
   }
 
+  /** Revokes the given refresh token; an unknown token is ignored. */
   @Transactional
   public void logout(String refreshToken) {
     refreshTokens.findByHash(OtpHasher.sha256Hex(refreshToken))

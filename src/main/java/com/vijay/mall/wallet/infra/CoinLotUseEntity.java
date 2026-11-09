@@ -15,5 +15,6 @@ class CoinLotUseEntity {
   @Id UUID lotId;
   int coins;
 
+  /** Required by JPA; not for application code. */
   protected CoinLotUseEntity() {}
 }

@@ -9,11 +9,14 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores supplier deliveries: the header in {@code purchase} and the lines in {@code purchase_item}. */
 @Repository
 public class PurchaseRepository {
+  /** A delivery's header; {@code totalCostPaise} is the sum of quantity times unit cost over the lines. */
   public record Header(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
                        Instant createdAt) {}
 
+  /** One received product line: quantity and the cost of each unit in paise. */
   public record Line(UUID productId, int qty, long unitCostPaise) {}
 
   private final PurchaseJpa purchases;
@@ -28,10 +31,13 @@ public class PurchaseRepository {
     return new Header(e.id, e.supplierName, e.invoiceNo, e.note, e.totalCostPaise, e.createdBy, e.createdAt);
   }
 
+  /** Finds a delivery header by id. */
   public Optional<Header> find(UUID id) { return purchases.findById(id).map(PurchaseRepository::toHeader); }
 
+  /** Finds the delivery already recorded under this idempotency key. */
   public Optional<Header> findByIdem(String key) { return purchases.findByIdemKey(key).map(PurchaseRepository::toHeader); }
 
+  /** The lines of one delivery. */
   public List<Line> lines(UUID purchaseId) {
     return items.findByPurchaseId(purchaseId).stream().map(i -> new Line(i.productId, i.qty, i.unitCostPaise)).toList();
   }

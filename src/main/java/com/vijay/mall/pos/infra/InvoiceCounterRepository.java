@@ -14,6 +14,12 @@ public class InvoiceCounterRepository {
   @PersistenceContext
   private EntityManager em;
 
+  /**
+   * The next number for a kind of document ({@code INVOICE}, {@code CREDIT_NOTE}, {@code CREDIT_RECEIPT}) in a
+   * financial year, starting at 1 for each year.
+   *
+   * @param financialYear for example {@code 2026-27}
+   */
   @Transactional
   public long next(String kind, String financialYear) {
     em.createNativeQuery("insert into invoice_counter (kind, fy, last_no) values (:k, :f, 0) on conflict (kind, fy) do nothing")

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 public class FcmConnectionTester implements ConnectionTester {
   private final FcmPushSender sender;
 
+  /** Creates the tester with the Firebase sender (wired by Spring). */
   public FcmConnectionTester(FcmPushSender sender) { this.sender = sender; }
 
   @Override

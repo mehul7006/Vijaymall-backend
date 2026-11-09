@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code refresh_token} rows: lookup by hash and revoking one token, a device or all of a user's tokens.
+ */
 interface RefreshTokenJpa extends JpaRepository<RefreshTokenEntity, UUID> {
   Optional<RefreshTokenEntity> findByTokenHash(String tokenHash);
 

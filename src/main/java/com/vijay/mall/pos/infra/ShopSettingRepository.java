@@ -6,12 +6,14 @@ import java.time.Instant;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Reads and writes the single row of shop settings. */
 @Repository
 public class ShopSettingRepository {
   private final PosShopJpa jpa;
 
   ShopSettingRepository(PosShopJpa jpa) { this.jpa = jpa; }
 
+  /** The shop settings. */
   public ShopSetting get() {
     ShopSettingEntity e = jpa.findById(1).orElseThrow();
     return new ShopSetting(e.shopName, e.address, e.phone, e.gstin, e.stateCode, e.upiId, e.invoicePrefix,
@@ -19,6 +21,7 @@ public class ShopSettingRepository {
         e.details == null ? "" : e.details);
   }
 
+  /** Overwrites the shop settings. */
   @Transactional
   public void save(ShopSetting s, Instant now) {
     ShopSettingEntity e = jpa.findById(1).orElseThrow();

@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
 
-/** 300 API calls per minute per client address (Cloudflare adds its own limits in front). See {@link #clientIp}. */
+/** Limits API calls per minute per client address (default 300, set with {@code app.rate-limit.api-per-minute}). See {@link #clientIp}. */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
   private final RateLimiter limiter;
@@ -34,6 +34,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
   private static volatile String trustedHeader = "";
   private RuntimeSettings settings;
 
+  /**
+   * Creates the filter.
+   * @param perMinute calls allowed per client address per minute
+   * @param ipHeader name of the trusted proxy header carrying the real client address, or empty
+   */
   public RateLimitFilter(RateLimiter limiter, JsonMapper mapper,
                          @Value("${app.rate-limit.api-per-minute:300}") int perMinute,
                          @Value("${app.rate-limit.client-ip-header:}") String ipHeader) {
@@ -69,6 +74,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     return !req.getRequestURI().startsWith("/api/");
   }
 
+  /**
+   * The client's address: the first value of the trusted proxy header when one is configured and present, otherwise the socket address.
+   */
   public static String clientIp(HttpServletRequest req) {
     String name = trustedHeader;
     if (!name.isEmpty()) {

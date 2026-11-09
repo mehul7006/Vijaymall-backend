@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code pos_hold}, the parked baskets, newest first. */
 interface PosHoldJpa extends JpaRepository<PosHoldEntity, UUID> {
   List<PosHoldEntity> findAllByOrderByCreatedAtDesc();
 }

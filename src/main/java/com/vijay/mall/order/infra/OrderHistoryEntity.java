@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** Row of {@code order_status_history}: one status change of an order, with who made it and an optional note. */
 @Entity
 @Table(name = "order_status_history")
 class OrderHistoryEntity extends BaseEntity {
@@ -16,5 +17,6 @@ class OrderHistoryEntity extends BaseEntity {
   String note;
   Instant createdAt;
 
+  /** For JPA. */
   protected OrderHistoryEntity() {}
 }

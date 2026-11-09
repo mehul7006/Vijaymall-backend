@@ -50,6 +50,19 @@ class SmtpAndTestersTest {
   }
 
   @Test
+  void aMailServerFailureIsACleanRetryableErrorNotAnUnhandledOne() {
+    org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("connection refused")).when(mail).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> smtp.send("bob@x.com", "314159"))
+        .isInstanceOfSatisfying(com.vijay.mall.common.error.ApiException.class, e -> {
+          assertThat(e.code()).isEqualTo("OTP_EMAIL_FAILED");
+          assertThat(e.status().value()).isEqualTo(503);
+          assertThat(e.getMessage()).doesNotContain("connection refused");
+        });
+    // the admin's test button still gets the raw failure to show the owner what is wrong
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> smtp.sendTest("bob@x.com")).isInstanceOf(org.springframework.mail.MailException.class);
+  }
+
+  @Test
   void senderIsCachedUntilTheSmtpSettingsChange() {
     fs.with(Settings.SMTP_HOST, "smtp.a").with(Settings.SMTP_PORT, "25");
     smtp.send("a@b.com", "1");

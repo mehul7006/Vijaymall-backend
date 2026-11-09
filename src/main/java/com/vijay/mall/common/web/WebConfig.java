@@ -11,6 +11,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
   private final AppProps props;
 
+  /** Creates the configuration. */
   public WebConfig(AppProps props) { this.props = props; }
 
   @Override

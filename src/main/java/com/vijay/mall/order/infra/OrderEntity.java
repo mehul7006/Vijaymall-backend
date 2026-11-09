@@ -7,6 +7,9 @@ import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Row of the {@code orders} table: an online order with its money (in paise), status, payment, address snapshot and the flags that make cancel and coin credit happen once. Updated with optimistic locking ({@code version}).
+ */
 @Entity
 @Table(name = "orders")
 class OrderEntity extends BaseEntity {
@@ -35,5 +38,6 @@ class OrderEntity extends BaseEntity {
   Instant updatedAt;
   @Version Long version;
 
+  /** For JPA. */
   protected OrderEntity() {}
 }

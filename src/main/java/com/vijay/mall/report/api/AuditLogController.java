@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuditLogController {
   private final AuditLogService audit;
 
+  /** Creates the controller. */
   public AuditLogController(AuditLogService audit) { this.audit = audit; }
 
   /** Any mix of filters; newest first. entity is the kind of record (orders, pos_sale, coupon...), entityId its id. */

@@ -31,8 +31,10 @@ public class PosCatalogRepository {
     return new ProductPos(e.productId, SoldBy.valueOf(e.soldBy), e.plu, e.gstPercent, e.hsn);
   }
 
+  /** The counter attributes saved for a product, if any. */
   public Optional<ProductPos> find(UUID productId) { return pos.findById(productId).map(PosCatalogRepository::toDomain); }
 
+  /** The product that owns this scale item code (PLU, without leading zeros), if any. */
   public Optional<ProductPos> findByPlu(String plu) { return pos.findByPlu(plu).map(PosCatalogRepository::toDomain); }
 
   /** Counter attributes for many products; products never configured get the defaults (by piece, 0% GST). */
@@ -44,6 +46,7 @@ public class PosCatalogRepository {
         id -> found.getOrDefault(id, ProductPos.defaults(id))));
   }
 
+  /** Creates or updates the counter attributes of a product. */
   @Transactional
   public void save(ProductPos p, Instant now) {
     ProductPosEntity e = pos.findById(p.productId()).orElseGet(() -> {
@@ -59,8 +62,10 @@ public class PosCatalogRepository {
     pos.saveAndFlush(e);
   }
 
+  /** The product a barcode belongs to, if the code is known. */
   public Optional<UUID> productByBarcode(String code) { return barcodes.findById(code).map(b -> b.productId); }
 
+  /** The barcodes of a product, in code order. */
   public List<String> barcodesOf(UUID productId) {
     return barcodes.findByProductIdOrderByCode(productId).stream().map(b -> b.code).toList();
   }

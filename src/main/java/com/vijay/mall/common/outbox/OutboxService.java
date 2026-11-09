@@ -22,6 +22,11 @@ public class OutboxService {
   /** Events written but not yet delivered; a growing number means the relay or a listener is stuck. */
   public long pending() { return jpa.countByPublishedAtIsNull(); }
 
+  /**
+   * Saves an event for later delivery, in the caller's transaction.
+   * @param type the event type, for example {@code ORDER_PLACED}
+   * @param payload any object; stored as JSON
+   */
   @Transactional
   public void add(String type, Object payload) {
     OutboxEventEntity e = new OutboxEventEntity();

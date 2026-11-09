@@ -14,6 +14,7 @@ public class RoutingOtpSender implements OtpSender {
   private final ConsoleOtpSender console;
   private final SmtpEmailOtpSender smtp;
 
+  /** Creates the router with the live settings and both delivery channels (wired by Spring). */
   public RoutingOtpSender(RuntimeSettings settings, ConsoleOtpSender console, SmtpEmailOtpSender smtp) {
     this.settings = settings;
     this.console = console;
