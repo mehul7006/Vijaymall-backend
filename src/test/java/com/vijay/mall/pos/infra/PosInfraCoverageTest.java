@@ -217,4 +217,28 @@ class PosInfraCoverageTest {
     assertThat(saleRepo.between(NOW, NOW.plusSeconds(60))).isEmpty();
     verify(items, never()).findBySaleIdIn(any());
   }
+
+  @Test void thePickerListsCustomersWithALimitByNameAndAllCustomersWhenAsked() {
+    jakarta.persistence.EntityManager em = mock(jakarta.persistence.EntityManager.class);
+    org.springframework.test.util.ReflectionTestUtils.setField(credit, "em", em);
+    jakarta.persistence.Query q = mock(jakarta.persistence.Query.class);
+    when(em.createNativeQuery(any(String.class))).thenReturn(q);
+    when(q.setParameter(any(String.class), any())).thenReturn(q);
+    UUID asObject = UUID.randomUUID(), asText = UUID.randomUUID();
+    when(q.getResultList()).thenReturn(List.<Object[]>of(new Object[] {asObject, "Asha", "9000000001", 500L, 1000L, false},
+        new Object[] {asText.toString(), null, null, 0L, 0L, true}));
+
+    var withLimit = credit.pick("%as%", false, 0, 10);
+    assertThat(withLimit.items()).extracting(CreditRepository.Pick::userId).containsExactly(asObject, asText);
+    assertThat(withLimit.items().get(0).limitPaise()).isEqualTo(1000);
+    assertThat(withLimit.items().get(1).blocked()).isTrue();
+    assertThat(withLimit.total()).isEqualTo(2);
+    verify(q).setParameter("pattern", "%as%");
+    verify(q).setParameter("n", 11);
+    verify(em).createNativeQuery(org.mockito.ArgumentMatchers.contains("join credit_account a on a.user_id = u.id where a.limit_paise > 0 and ("));
+
+    credit.pick(null, true, 2, 5);
+    verify(em).createNativeQuery(org.mockito.ArgumentMatchers.contains("left join credit_account a on a.user_id = u.id where u.role = 'CUSTOMER' order by"));
+    verify(q).setParameter("o", 10L);
+  }
 }

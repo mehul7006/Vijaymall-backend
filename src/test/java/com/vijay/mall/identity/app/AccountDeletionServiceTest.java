@@ -47,7 +47,7 @@ class AccountDeletionServiceTest {
     service = new AccountDeletionService(users, addresses, devices, tokens, orders, credit, mock(AuditService.class),
         Clock.fixed(NOW, ZoneOffset.UTC));
     when(users.findById(id)).thenReturn(Optional.of(new User(id, "a@b.c", "A", "9000000001", User.CUSTOMER)));
-    when(credit.account(id)).thenReturn(new CreditService.AccountView(id, "A", "9000000001", 0, 0, 0));
+    when(credit.account(id)).thenReturn(new CreditService.AccountView(id, "A", "9000000001", 0, 0, 0, false));
   }
 
   @Test
@@ -69,7 +69,7 @@ class AccountDeletionServiceTest {
 
   @Test
   void moneyOwedToTheShopBlocksDeletion() {
-    when(credit.account(id)).thenReturn(new CreditService.AccountView(id, "A", "9000000001", 5000, 10000, 5000));
+    when(credit.account(id)).thenReturn(new CreditService.AccountView(id, "A", "9000000001", 5000, 10000, 5000, false));
     assertThatThrownBy(() -> service.deleteAccount(id)).isInstanceOfSatisfying(ApiException.class,
         e -> assertThat(e.code()).isEqualTo("ACCOUNT_HAS_DUES"));
     verify(users, never()).anonymize(any(), any());

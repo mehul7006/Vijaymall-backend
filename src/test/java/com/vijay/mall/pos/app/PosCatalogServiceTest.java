@@ -184,7 +184,7 @@ class PosCatalogServiceTest {
     assertThatThrownBy(() -> service.save(rice, SoldBy.UNIT, "12ab", 5, "", List.of(), actor)).hasMessageContaining("digits");
     assertThatThrownBy(() -> service.save(rice, SoldBy.UNIT, null, 7, "", List.of(), actor)).hasMessageContaining("18 or 28");
     assertThatThrownBy(() -> service.save(rice, SoldBy.UNIT, null, 5, "", List.of("ab"), actor)).hasMessageContaining("letters");
-    assertThatThrownBy(() -> service.save(sugar, SoldBy.WEIGHT, "101", 5, "", List.of("2123456789012"), actor))
+    assertThatThrownBy(() -> service.save(sugar, SoldBy.WEIGHT, "101", 5, "", List.of(ean("212345678901")), actor))
         .hasMessageContaining("scale prefix");
     verify(repo, never()).save(any(), any());
   }

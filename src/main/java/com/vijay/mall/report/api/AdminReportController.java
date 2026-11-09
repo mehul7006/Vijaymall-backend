@@ -50,11 +50,19 @@ public class AdminReportController {
     return creditReports.report(period, from, to);
   }
 
-  /** Customers with credit accounts, biggest balance first. */
+  /**
+   * Customers with credit accounts, biggest balance first; each row carries the limit, what is still available (never negative) and
+   * whether the customer is blocked.
+   *
+   * @param outstandingOnly true (default) leaves out customers who owe nothing
+   * @param eligibleOnly true keeps only customers with a credit limit above zero
+   * @param q part of the name or mobile number, any case
+   */
   @GetMapping("/credit/accounts")
   public Page<CreditReportService.Debtor> creditAccounts(
-      @RequestParam(defaultValue = "true") boolean outstandingOnly, @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "true") boolean outstandingOnly, @RequestParam(defaultValue = "false") boolean eligibleOnly,
+      @RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
-    return creditReports.debtors(outstandingOnly, page, size);
+    return creditReports.debtors(outstandingOnly, eligibleOnly, q, page, size);
   }
 }

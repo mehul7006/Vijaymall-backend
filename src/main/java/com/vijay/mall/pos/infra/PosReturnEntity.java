@@ -22,6 +22,7 @@ class PosReturnEntity extends BaseEntity {
   int coinsClawedBack;
   int coinsRestored;
   long creditAdjustPaise;
+  long couponClawbackPaise;
   Instant createdAt;
 
   /** Required by JPA; not for application code. */

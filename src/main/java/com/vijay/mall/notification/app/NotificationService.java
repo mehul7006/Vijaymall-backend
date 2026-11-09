@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,6 +95,7 @@ public class NotificationService {
           notify(UUID.fromString(p.path("userId").asString()), "Order update", "Order " + no + " is now " + pretty(p.path("status").asString()) + ".", "ORDER", no);
         }
         case "LOW_STOCK" -> lowStock(p.path("items"));
+        case "LOT_EXPIRY" -> lotExpiry(p);
         case "FLASH_STARTED" -> {
           int n = p.path("items").asInt();
           tellStaff("Flash sale started", "\"" + p.path("name").asString() + "\" is live now with " + n + (n == 1 ? " item." : " items."),
@@ -143,6 +145,18 @@ public class NotificationService {
     }
     notify(UUID.fromString(p.path("userId").asString()), duplicate ? "Duplicate payment" : "Payment amount did not match", customer, "ORDER", no);
     for (UUID admin : profiles.staffIds()) notify(admin, "Payment problem", staff, "PAYMENT", no);
+  }
+
+  /** The daily expiry check: staff hear how many lots are close to their date (and how many were written off automatically). */
+  private void lotExpiry(JsonNode p) {
+    int lots = p.path("lots").asInt();
+    int written = p.path("writtenOff").asInt();
+    String names = StreamSupport.stream(p.path("items").spliterator(), false).limit(NAMES_SHOWN)
+        .map(i -> i.path("name").asString() + " (" + i.path("expiryDate").asString() + ")").collect(Collectors.joining(", "));
+    String body = lots + (lots == 1 ? " lot expires" : " lots expire") + " within " + p.path("days").asInt() + " days"
+        + (names.isEmpty() ? "." : ": " + names + (lots > NAMES_SHOWN ? " and more." : "."))
+        + (written > 0 ? " " + written + (written == 1 ? " expired lot was" : " expired lots were") + " written off." : "");
+    for (UUID staff : profiles.staffIds()) notify(staff, "Stock close to expiry", body, "STOCK", null);
   }
 
   /** Flash sale news goes to every staff member (admins and cashiers). */

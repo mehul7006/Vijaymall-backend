@@ -1,8 +1,11 @@
 package com.vijay.mall.order.app;
 
+import com.vijay.mall.common.CouponReturnMath;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.domain.OrderChanged;
@@ -40,6 +43,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class OrderReturnService {
   private DefectiveService defective;
 
+  private RuntimeSettings settings;
+
+  /** Optional (plain unit tests run without it): the admin's coupon policy for returns. */
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
+
+  private String policy() { return settings == null ? CouponReturnMath.KEEP : settings.get(Settings.RETURNS_COUPON_POLICY); }
+
   /** Optional (plain unit tests run without it): where goods returned as defective are kept. */
   @Autowired(required = false)
   void setDefective(DefectiveService defective) { this.defective = defective; }
@@ -64,13 +75,25 @@ public class OrderReturnService {
    * One returned product as shown back.
    * @param refundPaise the refund for these units, in paise
    * @param restocked whether the units went back on the shelf
+   * @param couponSharePaise the coupon discount that left with these units (not refunded), in paise
    */
   @Schema(name = "ReturnItemView")
-  public record ItemView(UUID productId, String name, int qty, long refundPaise, boolean restocked) {}
+  public record ItemView(UUID productId, String name, int qty, long refundPaise, boolean restocked, long couponSharePaise) {
+    /** An item that carried no coupon share. */
+    public ItemView(UUID productId, String name, int qty, long refundPaise, boolean restocked) {
+      this(productId, name, qty, refundPaise, restocked, 0);
+    }
+  }
 
-  /** refundMode is ONLINE (back to the customer's payment method), CASH (the shop hands it over; cash-on-delivery orders) or NONE. */
+  /** refundMode is ONLINE (back to the customer's payment method), CASH (the shop hands it over; cash-on-delivery orders) or NONE. couponClawbackPaise is the coupon discount the CLAWBACK_BELOW_MINIMUM policy took back out of this refund (0 under KEEP). */
   public record ReturnView(UUID id, UUID orderId, String orderNo, String reason, long refundPaise, String refundMode,
-                           int coinsClawedBack, int coinsRestored, Instant createdAt, List<ItemView> items) {}
+                           int coinsClawedBack, int coinsRestored, Instant createdAt, List<ItemView> items, long couponClawbackPaise) {
+    /** A return that took no coupon discount back. */
+    public ReturnView(UUID id, UUID orderId, String orderNo, String reason, long refundPaise, String refundMode,
+                      int coinsClawedBack, int coinsRestored, Instant createdAt, List<ItemView> items) {
+      this(id, orderId, orderNo, reason, refundPaise, refundMode, coinsClawedBack, coinsRestored, createdAt, items, 0);
+    }
+  }
 
   static final int MAX_ITEMS = 100;
   static final int MAX_REASON = 200;
@@ -122,7 +145,11 @@ public class OrderReturnService {
     }
   }
 
-  private UUID doCreate(UUID actor, UUID orderId, String idemKey, Input in) {
+  /** Everything worked out before anything is changed: the order, its lines, who asked for what, and the refund plan. */
+  private record Prepared(OrderRepository.Row order, List<OrderRepository.ItemRow> lines, Map<UUID, ItemInput> asked,
+                          Map<UUID, Integer> perLine, CouponReturnMath.Plan plan, String reason, String policy) {}
+
+  private Prepared prepare(UUID orderId, Input in) {
     OrderRepository.Row order = orders.find(orderId).orElseThrow(() -> ApiException.notFound("Order"));
     if (!"DELIVERED".equals(order.status()) && !"PICKED_UP".equals(order.status())) {
       throw ApiException.conflict("ORDER_NOT_DELIVERED", "Only a delivered or picked-up order can have items returned", Map.of());
@@ -162,6 +189,31 @@ public class OrderReturnService {
     // What each line really cost the customer: its price less its coupon share, less its share of the coins spent.
     long[] net = lines.stream().mapToLong(l -> Math.max(0, l.lineTotalPaise() - l.couponDiscountPaise())).toArray();
     long[] coinShare = OrderReturnMath.allocate(Math.min(order.coinDiscount(), Arrays.stream(net).sum()), net);
+    List<CouponReturnMath.Line> sold = new ArrayList<>();
+    for (int k = 0; k < lines.size(); k++) {
+      OrderRepository.ItemRow l = lines.get(k);
+      sold.add(new CouponReturnMath.Line(l.qty(), l.lineTotalPaise(), Math.min(l.couponDiscountPaise(), l.lineTotalPaise()), net[k] - coinShare[k]));
+    }
+    Map<UUID, Integer> index = new HashMap<>();
+    for (int k = 0; k < lines.size(); k++) index.put(lines.get(k).id(), k);
+    List<CouponReturnMath.Earlier> earlier = new ArrayList<>();
+    for (OrderReturnRepository.Return r : returns.forOrder(orderId)) {
+      int[] back = new int[lines.size()];
+      r.lines().forEach(rl -> back[index.get(rl.orderItemId())] += rl.qty());
+      earlier.add(new CouponReturnMath.Earlier(back, r.couponClawbackPaise()));
+    }
+    int[] returning = new int[lines.size()];
+    for (int k = 0; k < lines.size(); k++) returning[k] = perLine.getOrDefault(lines.get(k).id(), 0);
+    String policy = policy();
+    CouponReturnMath.Plan plan = CouponReturnMath.plan(sold, lines.stream().mapToInt(OrderRepository.ItemRow::returnedQty).toArray(), earlier, returning, policy, orders.couponMinimum(orderId));
+    return new Prepared(order, lines, asked, perLine, plan, reason, policy);
+  }
+
+  private UUID doCreate(UUID actor, UUID orderId, String idemKey, Input in) {
+    Prepared p = prepare(orderId, in);
+    OrderRepository.Row order = p.order();
+    List<OrderRepository.ItemRow> lines = p.lines();
+    String reason = p.reason();
     OrderReturnRepository.Totals prior = returns.totals(orderId);
 
     UUID returnId = UUID.randomUUID();
@@ -172,19 +224,19 @@ public class OrderReturnService {
     long cumulativeGross = 0;
     for (int k = 0; k < lines.size(); k++) {
       OrderRepository.ItemRow l = lines.get(k);
-      ItemInput i = asked.get(l.productId());
-      int returning = perLine.getOrDefault(l.id(), 0);
+      ItemInput i = p.asked().get(l.productId());
+      int returning = p.perLine().getOrDefault(l.id(), 0);
       cumulativeGross += OrderReturnMath.share(l.lineTotalPaise(), l.qty(), 0, l.returnedQty() + returning);
       if (returning == 0) continue;
-      long lineRefund = OrderReturnMath.share(net[k] - coinShare[k], l.qty(), l.returnedQty(), returning);
+      long lineRefund = p.plan().refundPaise()[k];
       boolean back = i.restock() == null || i.restock();
       if (!returns.addReturned(l.id(), returning)) {
         throw ApiException.conflict("RETURN_EXCEEDS_SOLD", "More than what is left to return", Map.of("productId", l.productId().toString()));
       }
       refund += lineRefund;
-      stored.add(new OrderReturnRepository.Line(l.id(), returning, lineRefund, back));
-      if (back) restock.add(new InventoryService.Item(l.productId(), returning));
-      else defectiveGoods.add(new InventoryService.Item(l.productId(), returning));
+      stored.add(new OrderReturnRepository.Line(l.id(), returning, lineRefund, back, p.plan().couponSharePaise()[k]));
+      if (back) restock.add(new InventoryService.Item(l.productId(), returning, l.id()));
+      else defectiveGoods.add(new InventoryService.Item(l.productId(), returning, l.id()));
     }
     if (prior.refundPaise() + refund > order.total()) {
       throw ApiException.conflict("REFUND_EXCEEDS_ORDER", "More than the order was worth", Map.of("totalPaise", order.total()));
@@ -208,12 +260,60 @@ public class OrderReturnService {
     String mode = refund <= 0 ? "NONE" : "ONLINE".equals(order.paymentMethod()) && payments.refundPartial(orderId, refund, "return " + order.orderNo())
         ? "ONLINE" : "CASH";
     Instant now = clock.instant();
-    returns.insert(returnId, orderId, idemKey, reason, refund, mode, clawed, restored, actor, stored, now);
-    audit.log(actor, "ORDER_RETURN", "orders", orderId, order.orderNo() + " refund=" + refund + " mode=" + mode + " " + reason);
+    long clawbackTotal = p.plan().clawbackTotalPaise();
+    returns.insert(returnId, orderId, idemKey, reason, refund, mode, clawed, restored, actor, stored, now, clawbackTotal);
+    audit.log(actor, "ORDER_RETURN", "orders", orderId, order.orderNo() + " refund=" + refund + " mode=" + mode
+        + (clawbackTotal > 0 ? " couponClawback=" + clawbackTotal : "") + " " + reason);
     outbox.add("ORDER_RETURN", Map.of("orderId", orderId, "orderNo", order.orderNo(), "userId", order.userId(), "refundPaise", refund,
         "mode", mode));
     events.publishEvent(new OrderChanged(orderId, order.orderNo(), order.userId(), order.status(), order.status(), now));
     return returnId;
+  }
+
+  /**
+   * One line of a return preview. For the returned pieces: {@code grossPaise} (their price), less {@code couponSharePaise} (their
+   * share of the coupon discount), less {@code coinSharePaise} (their share of the coins spent), less {@code clawbackPaise} (coupon
+   * discount taken back under the CLAWBACK_BELOW_MINIMUM policy) is the {@code refundPaise}.
+   */
+  @Schema(name = "ReturnPreviewItem")
+  public record PreviewItem(UUID orderItemId, UUID productId, String name, int qty, long grossPaise, long couponSharePaise,
+                            long coinSharePaise, long clawbackPaise, long refundPaise) {}
+
+  /**
+   * What a return would refund, exactly as recording it would, without changing anything.
+   * @param couponPolicy the policy in force, {@code KEEP} or {@code CLAWBACK_BELOW_MINIMUM}
+   * @param refundPaise the total refund
+   * @param couponShareRemovedPaise the coupon discount that leaves with the returned pieces (the customer does not get this back)
+   * @param coinShareRemovedPaise the coin value that leaves with them
+   * @param couponClawbackPaise coupon discount of the kept pieces taken back out of this refund (0 under KEEP)
+   * @param deliveryFeeRefundedPaise always 0: the delivery fee is not refunded
+   */
+  @Schema(name = "ReturnPreview")
+  public record PreviewView(UUID orderId, String orderNo, String couponPolicy, long refundPaise, long couponShareRemovedPaise,
+                            long coinShareRemovedPaise, long couponClawbackPaise, long deliveryFeeRefundedPaise,
+                            List<PreviewItem> items) {}
+
+  /**
+   * The refund a return would give, with the coupon and coin share per line. Same checks and the same maths as {@link #create}, no
+   * stock, money or coin movement and nothing stored.
+   * @param orderId the order
+   * @param in the reason (optional here) and lines, as for {@link #create}
+   */
+  public PreviewView preview(UUID orderId, Input in) {
+    Input asked = in.reason() == null || in.reason().isBlank() ? new Input("preview", in.items()) : in;
+    Prepared p = tx.execute(_ -> prepare(orderId, asked));
+    CouponReturnMath.Plan plan = p.plan();
+    List<PreviewItem> items = new ArrayList<>();
+    for (int k = 0; k < p.lines().size(); k++) {
+      OrderRepository.ItemRow l = p.lines().get(k);
+      int returning = p.perLine().getOrDefault(l.id(), 0);
+      if (returning == 0) continue;
+      items.add(new PreviewItem(l.id(), l.productId(), l.name(), returning, plan.grossPaise()[k], plan.couponSharePaise()[k],
+          plan.otherSharePaise()[k], plan.clawbackPaise()[k], plan.refundPaise()[k]));
+    }
+    return new PreviewView(orderId, p.order().orderNo(), p.policy(), items.stream().mapToLong(PreviewItem::refundPaise).sum(),
+        items.stream().mapToLong(PreviewItem::couponSharePaise).sum(), items.stream().mapToLong(PreviewItem::coinSharePaise).sum(),
+        plan.clawbackTotalPaise(), 0, items);
   }
 
   /** The returns of one order, oldest first. {@code onlyFor} limits it to the customer's own order (null for staff). */
@@ -232,9 +332,9 @@ public class OrderReturnService {
     Map<UUID, OrderRepository.ItemRow> byId = lines.stream().collect(Collectors.toMap(OrderRepository.ItemRow::id, Function.identity()));
     List<ItemView> items = r.lines().stream().map(l -> {
       OrderRepository.ItemRow row = byId.get(l.orderItemId());
-      return new ItemView(row == null ? null : row.productId(), row == null ? "?" : row.name(), l.qty(), l.refundPaise(), l.restocked());
+      return new ItemView(row == null ? null : row.productId(), row == null ? "?" : row.name(), l.qty(), l.refundPaise(), l.restocked(), l.couponSharePaise());
     }).toList();
     return new ReturnView(r.id(), r.orderId(), orderNo, r.reason(), r.refundPaise(), r.refundMode(), r.coinsClawedBack(),
-        r.coinsRestored(), r.createdAt(), items);
+        r.coinsRestored(), r.createdAt(), items, r.couponClawbackPaise());
   }
 }

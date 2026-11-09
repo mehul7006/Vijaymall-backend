@@ -73,6 +73,7 @@ class PublicCouponTest {
   @Test
   void serviceListsOnlyOfferedCouponsInRepositoryOrder() {
     var repo = mock(CouponRepository.class);
+    when(repo.namesFor(org.mockito.ArgumentMatchers.any())).thenReturn(new com.vijay.mall.promotion.infra.CouponRepository.Names(java.util.Map.of(), java.util.Map.of(), java.util.Map.of()));
     when(repo.allActive()).thenReturn(List.of(
         coupon("A", true, null, null, 0, 0),
         coupon("B", true, null, EARLIER, 0, 0),

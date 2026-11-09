@@ -151,15 +151,23 @@ public class AdminCatalogController {
    * Lists products for the admin screen, including inactive and counter-only ones, with stock numbers.
    * @param q optional text matched against the English and Gujarati names
    * @param categoryId optional category filter
+   * @param hotSale optional: true for products flagged hot sale, false for the others
+   * @param active optional: true for active products, false for retired ones
+   * @param lowStock true to keep only products at or below their stock alert level
+   * @param sort {@code name} (default), {@code lowStock} (emptiest first) or {@code updated} (most recently changed first); another value answers 400 {@code fields.sort}
    * @param page zero-based page number
    * @param size page size (clamped by the service)
    */
   @GetMapping("/products")
   public Page<AdminProduct> list(@RequestParam(required = false) String q,
                                  @RequestParam(required = false) UUID categoryId,
+                                 @RequestParam(required = false) Boolean hotSale,
+                                 @RequestParam(required = false) Boolean active,
+                                 @RequestParam(defaultValue = "false") boolean lowStock,
+                                 @RequestParam(required = false) String sort,
                                  @RequestParam(defaultValue = "0") int page,
                                  @RequestParam(defaultValue = "20") int size) {
-    return catalog.adminList(q, categoryId, page, size);
+    return catalog.adminList(q, categoryId, hotSale, active, lowStock, sort, page, size);
   }
 
   /**
@@ -207,6 +215,26 @@ public class AdminCatalogController {
   @PatchMapping("/products/{id}")
   public AdminProduct patch(@PathVariable UUID id, @RequestBody @Schema(implementation = ProductPatchBody.class) Map<String, Object> body) {
     return catalog.patch(id, new ProductPatch(body), CurrentUser.id());
+  }
+
+  /**
+   * Body of the bulk hot-sale change.
+   * @param ids the products, 1 to 200
+   * @param hotSale true to put them on hot sale, false to take them off
+   * @param hotStart optional start of the window (ISO instant, zone-less date-time or plain date, India time); null means no start
+   * @param hotEnd optional end of the window, same formats; null means no end
+   */
+  public record HotSaleBody(@NotNull @Size(min = 1, max = 200) List<@NotNull UUID> ids, @NotNull Boolean hotSale, Instant hotStart, Instant hotEnd) {}
+
+  /**
+   * Puts many products on hot sale, or takes them off, in one call: all or nothing, one audit entry and one catalog announcement.
+   * The window replaces each product's old window. Repeating the call with the same {@code Idempotency-Key} changes nothing more.
+   * Answers 404 (nothing changed) when an id is unknown, 400 {@code fields.ids} for an empty or longer than 200 list.
+   */
+  @PatchMapping("/products/hot-sale")
+  public CatalogService.HotSaleResult hotSale(@Valid @RequestBody HotSaleBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.runStored(ops, key, "product-hot-sale", CurrentUser.id(), AdminOps.fingerprint(b),
+        () -> catalog.setHotSale(b.ids(), b.hotSale(), b.hotStart(), b.hotEnd(), CurrentUser.id()), CatalogService.HotSaleResult.class);
   }
 
   /**

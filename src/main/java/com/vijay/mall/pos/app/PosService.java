@@ -12,6 +12,8 @@ import com.vijay.mall.config.Settings;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.inventory.domain.Lot;
+import com.vijay.mall.inventory.domain.LotAllocator;
 import com.vijay.mall.order.app.QuoteService;
 import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.pos.app.PosViews.BillLine;
@@ -20,6 +22,7 @@ import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.HoldView;
 import com.vijay.mall.pos.app.PosViews.Item;
 import com.vijay.mall.pos.app.PosViews.ManualDiscount;
+import com.vijay.mall.payment.app.MoneyAccountService;
 import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.Rung;
 import com.vijay.mall.pos.app.PosViews.RungLine;
@@ -31,7 +34,10 @@ import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.CreditNoteData;
 import com.vijay.mall.pos.domain.PaymentRules;
+import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
+import com.vijay.mall.payment.app.TerminalService;
+import com.vijay.mall.payment.domain.CardTerminal.Attachment;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
@@ -147,7 +153,7 @@ public class PosService implements ReferenceLookup {
     requireCustomerForPromo(cart, mobile);
     Optional<User> customer = mobile == null ? Optional.empty() : users.findByMobile(mobile);
     UUID userId = customer.map(User::id).orElse(mobile == null ? null : UUID.randomUUID());
-    Priced priced = flashed(base, userId);
+    Priced priced = laned(flashed(base, userId));
     Quote q = quotes.quoteLines(userId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
     long subtotal = priced.drafts().stream().mapToLong(BillCalculator.Draft::linePaise).sum();
     long manual = previewManual(manualDiscount, subtotal - q.couponDiscountPaise() - q.coinDiscountPaise());
@@ -222,9 +228,35 @@ public class PosService implements ReferenceLookup {
       if (qty > max) throw ApiException.validation("qty", "quantity too large for " + p.nameEn());
       BillCalculator.Draft d = new BillCalculator.Draft(id, p.nameEn(), a.soldBy(), qty, p.pricePaise(), a.gstPercent(), a.hsn());
       drafts.add(d);
-      lines.add(new PricedLine(id, p.categoryId(), p.nameEn(), qty, p.pricePaise(), d.linePaise(), p.coinRedeemable(), p.earnsCoins()));
+      lines.add(new PricedLine(id, p.categoryId(), p.nameEn(), qty, p.pricePaise(), d.linePaise(), p.coinRedeemable(), p.earnsCoins(),
+          p.nameEn(), "", null, 0, p.productGroupId()));
     });
     return new Priced(lines, drafts);
+  }
+
+  private MoneyAccountService moneyAccounts;
+
+  /** Optional (plain unit tests run without it): names the money account of every payment line. */
+  @Autowired(required = false)
+  void setMoneyAccounts(MoneyAccountService moneyAccounts) { this.moneyAccounts = moneyAccounts; }
+
+  /**
+   * Gives every payment line its money account: the one the till named (checked), else the shop's default for the mode. An offline bill
+   * keeps an account that was switched off after the sale was rung.
+   */
+  private List<Pay> tagged(List<Pay> pays, boolean offline) {
+    if (moneyAccounts == null) return pays;
+    List<Pay> out = new ArrayList<>();
+    for (int i = 0; i < pays.size(); i++) {
+      Pay p = pays.get(i);
+      if (p.terminalPaymentId() != null) { // the machine's own account is taken when the payment is attached
+        out.add(p);
+        continue;
+      }
+      out.add(new Pay(p.mode(), p.amountPaise(), p.reference(), null, moneyAccounts.counterAccount(p.mode(), p.moneyAccountId(),
+          "payments[" + i + "].moneyAccountId", offline), p.terminalId()));
+    }
+    return out;
   }
 
   private FlashPricing flash;
@@ -254,6 +286,42 @@ public class PosService implements ReferenceLookup {
       if (l.qty() > a.saleQty()) {
         lines.add(l.split(l.qty() - a.saleQty(), l.unitPricePaise(), null, 0));
         drafts.add(new BillCalculator.Draft(d.productId(), d.name(), d.soldBy(), l.qty() - a.saleQty(), d.unitPricePaise(), d.gstPercent(), d.hsn()));
+      }
+    }
+    return new Priced(lines, drafts);
+  }
+
+  /**
+   * Splits the lines of lot-priced products whose stock holds more than one price into runs, each run priced at the lot its units will
+   * come from (5 at 100 and 2 at 120 are two lines). Units a flash sale already covers are passed over first, because the flash
+   * price overrides the lot price while the sale runs. Products with one price for all their stock are left as they are.
+   */
+  private Priced laned(Priced p) {
+    Set<UUID> ids = new LinkedHashSet<>();
+    for (int i = 0; i < p.lines().size(); i++) if (p.drafts().get(i).soldBy() == SoldBy.UNIT) ids.add(p.lines().get(i).productId());
+    Map<UUID, List<Lot>> lots = inventory.pricedLots(ids);
+    if (lots.isEmpty()) return p;
+    Map<UUID, Integer> placed = new LinkedHashMap<>();
+    List<PricedLine> lines = new ArrayList<>();
+    List<BillCalculator.Draft> drafts = new ArrayList<>();
+    for (int i = 0; i < p.lines().size(); i++) {
+      PricedLine l = p.lines().get(i);
+      BillCalculator.Draft d = p.drafts().get(i);
+      int skip = placed.getOrDefault(l.productId(), 0);
+      placed.merge(l.productId(), l.qty(), Integer::sum);
+      List<LotAllocator.Run> runs = l.flashSaleId() != null || !lots.containsKey(l.productId()) ? List.of()
+          : LotAllocator.priceRuns(lots.get(l.productId()), l.qty(), skip);
+      boolean same = runs.size() <= 1 && (runs.isEmpty() || runs.getFirst().lot().pricePaise() == null
+          || runs.getFirst().lot().pricePaise() == l.unitPricePaise());
+      if (same) {
+        lines.add(l);
+        drafts.add(d);
+        continue;
+      }
+      for (LotAllocator.Run run : runs) {
+        long price = run.lot().pricePaise() == null ? l.unitPricePaise() : run.lot().pricePaise();
+        lines.add(l.split(run.qty(), price, null, 0));
+        drafts.add(new BillCalculator.Draft(d.productId(), d.name(), d.soldBy(), run.qty(), price, d.gstPercent(), d.hsn()));
       }
     }
     return new Priced(lines, drafts);
@@ -379,14 +447,14 @@ public class PosService implements ReferenceLookup {
     requireCustomerForPromo(cart, mobile);
     User customer = mobile == null ? null : users.findByMobile(mobile).orElseGet(() -> users.insertCounterCustomer(mobile, now));
     UUID customerId = customer == null ? null : customer.id();
-    Priced priced = flashed(base, customerId);
+    Priced priced = laned(flashed(base, customerId));
 
     Quote q = quotes.quoteLines(customerId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
     long subtotal = priced.drafts().stream().mapToLong(BillCalculator.Draft::linePaise).sum();
     Manual manual = resolveManual(cashierId, admin, in.manualDiscount(), subtotal,
         subtotal - q.couponDiscountPaise() - q.coinDiscountPaise());
     BillCalculator.Bill bill = bill(priced.drafts(), q, manual.amountPaise());
-    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
+    List<Pay> pays = tagged(PayModes.normalize(in.payments(), true, "payments"), in.offline());
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     long roundOff = roundOff(bill.totalPaise());
     long payable = bill.totalPaise() + roundOff;
@@ -402,13 +470,18 @@ public class PosService implements ReferenceLookup {
     }
 
     UUID saleId = UUID.randomUUID();
+    List<PaymentRecord> paid = withTerminalPayments(pays, saleId, cashierId);
     int earned = customerId == null ? 0 : (int) q.coinsToEarn();
-    List<InventoryService.Item> taken = bill.lines().stream().map(l -> new InventoryService.Item(l.productId(), l.qty())).toList();
+    List<UUID> itemIds = bill.lines().stream().map(_ -> UUID.randomUUID()).toList();
+    List<InventoryService.Item> taken = takenItems(bill, itemIds);
     List<OfflineFinding> findings = new ArrayList<>();
+    Map<UUID, Long> costs;
     if (in.offline()) {
-      findings.addAll(takeOffline(cashierId, taken, saleId));
+      OfflineTake t = takeOffline(cashierId, taken, saleId);
+      findings.addAll(t.findings());
+      costs = t.costs();
     } else {
-      inventory.reserve(taken, saleId, "POS_SALE");
+      costs = inventory.reserve(taken, saleId, "POS_SALE");
     }
     if (customerId != null) {
       wallet.redeem(customerId, q.coinsUsed(), saleId);
@@ -426,14 +499,14 @@ public class PosService implements ReferenceLookup {
     ShopSetting shopInfo = shop.get();
     String fy = InvoiceNumbers.financialYear(soldAt); // an offline bill belongs to the year it was sold in, not the day it was uploaded
     String invoiceNo = InvoiceNumbers.format(shopInfo.invoicePrefix(), fy, counters.next("INVOICE", fy));
-    List<SaleItemRecord> items = bill.lines().stream().map(l -> new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(),
-        l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(),
-        l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0)).toList();
-    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
+    long[] couponShares = q.lines().size() == bill.lines().size()
+        ? q.lines().stream().mapToLong(Quote.Line::couponDiscountPaise).toArray() : null; // the coupon's part of each line
+    List<SaleItemRecord> items = saleItems(bill, itemIds, costs, couponShares);
+    List<PaymentRecord> payments = paid;
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), payable, bill.tax().taxable(), bill.tax().cgst(),
         bill.tax().sgst(), earned, in.cashTenderedPaise(), change, soldAt, items, payments, PaymentRules.classify(payLines),
-        manual.amountPaise(), manual.reason(), manual.approver(), roundOff), idemKey);
+        manual.amountPaise(), manual.reason(), manual.approver(), roundOff, q.couponMinOrderPaise()), idemKey);
     if (manual.amountPaise() > 0) {
       audit.log(cashierId, "MANUAL_DISCOUNT", "pos_sale", saleId, invoiceNo + " amount=" + manual.amountPaise() + " reason="
           + manual.reason() + " approvedBy=" + manual.approver());
@@ -448,6 +521,41 @@ public class PosService implements ReferenceLookup {
     log.info("POS sale invoice={} cashier={} total={} lines={} payments={} onCredit={} coinsUsed={} coinsEarned={}", invoiceNo,
         cashierId, payable, items.size(), payments.size(), onCredit, q.coinsUsed(), earned);
     return saleId;
+  }
+
+  private TerminalService terminalPayments;
+
+  /** Optional (plain unit tests run without it): attaches paid card machine payments to the payment lines that name one. */
+  @Autowired(required = false)
+  void setTerminalPayments(TerminalService terminalPayments) { this.terminalPayments = terminalPayments; }
+
+  /**
+   * Attaches the card machine payment of every line that names one, whichever kind of machine took it (it must be paid, unused and of
+   * the line's amount; a Paytm payment must also fit the line's mode). The line then takes the machine's money account, terminal id,
+   * its reference (the RRN, unless the till sent one) and the masked payer detail. A line that names a different account than the machine's
+   * is refused. Lines without a machine payment get their default account as before.
+   */
+  private List<PaymentRecord> withTerminalPayments(List<Pay> pays, UUID saleId, UUID cashierId) {
+    List<PaymentRecord> out = new ArrayList<>();
+    for (int i = 0; i < pays.size(); i++) {
+      Pay p = pays.get(i);
+      if (p.terminalPaymentId() == null) {
+        out.add(new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), null, p.moneyAccountId(), p.terminalId()));
+        continue;
+      }
+      String field = "payments[" + i + "].terminalPaymentId";
+      if (!"CARD".equals(p.mode()) && !"UPI".equals(p.mode())) throw ApiException.validation(field, "only a CARD or UPI line can use a card machine payment");
+      if (terminalPayments == null) throw ApiException.validation(field, "the card machine is not available");
+      Attachment c = terminalPayments.attach(p.terminalPaymentId(), saleId, p.amountPaise(), p.mode(), field, cashierId);
+      if (p.moneyAccountId() != null && c.moneyAccountId() != null && !p.moneyAccountId().equals(c.moneyAccountId())) {
+        throw ApiException.validation("payments[" + i + "].moneyAccountId", "this payment was taken on another card machine than the account named");
+      }
+      UUID account = c.moneyAccountId() != null ? c.moneyAccountId() : p.moneyAccountId();
+      String ref = p.reference() == null || p.reference().isBlank() ? c.reference() : p.reference();
+      String terminal = c.terminalId() != null ? c.terminalId() : p.terminalId();
+      out.add(new PaymentRecord(p.mode(), p.amountPaise(), ref, p.terminalPaymentId(), account, terminal, c.detail()));
+    }
+    return out;
   }
 
   private OfflineExceptionService offlineExceptions;
@@ -467,14 +575,40 @@ public class PosService implements ReferenceLookup {
    * Takes stock for an offline bill that has already left the shop: what is there is taken, never below zero. Whatever
    * the system did not have is logged, audited and returned as OVERSOLD findings so a manager can look into it.
    */
-  private List<OfflineFinding> takeOffline(UUID cashierId, List<InventoryService.Item> taken, UUID saleId) {
-    List<Map<String, Object>> short_ = inventory.takeWhatIsLeft(taken, saleId, "POS_SALE");
-    if (short_.isEmpty()) return List.of();
+  private OfflineTake takeOffline(UUID cashierId, List<InventoryService.Item> taken, UUID saleId) {
+    InventoryService.Taken got = inventory.takeWhatIsLeftCosted(taken, saleId, "POS_SALE");
+    List<Map<String, Object>> short_ = got.shortfalls();
+    if (short_.isEmpty()) return new OfflineTake(List.of(), got.costs());
     log.warn("Offline bill sold more than the system had in stock; recorded anyway sale={} shortfalls={}", saleId, short_);
     audit.log(cashierId, "OFFLINE_OVERSOLD", "pos_sale", saleId, short_.toString());
-    return short_.stream().map(s -> new OfflineFinding(OfflineExceptionKind.OVERSOLD,
+    return new OfflineTake(short_.stream().map(s -> new OfflineFinding(OfflineExceptionKind.OVERSOLD,
         "Sold " + s.get("sold") + " but the system had only " + s.get("taken") + " in stock", UUID.fromString((String) s.get("productId")),
-        String.valueOf(s.get("taken")), String.valueOf(s.get("sold")))).toList();
+        String.valueOf(s.get("taken")), String.valueOf(s.get("sold")))).toList(), got.costs());
+  }
+
+  /** What taking an offline bill's stock found: the differences for a manager and what each line cost. */
+  private record OfflineTake(List<OfflineFinding> findings, Map<UUID, Long> costs) {}
+
+  private static List<InventoryService.Item> takenItems(BillCalculator.Bill bill, List<UUID> itemIds) {
+    List<InventoryService.Item> out = new ArrayList<>();
+    for (int i = 0; i < bill.lines().size(); i++) out.add(new InventoryService.Item(bill.lines().get(i).productId(), bill.lines().get(i).qty(), itemIds.get(i)));
+    return out;
+  }
+
+  /**
+   * The stored lines of a bill, each with the stock cost taken from its lots and its part of the coupon discount.
+   *
+   * @param couponShares each line's part of the coupon discount in paise, or {@code null} when the bill has no coupon
+   */
+  private static List<SaleItemRecord> saleItems(BillCalculator.Bill bill, List<UUID> itemIds, Map<UUID, Long> costs, long[] couponShares) {
+    List<SaleItemRecord> out = new ArrayList<>();
+    for (int i = 0; i < bill.lines().size(); i++) {
+      var l = bill.lines().get(i);
+      out.add(new SaleItemRecord(itemIds.get(i), l.productId(), l.name(), l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(),
+          l.netPaise(), l.gstPercent(), l.hsn(), l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0,
+          couponShares == null ? 0 : couponShares[i], costs.get(itemIds.get(i))));
+    }
+    return out;
   }
 
   /** Refuses a rung line that cannot be a real sale: missing or non-positive numbers, a GST rate the system does not accept. */
@@ -501,7 +635,12 @@ public class PosService implements ReferenceLookup {
     if (coupon || coins) {
       throw ApiException.validation("cart", "a coupon or coin redemption cannot be checked offline: ring this bill without it");
     }
-    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
+    List<Pay> pays = tagged(PayModes.normalize(in.payments(), true, "payments"), true);
+    for (int i = 0; i < pays.size(); i++) {
+      if (pays.get(i).terminalPaymentId() != null) {
+        throw ApiException.validation("payments[" + i + "].terminalPaymentId", "a card machine payment cannot be used on an offline bill");
+      }
+    }
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     if (PaymentRules.creditAmount(payLines) > 0) {
       throw ApiException.validation("payments", "credit (udhar) cannot be given on an offline bill: it needs the customer's account");
@@ -559,16 +698,15 @@ public class PosService implements ReferenceLookup {
     UUID customerId = customer == null ? null : customer.id();
 
     UUID saleId = UUID.randomUUID();
-    List<InventoryService.Item> taken = bill.lines().stream().map(l -> new InventoryService.Item(l.productId(), l.qty())).toList();
-    findings.addAll(takeOffline(cashierId, taken, saleId));
+    List<UUID> itemIds = bill.lines().stream().map(_ -> UUID.randomUUID()).toList();
+    OfflineTake offlineTake = takeOffline(cashierId, takenItems(bill, itemIds), saleId);
+    findings.addAll(offlineTake.findings());
 
     ShopSetting shopInfo = shop.get();
     String fy = InvoiceNumbers.financialYear(soldAt);
     String invoiceNo = InvoiceNumbers.format(shopInfo.invoicePrefix(), fy, counters.next("INVOICE", fy));
-    List<SaleItemRecord> items = bill.lines().stream().map(l -> new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(),
-        l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(),
-        l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0)).toList();
-    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
+    List<SaleItemRecord> items = saleItems(bill, itemIds, offlineTake.costs(), null); // offline bills carry no coupon
+    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), null, p.moneyAccountId(), p.terminalId())).toList();
     // the subtotal is what the lines cost after the till's own line discounts, so the receipt adds up: subtotal - discount +- round off = total
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, afterLineDiscounts, null, 0, 0, 0, payable,
         bill.tax().taxable(), bill.tax().cgst(), bill.tax().sgst(), 0, in.cashTenderedPaise(), change, soldAt, items, payments,
@@ -693,7 +831,8 @@ public class PosService implements ReferenceLookup {
     CreditNoteData data = new CreditNoteData(shopInfo.shopName(), shopInfo.address(), shopInfo.phone(), shopInfo.gstin(),
         r.creditNoteNo(), s.invoiceNo(), STAMP.format(r.createdAt().atZone(InvoiceNumbers.SHOP_ZONE)), cashierName(r.cashierId()),
         s.customerMobile() == null ? "" : s.customerMobile(), r.reason() == null ? "" : r.reason(), lines, r.taxablePaise(),
-        r.cgstPaise(), r.sgstPaise(), r.refundPaise(), refunds, r.creditAdjustedPaise(), shopInfo.receiptFooter());
+        r.cgstPaise(), r.sgstPaise(), r.refundPaise(), refunds, r.creditAdjustedPaise(), shopInfo.receiptFooter(),
+        r.items().stream().mapToLong(PosRecords.ReturnItemRecord::couponSharePaise).sum(), r.couponClawbackPaise());
     try {
       return ReceiptText.renderCreditNote(data, width);
     } catch (IllegalArgumentException e) {

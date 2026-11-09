@@ -17,6 +17,7 @@ class OrderReturnEntity extends BaseEntity {
   String refundMode;
   int coinsClawedBack;
   int coinsRestored;
+  long couponClawbackPaise;
   UUID createdBy;
   Instant createdAt;
 

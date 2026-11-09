@@ -25,6 +25,7 @@ class PosSaleEntity extends BaseEntity {
   long coinDiscountPaise;
   long manualDiscountPaise;
   long roundOffPaise;
+  long couponMinOrderPaise;
   String manualDiscountReason;
   UUID manualDiscountApprover;
   long totalPaise;

@@ -101,7 +101,7 @@ public class PosController {
    * never both.
    */
   @Schema(name = "PosReturnBody")
-  public record ReturnBody(@NotEmpty List<@Valid ReturnLine> items, @Size(max = 200) String reason, List<@Valid Pay> refunds, String refundMode) {}
+  public record ReturnBody(@NotEmpty(message = "choose at least one item to return") List<@Valid ReturnLine> items, @Size(max = 200) String reason, List<@Valid Pay> refunds, String refundMode) {}
 
   /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
   public record Receipt(int width, String text) {}
@@ -211,6 +211,15 @@ public class PosController {
   public ReturnRecord refund(@PathVariable UUID id, @RequestHeader("Idempotency-Key") String key,
                              @Valid @RequestBody ReturnBody body) {
     return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds(), body.refundMode()));
+  }
+
+  /**
+   * Shows what a return would refund before it is made: per line the price, the coupon share and the coins/discount share that leave
+   * with the units, any coupon taken back under the admin's return policy, the refund and its GST. Changes nothing.
+   */
+  @PostMapping("/sales/{id}/returns/preview")
+  public PosReturnService.Preview previewReturn(@PathVariable UUID id, @Valid @RequestBody ReturnBody body) {
+    return returns.preview(CurrentUser.isAdmin(), id, new ReturnInput(body.items(), body.reason(), body.refunds(), body.refundMode()));
   }
 
   /** Lists the returns already made against a bill. */

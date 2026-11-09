@@ -4,12 +4,20 @@ Audience: the Flutter app team, the web app team, and the LLM coding assistants 
 
 | File | Covers |
 |---|---|
+| `01-implementation-guide.md` | **Start here for the plan:** what to build per app, what changed, what to configure, build order |
 | `00-overview.md` (this file) | Roles, authentication, request/response conventions, errors, idempotency, money, pagination, live events, images, rate limits |
 | `10-customer-and-catalog.md` | Sign-in, profile, addresses, devices, wallet and coins, notifications, wishlist, catalog, reviews, coupons, units, admin catalog and customer tools |
 | `20-orders-payments-admin-config.md` | Cart quote, orders, returns, online payment and refunds, public shop details, shop profile, admin configuration screen, caches, logs, live events |
 | `30-pos-reports-purchasing.md` | Shop-counter POS, shifts, credit (udhar), offline sync, purchasing, stock takes, reports, audit log |
-| `40-flash-sales.md` | Flash sale module (added after it is merged) |
+| `40-flash-sales.md` | Flash sale module |
 | `60-admin-push-notifications.md` | Admin push notifications: broadcasts to users, role groups or condition-based customer segments, segment builder, previews, inbox kind `ANNOUNCEMENT` |
+| `70-purchases.md` | Suppliers, purchase documents with GST, cess, discount and freight, payments and payables, returns to suppliers, supplier statement, credit and refunds, invoice file |
+| `72-barcode-labels.md` | Store barcode generation and label printing (PDF, thermal printer commands, JSON) |
+| `71-bank-and-settlements.md` | Bank module: money accounts, payment channels (several vendors at once), receipts, settlements, statement import, one card-machine flow for every vendor |
+| `73-paytm-terminal.md` | The Paytm wireless swipe machine as a vendor of that flow: set-up, till flow, void, Paytm settlement import |
+| `74-stock-lots-and-pricing.md` | Stock lots, lot-aware prices and scanning, FIFO cost, expiry, margin and stock value reports |
+| `playbooks/README.md` | Step-by-step implementation playbooks P1 to P5 (orders, purchases and labels, counter till, bank module, stock lots), checked against the code |
+| `50`, `51`, `52-backend-response-*.md` | The backend's answers to the Flutter reviews, item by item (change history) |
 
 The backend is one REST API over HTTPS. Base path: `/api/v1`. All bodies are JSON (`Content-Type: application/json`) except image uploads (`multipart/form-data`) and the live-event stream (`text/event-stream`).
 
@@ -61,7 +69,7 @@ Catalog items carry English and Gujarati names (`nameEn`, `nameGu`). Show the on
 `X-Trace-Id` is on every response. Show it in "Something went wrong (ref abc123)" screens and send it to support: it finds the exact request in the server logs.
 
 ### Idempotency-Key (important)
-Endpoints that create money or stock effects require an `Idempotency-Key` request header: placing an order, a POS sale, a return, a purchase, offline sync, and similar (each endpoint says so). Generate a fresh random UUID **per user action** (when the user taps Pay), keep it with that action, and **reuse the same key on every retry** of that action (timeouts, network drops, app restarts). The server then returns the original result instead of creating a second order or bill. Never reuse a key for a different action. A missing key on those endpoints answers 400.
+Endpoints that create money or stock effects require an `Idempotency-Key` request header: placing an order, a POS sale, a return, a purchase, offline sync, and similar (each endpoint says so). Generate a fresh random UUID **per user action** (when the user taps Pay), keep it with that action, and **reuse the same key on every retry** of that action (timeouts, network drops, app restarts). The server then returns the original result instead of creating a second order or bill. Never reuse a key for a different action. A missing key on those endpoints answers 400. A key reused with a DIFFERENT body is answered 409 `IDEMPOTENCY_KEY_REUSED` on purchases, supplier/credit/catalog/wallet admin writes and broadcasts, while counter sales, returns and repayments look the key up only and return the first result (each endpoint says which). The key is optional on some writes (money accounts and entries, the generic card-terminal start, supplier create); the endpoint's section says so, and not every write takes one (for example supplier `PUT`).
 
 ### Errors
 Every error has this body (HTTP status varies):

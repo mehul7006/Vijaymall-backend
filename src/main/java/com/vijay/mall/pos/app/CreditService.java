@@ -42,9 +42,21 @@ public class CreditService {
 
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
 
-  /** limitPaise 0 means credit is not enabled for this customer. */
+  /**
+   * limitPaise 0 means credit is not enabled for this customer.
+   * @param blocked whether the customer's account is blocked; a blocked customer cannot be given credit whatever the limit
+   */
   public record AccountView(UUID customerId, String name, String mobile, long balancePaise, long limitPaise,
-                            long availablePaise) {}
+                            long availablePaise, boolean blocked) {}
+
+  /**
+   * A customer in the till's credit picker. The mobile number is masked ({@code 98XXXXXX10}); the full number is only given by the
+   * account lookup of one customer.
+   * @param blocked whether the customer is blocked and cannot be given credit
+   */
+  @Schema(name = "CreditCustomer")
+  public record PickView(UUID customerId, String name, String maskedMobile, long limitPaise, long balancePaise,
+                         long availablePaise, boolean blocked) {}
 
   /** deltaPaise above 0 means the customer owes more; below 0 means they owe less. */
   @Schema(name = "CreditLedgerEntry")
@@ -113,9 +125,35 @@ public class CreditService {
         e.refNo(), e.note(), e.at())).toList(), p.page(), p.size(), p.total());
   }
 
-  private static AccountView view(User u, CreditRepository.Account a) {
+  /**
+   * For the till: customers who may buy on credit (a limit above zero), by name, so the cashier can find one without typing the
+   * whole number. Read only: switching credit on or changing a limit stays with the admin.
+   *
+   * @param q part of the name or mobile number, any case; at least 2 characters when {@code everyone} is set
+   * @param everyone true to list customers without a credit limit too
+   * @param page zero-based page number (negative values count as 0)
+   * @param size page size (clamped to the allowed maximum)
+   * @throws ApiException 400 when {@code q} is longer than 100 characters, or too short for {@code everyone}
+   */
+  public Page<PickView> pick(String q, boolean everyone, int page, int size) {
+    String text = q == null ? "" : q.trim().toLowerCase().replace("%", "").replace("_", "");
+    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
+    if (everyone && text.length() < 2) throw ApiException.validation("q", "enter at least 2 characters to search all customers");
+    Page<CreditRepository.Pick> p = credit.pick(text.isEmpty() ? null : "%" + text + "%", everyone, Math.max(0, page), Page.clampSize(size));
+    return p.withItems(p.items().stream().map(c -> new PickView(c.userId(), c.name(), mask(c.mobile()), c.limitPaise(), c.balancePaise(),
+        CreditMath.available(c.limitPaise(), c.balancePaise()), c.blocked())).toList());
+  }
+
+  /** {@code 9876543210} becomes {@code 98XXXXXX10}; a missing number stays empty and a short one shows nothing useful. */
+  static String mask(String mobile) {
+    if (mobile == null) return null;
+    if (mobile.length() < 5) return "XXXX";
+    return mobile.substring(0, 2) + "X".repeat(mobile.length() - 4) + mobile.substring(mobile.length() - 2);
+  }
+
+  private AccountView view(User u, CreditRepository.Account a) {
     return new AccountView(u.id(), u.name(), u.mobile(), a.balancePaise(), a.limitPaise(),
-        CreditMath.available(a.limitPaise(), a.balancePaise()));
+        CreditMath.available(a.limitPaise(), a.balancePaise()), users.isBlocked(u.id()));
   }
 
   private static String mobileOf(String raw) {
@@ -123,11 +161,20 @@ public class CreditService {
   }
 
   // ---------- credit on a bill ----------
-  /** Puts part or all of a bill on the customer's account. Fails when credit is off or the limit would be passed. */
+  /**
+   * Puts part or all of a bill on the customer's account.
+   *
+   * @throws ApiException 422 {@code CREDIT_NOT_ALLOWED} when the customer has no credit limit, {@code CUSTOMER_BLOCKED} when the
+   *     customer is blocked, {@code CREDIT_LIMIT_EXCEEDED} when the limit would be passed
+   */
   public void chargeSale(UUID customerId, long amountPaise, UUID saleId, String invoiceNo, UUID cashierId, Instant now) {
     CreditRepository.Account a = credit.lock(customerId, now);
-    if (a.limitPaise() <= 0 || users.isBlocked(customerId)) {
+    if (a.limitPaise() <= 0) {
       throw ApiException.unprocessable("CREDIT_NOT_ALLOWED", "Credit is not enabled for this customer",
+          Map.of("customerId", customerId.toString()));
+    }
+    if (users.isBlocked(customerId)) {
+      throw ApiException.unprocessable("CUSTOMER_BLOCKED", "This customer is blocked, so credit cannot be given",
           Map.of("customerId", customerId.toString()));
     }
     if (!CreditMath.fits(a.limitPaise(), a.balancePaise(), amountPaise)) {

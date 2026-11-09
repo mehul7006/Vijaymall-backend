@@ -44,14 +44,14 @@ class ReportServiceTest {
   @Test
   void usesTheShopCalendarAndFillsMissingDaysWithZero() {
     ReflectionTestUtils.setField(service, "em", em);
-    Query sales = scalar(150000L), count = scalar(3L), fresh = scalar(2L), coins = scalar(40L);
+    Query sales = scalar(150000L), count = scalar(3L), fresh = scalar(2L), action = scalar(7L), coins = scalar(40L);
     Query posSales = scalar(80000L), posBills = scalar(5L), posRefunds = scalar(1000L), onlineRefunds = scalar(250L);
     Query days = mock(Query.class);
     when(days.setParameter(any(String.class), any())).thenReturn(days);
     when(days.getResultList()).thenReturn(List.of(
         new Object[] {Date.valueOf("2027-03-11"), 90000L},
         new Object[] {Date.valueOf("2027-03-08"), 60000L}));
-    when(em.createNativeQuery(any(String.class))).thenReturn(sales, count, fresh, coins, posSales, posBills, posRefunds, onlineRefunds, days);
+    when(em.createNativeQuery(any(String.class))).thenReturn(sales, count, fresh, action, coins, posSales, posBills, posRefunds, onlineRefunds, days);
 
     UUID low = UUID.randomUUID();
     UUID unnamed = UUID.randomUUID();
@@ -63,6 +63,7 @@ class ReportServiceTest {
     assertThat(d.salesTodayPaise()).isEqualTo(150000);
     assertThat(d.ordersToday()).isEqualTo(3);
     assertThat(d.newOrders()).isEqualTo(2);
+    assertThat(d.needsAction()).as("every order staff still have to work on").isEqualTo(7);
     assertThat(d.coinsIssuedToday()).isEqualTo(40);
     assertThat(d.posSalesTodayPaise()).isEqualTo(80000);
     assertThat(d.posBillsToday()).isEqualTo(5);

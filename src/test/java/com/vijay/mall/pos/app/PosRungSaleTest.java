@@ -88,6 +88,7 @@ class PosRungSaleTest {
     catalog = mock(PosCatalogService.class);
     sales = mock(PosSaleRepository.class);
     inventory = mock(InventoryService.class);
+    when(inventory.takeWhatIsLeftCosted(anyList(), any(), anyString())).thenReturn(new InventoryService.Taken(List.of(), Map.of()));
     users = mock(UserRepository.class);
     audit = mock(AuditService.class);
     counters = mock(InvoiceCounterRepository.class);
@@ -160,7 +161,7 @@ class PosRungSaleTest {
     assertThat(f.productId()).isEqualTo(rice);
     assertThat(f.expected()).isEqualTo("5900");
     assertThat(f.actual()).isEqualTo("5000");
-    verify(inventory).takeWhatIsLeft(List.of(new InventoryService.Item(rice, 2)), s.id(), "POS_SALE");
+    verify(inventory).takeWhatIsLeftCosted(anyList(), eq(s.id()), eq("POS_SALE"));
     verify(audit).log(eq(cashier), eq("SALE"), eq("pos_sale"), eq(s.id()), anyString());
   }
 
@@ -249,7 +250,7 @@ class PosRungSaleTest {
 
   @Test
   void stockThatRanShortBecomesAnOversoldExceptionAndTheBillIsStillRecorded() {
-    when(inventory.takeWhatIsLeft(anyList(), any(), anyString())).thenReturn(List.of(Map.of("productId", rice.toString(), "sold", 3, "taken", 1)));
+    when(inventory.takeWhatIsLeftCosted(anyList(), any(), anyString())).thenReturn(new InventoryService.Taken(List.of(Map.of("productId", rice.toString(), "sold", 3, "taken", 1)), Map.of()));
     SaleRecord out = ring(rung(rice(3, 5900)), 17700);
     assertThat(out).isNotNull();
     OfflineFinding f = flagged().get(0);
@@ -430,7 +431,7 @@ class PosRungSaleTest {
         Clock.fixed(NOW, ZoneOffset.UTC), mock(CreditService.class));
     legacy.setOfflineExceptions(exceptions);
     when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(new Quote(List.of(), 5900, null, 0, 0, 0, 0, 5900, 0, List.of()));
-    when(inventory.takeWhatIsLeft(anyList(), any(), anyString())).thenReturn(List.of(Map.of("productId", rice.toString(), "sold", 1, "taken", 0)));
+    when(inventory.takeWhatIsLeftCosted(anyList(), any(), anyString())).thenReturn(new InventoryService.Taken(List.of(Map.of("productId", rice.toString(), "sold", 1, "taken", 0)), Map.of()));
     legacy.sale(cashier, false, "legacy-1", new SaleInput(new Cart(List.of(new Item(rice, 1)), null, null, null, null),
         List.of(new Pay("CASH", 5900, null)), null, null, null, true));
     assertThat(flagged()).extracting(OfflineFinding::kind).containsExactly(OfflineExceptionKind.OVERSOLD);

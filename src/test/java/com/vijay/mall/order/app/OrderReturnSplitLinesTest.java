@@ -76,7 +76,7 @@ class OrderReturnSplitLinesTest {
     giveBack(4); // 3 from the sale line, 1 from the normal line
     ArgumentCaptor<List<OrderReturnRepository.Line>> stored = ArgumentCaptor.forClass(List.class);
     verify(returns).insert(any(), eq(orderId), anyString(), anyString(), ArgumentMatchers.anyLong(), anyString(), anyInt(), anyInt(), eq(actor),
-        stored.capture(), any());
+        stored.capture(), any(), ArgumentMatchers.anyLong());
     assertThat(stored.getValue()).extracting(OrderReturnRepository.Line::orderItemId).containsExactly(saleLine, normalLine);
     assertThat(stored.getValue()).extracting(OrderReturnRepository.Line::qty).containsExactly(3, 1);
     assertThat(stored.getValue().stream().mapToLong(OrderReturnRepository.Line::refundPaise).sum()).isEqualTo(12000 + 5000);

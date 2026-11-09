@@ -31,7 +31,8 @@ class PurchasingIT extends IntegrationTestBase {
 
     var res = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, body, key);
     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-    assertThat(((Number) res.getBody().get("totalCostPaise")).longValue()).isEqualTo(24 * 3200);
+    assertThat(((Number) res.getBody().get("taxablePaise")).longValue()).isEqualTo(24 * 3200);
+    assertThat(((Number) res.getBody().get("totalCostPaise")).longValue()).as("Bath Soap carries 18% GST, added on top by default").isEqualTo(24 * 3200 * 118 / 100);
     assertThat(stockOf(pid)).isEqualTo(before + 24);
 
     var again = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, body, key);

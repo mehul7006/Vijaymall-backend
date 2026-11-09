@@ -63,4 +63,10 @@ class OrderStatusTest {
     assertThat(PICKED_UP.completesOrder()).isTrue();
     assertThat(PACKED.completesOrder()).isFalse();
   }
+
+  @Test
+  void needsActionIsTheFiveStatusesStaffStillWorkOn() {
+    assertThat(OrderStatus.NEEDS_ACTION).containsExactly(OrderStatus.PLACED, OrderStatus.CONFIRMED, OrderStatus.PACKED,
+        OrderStatus.OUT_FOR_DELIVERY, OrderStatus.READY_FOR_PICKUP);
+  }
 }

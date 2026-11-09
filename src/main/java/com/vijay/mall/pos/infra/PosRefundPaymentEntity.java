@@ -13,6 +13,7 @@ class PosRefundPaymentEntity extends BaseEntity {
   String mode;
   long amountPaise;
   String reference;
+  UUID moneyAccountId;
 
   /** Required by JPA; not for application code. */
   protected PosRefundPaymentEntity() {}

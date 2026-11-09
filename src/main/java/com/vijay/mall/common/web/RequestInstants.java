@@ -42,4 +42,17 @@ public final class RequestInstants {
     Instant india = parseIndia(text);
     return india != null ? india : Instant.parse(text.trim());
   }
+
+  /**
+   * Reads the end of a range, excluded: a plain date means the whole of that India-time day, so the end is the start of the next
+   * day; any other form is the instant itself.
+   * @throws DateTimeException when the text is none of the accepted forms
+   */
+  public static Instant parseEnd(String text) {
+    try {
+      return LocalDate.parse(text.trim()).plusDays(1).atStartOfDay(INDIA).toInstant();
+    } catch (DateTimeException notADate) {
+      return parse(text);
+    }
+  }
 }

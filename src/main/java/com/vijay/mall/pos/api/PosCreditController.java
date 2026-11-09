@@ -47,6 +47,19 @@ public class PosCreditController {
   @GetMapping("/account")
   public CreditService.AccountView account(@RequestParam String mobile) { return credit.accountByMobile(mobile); }
 
+  /**
+   * The credit picker of the till: customers who may buy on credit, by name, with the mobile masked, their limit, what they owe,
+   * what is left and whether they are blocked. Read only; setting a limit is an admin action.
+   *
+   * @param q part of the name or mobile number
+   * @param all true to include customers who have no credit limit (then {@code q} needs at least 2 characters)
+   */
+  @GetMapping("/customers")
+  public Page<CreditService.PickView> customers(@RequestParam(required = false) String q, @RequestParam(defaultValue = "false") boolean all,
+                                                @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+    return credit.pick(q, all, page, size);
+  }
+
   /** Lists a customer's credit ledger by mobile number, newest first. */
   @GetMapping("/ledger")
   public Page<CreditService.LedgerView> ledger(@RequestParam String mobile, @RequestParam(defaultValue = "0") int page,

@@ -93,7 +93,7 @@ Cross-references (documented in the catalog document, not here): `POST /api/v1/a
 
 **Round-off.** When the admin sets config `gst.roundOff = NEAREST_RUPEE`, the payable total is rounded to the nearest rupee (50 paise rounds up). `roundOffPaise` = paise added (can be negative); `totalPaise` already includes it. With `NONE` (default) `roundOffPaise` is 0. Payments must add up to `totalPaise` including round-off. Round-off is computed after the manual discount; `POST /pos/quote` has no manual discount input, so after the cashier enters a manual discount the UI must compute the new total itself: `t = quote.totalPaise - quote.roundOffPaise - manualDiscountPaise`, then if rounding is on `total = floor((t + 50) / 100) * 100`, else `total = t`. The `POST /pos/sales` response is authoritative.
 
-**Invoice numbers.** `<prefix>/<financialYear>/<6-digit running number>`, e.g. `VSM/2026-27/000042`. Financial year runs 1 April to 31 March and is taken from the server time when the bill is recorded (not `soldAt`). Credit notes (returns): `<prefix>-CN/2026-27/000001`. Credit repayment receipts: `<prefix>-CR/2026-27/000001`. The prefix is the shop's `invoicePrefix` (2-6 capital letters/digits, default `VSM`). Numbers are assigned by the server only; the till never invents them (an offline till shows its own temporary receipt number and replaces it with the server's `invoiceNo` after sync).
+**Invoice numbers.** `<prefix>/<financialYear>/<6-digit running number>`, e.g. `VSM/2026-27/000042`. Financial year runs 1 April to 31 March and is taken from the time of sale (`soldAt` for an offline bill, the server time for an online-rung one). Credit notes (returns): `<prefix>-CN/2026-27/000001`. Credit repayment receipts: `<prefix>-CR/2026-27/000001`. The prefix is the shop's `invoicePrefix` (2-6 capital letters/digits, default `VSM`). Numbers are assigned by the server only; the till never invents them (an offline till shows its own temporary receipt number and replaces it with the server's `invoiceNo` after sync).
 
 **Barcodes.**
 - Pack barcode: any code of 4-32 letters/digits/dashes registered on a product (normally EAN-13). Exact match. Maps to quantity 1 piece. A `WEIGHT` product cannot be scanned by a pack barcode (400 "weighed item: enter the weight").
@@ -109,7 +109,7 @@ Cross-references (documented in the catalog document, not here): `POST /api/v1/a
 
 **Credit (udhar).** Only for counter bills, never online orders. A customer may owe at most their `limitPaise` (set by admin; 0 = credit off). A CREDIT payment needs `customerMobile` and an approved limit. Returns from a credit bill first cancel what the customer still owes (up to the credit that bill put on the account, minus what earlier returns already cancelled, capped by the current balance); only the remainder is paid out as cash/UPI/card.
 
-**Idempotency.** `POST /pos/sales`, `POST /pos/sales/{id}/returns`, `POST /pos/credit/payments` and `POST /admin/purchases` require `Idempotency-Key`. The first call stores the result under the key; any later call with the same key returns **that stored result unchanged (same HTTP status as a fresh call, e.g. 201)** and does no work, even if the body differs. Two simultaneous calls with the same key produce one record. Keys for sales, returns, repayments and purchases are separate namespaces. Use a fresh UUID per user action and keep it until the action is confirmed.
+**Idempotency.** `POST /pos/sales`, `POST /pos/sales/{id}/returns`, `POST /pos/credit/payments` and `POST /admin/purchases` require `Idempotency-Key`. The first call stores the result under the key; any later call with the same key returns **that stored result unchanged (same HTTP status as a fresh call, e.g. 201)** and does no work, even if the body differs. This holds for counter sales, returns and repayments. It does NOT hold for `POST /admin/purchases`: the same key with a different delivery answers `409 IDEMPOTENCY_KEY_REUSED` (see the purchases bullet in the addendum and file 70); a purchase stored before fingerprints existed is compared by supplier name and invoice number. Two simultaneous calls with the same key produce one record. Keys for sales, returns, repayments and purchases are separate namespaces. Use a fresh UUID per user action and keep it until the action is confirmed.
 
 ---
 
@@ -143,7 +143,7 @@ The backend supports a till that keeps selling when the internet is down. The fl
    - `DUPLICATE`: this key was already recorded earlier (e.g. a previous upload half-arrived); treat as success, use `saleId`/`invoiceNo`.
    - `REJECTED`: not recorded (no stock/coins/coupon/credit side effects). Look at `errorCode`/`message`. `INTERNAL_ERROR` is transient: retry with the same key. Anything else needs a person: show the bill in a "needs attention" list for the manager.
    A rejected bill never blocks the others. Keep a bill in the queue until it is `CREATED`/`DUPLICATE`.
-5. **What the server does differently for offline bills.** (a) Stock is taken with "take what is left": a bill never fails for short stock; if the shelf had less than sold, the bill is recorded and stock stops at 0, and the shortfall is written to the audit log as action `OFFLINE_OVERSOLD` (entity `pos_sale`) and the server log. The upload response does **not** list shortfalls; the admin finds them in `GET /admin/audit-log?action=OFFLINE_OVERSOLD`. (b) The bill's time (`createdAt`, used by reports) is `soldAt`. (c) The bill is attributed to the user who uploads it, not necessarily the cashier who rang it. (d) The invoice number is assigned at upload time from the server's financial year.
+5. **What the server does differently for offline bills.** (a) Stock is taken with "take what is left": a bill never fails for short stock; if the shelf had less than sold, the bill is recorded and stock stops at 0, and the shortfall is written to the audit log as action `OFFLINE_OVERSOLD` (entity `pos_sale`) and the server log. Each upload result also carries `exceptions` (including `OVERSOLD` findings) and the shortfall stays in the audit log (`GET /admin/audit-log?action=OFFLINE_OVERSOLD`) and the offline-exceptions queue. (b) The bill's time (`createdAt`, used by reports) is `soldAt`. (c) The bill is attributed to the user who uploads it, not necessarily the cashier who rang it. (d) The invoice number is assigned at upload time, but its financial year is that of `soldAt` (see the Offline addendum).
 6. **Things that can make an offline bill REJECTED** (design the offline UI to avoid them):
    - **Prices are re-read from the server at upload time.** The server prices the cart at *current* prices and requires `payments` to add up exactly to its own total. If a price, GST rate or round-off setting changed while the till was offline, the bill is rejected with `VALIDATION_FAILED` ("payments add up to X but the bill is Y"). Manager must re-enter it as a new bill (a corrected bill may reuse the same key because nothing was stored; keep the original key to stay idempotent).
    - Coupons (`COUPON_INVALID`), coins (`VALIDATION_FAILED` "not enough coins"), and credit (`CREDIT_NOT_ALLOWED`, `CREDIT_LIMIT_EXCEEDED`) are checked against live data at upload. Recommended: disable coupons, coins and credit while offline.
@@ -290,7 +290,7 @@ Period rules shared by the three period reports (`summary`, `credit`, `counter-c
 |---|---|---|
 | 400 | VALIDATION_FAILED | empty basket (`items`); `qty` <= 0 (field `qty`); quantity too large; product missing/inactive (field `productId`); bad mobile (`customerMobile`); coupon or coins without a mobile (`customerMobile`) |
 | 422 | COUPON_INVALID | `details.reason` one of `NOT_FOUND`, `EXPIRED`, `MIN_ORDER`, `CATEGORY`, `LIMIT_REACHED`, `FIRST_ORDER_ONLY` |
-- **UI notes**: no manual discount input here; see the round-off formula above. Show `warnings` as hints. Quote does not check stock.
+- **UI notes**: the quote body accepts an optional `manualDiscount` and the answer carries `manualDiscountPaise` (no reason or PIN is needed for a quote; the sale enforces them): use the server's `totalPaise`, do not compute the total yourself. Show `warnings` as hints. Quote does not check stock.
 
 ### POST /api/v1/pos/sales
 - **Who**: both. Admin sales skip the PIN for manual discounts; cashier sales follow the discount limit.
@@ -367,7 +367,7 @@ Use `payments` with `mode == "CREDIT"` to find the credit amount.
 |---|---|---|
 | 400 | VALIDATION_FAILED (field `width`) | width not 32 or 48 |
 | 404 | NOT_FOUND | bill missing |
-- **UI notes**: Print with a fixed-width font; ESC/POS text printing needs no further wrapping. Amounts are printed in rupees with 2 decimals. There is no receipt endpoint for returns or credit repayments: render them yourself from their responses.
+- **UI notes**: Print with a fixed-width font; ESC/POS text printing needs no further wrapping. Amounts are printed in rupees with 2 decimals. Returns and credit repayments have receipt endpoints too: `GET /pos/sales/{id}/returns/{returnId}/receipt` and `GET /pos/credit/payments/{id}/receipt` (same `width` rule); you need not render them yourself.
 
 ### POST /api/v1/pos/sales/{id}/returns
 - **Who**: both. Cashiers limited to the return window (default 7 days, config `pos.cashierReturnDays`); admins not limited.
@@ -731,6 +731,8 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 
 ## Purchasing and stock
 
+> **Superseded by `70-purchases.md`.** Purchases now carry GST, discounts, freight, payments, suppliers and returns; the old body below still works, but `totalCostPaise` now includes GST and the answer has many more fields. Read file 70 for the current contract.
+
 ### POST /api/v1/admin/purchases
 - **Who**: admin only. **Purpose**: receive a supplier delivery (GRN): records the document and adds stock to each product (reason `PURCHASE`, linked to the document) in one transaction.
 - **Request**: header `Idempotency-Key` **mandatory**; replay returns the first document (201) and adds no stock. Body:
@@ -1031,7 +1033,7 @@ Money is in paise everywhere below. Everything here is read from the code; nothi
 
 ### GET /api/v1/pos/products (changed): search and incremental refresh
 - `q` still matches names, and now also a **barcode or an item code (PLU)** typed exactly. The PLU is matched when `q` is 1 to 6 digits, leading zeros ignored. A product with an exact barcode/PLU match is listed first. A blank `q` lists everything.
-- New optional `updatedSince`: only products changed at or after it (the product, its counter details or its barcodes). Use it to refresh an offline copy; use `catalogVersion` from `/pos/sync/status` to decide when. **Limitation**: a barcode that was only deleted is not seen by `updatedSince` (only creation times are kept for barcodes). **Accepted formats** (the same parser as every request date, see file 00): `2026-11-08T10:00:00Z` or with an offset `2026-11-08T15:30:00+05:30`; a zone-less date-time `2026-11-08T15:30:00` (India time); a plain date `2026-11-08` (start of that day, India time). Before this release only the first form was accepted and the others gave a bare 400. Anything else is a 400 `VALIDATION_FAILED`. Typical use: keep the largest `updatedAt`/the time you started the last refresh and send it back; for the first full download omit the parameter.
+- New optional `updatedSince`: only products changed at or after it (the product, its counter details or its barcodes). Use it to refresh an offline copy; use `catalogVersion` from `/pos/sync/status` to decide when. **Limitations**: (1) a barcode that was only deleted is not seen by `updatedSince` (only creation times are kept for barcodes); (2) `GET /pos/products` lists only ACTIVE products, so a product that was switched off after your last download never comes back through `updatedSince` and stays in the offline copy. Do a full download (omit `updatedSince`) at least once a day, e.g. at shift start, replace the local list with it, and treat a scan of an unknown or inactive product (404) as "not for sale". **Accepted formats** (the same parser as every request date, see file 00): `2026-11-08T10:00:00Z` or with an offset `2026-11-08T15:30:00+05:30`; a zone-less date-time `2026-11-08T15:30:00` (India time); a plain date `2026-11-08` (start of that day, India time). Before this release only the first form was accepted and the others gave a bare 400. Anything else is a 400 `VALIDATION_FAILED`. Typical use: keep the largest `updatedAt`/the time you started the last refresh and send it back; for the first full download omit the parameter.
 - Each product gains four fields: `packSize` (string, `""` when none), `unit` (string, `""` when none), `variantName` (string, `""` when none) and `displayName`. The same fields are on the product inside `GET /pos/barcode/{code}`.
 - **`displayName`** is what to show on the counter: the English `name`, then the variant name, then the pack size, e.g. `Basmati Rice Premium 1 kg`. Rules: words of the variant name that are already in the name (case-insensitive) are not repeated; a pack size already written in the name as a whole phrase is left out; with no variant and no pack size it equals `name`.
 - Paged lists carry `totalExact` and `hasMore` (see the paging note below).
@@ -1161,7 +1163,7 @@ Every limit below is also in the Swagger schema. A value outside it answers `400
 | Held basket | label at most 60 characters, at most 50 lines, at most 100 baskets in all (409 `HOLD_LIMIT`) |
 | Payment / refund / repayment `amountPaise` | 0 to 100,000,000 paise (and the usual rules: more than 0 where the guide says so) |
 | `cashTenderedPaise` | at most 100,000,000 paise |
-| Manual discount `amountPaise` | 0 to 100,000,000 paise; `reason` at most 200 characters |
+| Manual discount `amountPaise` | 0 to 100,000,000 paise; `reason` 1 to 100 characters (the request check allows 200 but the service refuses over 100 with 400 `manualDiscount`; send at most 100) |
 | Return line `qty` | 1 to 100000 (grams for a weighed item); `reason` at most 200 characters |
 | Credit limit (`limitPaise`) | 0 to 100,000,000 paise |
 | Credit adjust `amountPaise` | -100,000,000 to 100,000,000 paise, not 0 (`fields.amountPaise` "must be at most 100000000" / "must be at least -100000000") |
@@ -1183,3 +1185,39 @@ The delivery is always recorded (legitimate re-entries exist), but when an earli
 - Parked baskets older than `app.pos.hold-expiry-days` (environment variable `HOLD_EXPIRY_DAYS`, default 7, `0` = never expire) are deleted automatically every night at 03:00 shop time (Asia/Kolkata), so forgotten baskets cannot fill the 100-basket limit. The clean-up writes an audit entry (`HOLD_EXPIRED`) with the number removed, logs it and counts it in the metric `mall.pos.holds.expired`.
 - `expiresAt` (new, in every hold object of `POST /pos/holds`, `GET /pos/holds` and `GET /pos/holds/{id}`) is the moment the basket becomes eligible for removal (`createdAt` plus the expiry days, removed at the next 03:00 run after that); `null` when baskets never expire. Show "expires in N days" and warn when a basket is close to expiring.
 - The 409 `HOLD_LIMIT` message now ends with "Parked baskets are removed automatically after N days" and `details.expiryDays` holds N (0 when baskets never expire, in which case the sentence is left out). A basket removed this way answers 404 on `GET /pos/holds/{id}` like a discarded one, so a till that tries to resume an old basket should refresh its list.
+
+## Addendum 6 (credit: search, picker, blocked customers; dashboard)
+
+**`GET /admin/credit/accounts`** (ADMIN) new query parameters: `q` (part of the name or mobile number, any case; a typed `%` or `_` is not a wildcard; at most 100 characters), `eligibleOnly=true` (only customers whose limit is above 0). Existing `outstandingOnly` (default `true`; send `false` to include customers who owe nothing), `page`, `size` stay. Each row now also has `availablePaise` (limit minus balance, never below 0) and `blocked`. `total` is exact up to 10,000 (`totalExact`, `hasMore`).
+
+**`GET /pos/credit/customers`** (CASHIER and ADMIN, read only): the till's credit picker. Query: `q` (name or mobile part), `all` (default `false`), `page`, `size`. By default only customers with a credit limit above 0 are listed, by name. `all=true` also lists customers without a limit (then `q` needs at least 2 characters, else `400 fields.q`). Row: `customerId`, `name`, `maskedMobile` (`98XXXXXX10`), `limitPaise`, `balancePaise`, `availablePaise`, `blocked`. The picker returns only the **masked** mobile and the `customerId`, and `GET /pos/credit/account` takes only `mobile`: there is no cashier endpoint that turns an id into a full number. Pick the customer from the list to identify them, then the cashier types the full mobile number (asked from the customer) into the account lookup and checks that the name matches the picked row before selling on credit. Switching credit on or changing a limit stays admin-only (`PUT /admin/credit/limit` answers 403 for a cashier); there is no manager-PIN path.
+
+**Credit sale errors (422)**, now different codes: `CREDIT_NOT_ALLOWED` "Credit is not enabled for this customer" (no limit set) and `CUSTOMER_BLOCKED` "This customer is blocked, so credit cannot be given" (blocked account). `CREDIT_LIMIT_EXCEEDED` is unchanged. A customer with no limit AND blocked gets `CREDIT_NOT_ALLOWED`. This also applies to offline-sync `REJECTED` rows (`errorCode`). The account view (`GET /pos/credit/account`, `GET /admin/credit/accounts/{id}`) has a new `blocked` flag: show a "blocked" badge instead of offering credit.
+
+**`POST /pos/sales/{id}/returns` with no items:** `400` with `fields.items` = `choose at least one item to return` (it used to be `must not be empty`).
+
+**`GET /admin/dashboard`** has a new `needsAction` number next to `newOrders`: online orders in PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY or READY_FOR_PICKUP (includes `newOrders`); cached about 30 seconds.
+
+## Addendum 7 (counter: item coupons, coupon share on returns, return preview)
+
+**Billing with an item coupon.** The counter uses the same coupon engine as the app. `POST /pos/quote` and `POST /pos/sales` work out the discount **at bill time on the covered lines only** (the categories, products and product groups the coupon lists; see `20-orders-payments-admin-config.md`, Addendum 7). The GST split follows each line's own share: a covered line is taxed on its price less its share, an uncovered line on its full price. If the cashier adds or removes items after the code was applied, call `POST /pos/quote` again with the new basket: the discount, the minimum order (covered lines only) and every line's `discountPaise` are recomputed. A basket with no covered line answers `422 COUPON_INVALID` with `reason` `ITEM`, `CATEGORY` or `FLASH_ITEMS` and a message such as `This coupon is for Dal; none are in your cart.` Flash sale lines at the counter follow the setting `coupon.allowOnFlashItems` (default: the coupon also applies on top of the sale price).
+
+Each stored bill line keeps `couponSharePaise` (the part of its `discountPaise` that came from the coupon; coins and the manual discount are the rest) and the bill keeps the coupon's minimum order at sale time.
+
+**Returns.** A return refunds each returned piece's share of what the customer paid for the line (the line's `netPaise`, which is already after the coupon, coins and manual discount); an uncovered line comes back at its full price, a covered one net of its coupon share. Any sequence of partial returns adds up to the line's `netPaise` exactly. Policy `returns.couponPolicy` (admin config): `KEEP` (default) or `CLAWBACK_BELOW_MINIMUM` (if what is left of the covered lines is below the coupon's minimum, the coupon share on the pieces kept is taken from this refund, never below zero, and given back as those pieces are returned later). Worked numbers are in the online addendum (3 items, Rs 1,000, 10%: return Oil gives Rs 315 under `KEEP`, Rs 250 under the clawback policy, Rs 900 refunded in total either way). The credit note GST (`taxablePaise`, `cgstPaise`, `sgstPaise`) is computed on the **refund actually paid** per line at that line's GST rate, so a clawback lowers the tax reversed on this credit note too.
+
+`ReturnRecord` (`POST/GET /pos/sales/{id}/returns`) has `couponClawbackPaise` (already deducted from `refundPaise`) and each item `couponSharePaise`. The credit note receipt text prints `Coupon share -X` (what stayed with the customer as discount) and `Coupon taken back -Y` above `Refund total`.
+
+**Preview, no state change:** `POST /pos/sales/{id}/returns/preview` (CASHIER, ADMIN; same body as the return, `refunds`/`refundMode` ignored):
+
+```json
+{ "saleId": "...", "invoiceNo": "VSM/2026-27/000042", "couponPolicy": "CLAWBACK_BELOW_MINIMUM", "refundPaise": 25000,
+  "couponShareRemovedPaise": 3500, "otherShareRemovedPaise": 0, "couponClawbackPaise": 6500,
+  "taxablePaise": 22321, "cgstPaise": 1339, "sgstPaise": 1340,
+  "lines": [{ "saleItemId": "...", "productId": "...", "name": "Oil", "qty": 1, "grossPaise": 35000, "couponSharePaise": 3500,
+              "otherSharePaise": 0, "clawbackPaise": 6500, "refundPaise": 25000, "taxablePaise": 22321, "cgstPaise": 1339, "sgstPaise": 1340 }] }
+```
+
+`refundPaise = grossPaise - couponSharePaise - otherSharePaise - clawbackPaise` per line (`otherSharePaise` = coins and manual discount). The cashier return window applies to the preview as well (`422 RETURN_NEEDS_ADMIN`). Show it before the cashier confirms.
+
+Checklist (counter): [ ] re-quote after every basket change; [ ] show per-line discount from the quote; [ ] return screen calls the preview first; [ ] print/show the coupon lines of the credit note; [ ] handle `ITEM`/`FLASH_ITEMS` reasons.

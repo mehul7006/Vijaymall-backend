@@ -28,6 +28,9 @@ public final class OrderReturnMath {
     return roundShare(amount, already + returning, sold) - roundShare(amount, already, sold);
   }
 
+  /** The part of {@code amount} that belongs to {@code pieces} of {@code sold} pieces, rounded half up; the whole amount when all are counted. */
+  public static long cumulative(long amount, int pieces, int sold) { return roundShare(amount, pieces, sold); }
+
   private static long roundShare(long amount, int pieces, int sold) {
     return Math.floorDiv(Math.multiplyExact(amount, (long) pieces) * 2 + sold, 2L * sold);
   }

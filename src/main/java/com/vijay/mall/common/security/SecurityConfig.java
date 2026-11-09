@@ -46,7 +46,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Spring Security set-up: stateless bearer-token (JWT) authentication, CORS and the route rules.
- * <p>Public: sign-in, payment webhooks, health and metrics, API docs, product images and the guest catalog reads. {@code /admin/orders} and {@code /admin/flash-sales} are open to ADMIN and CASHIER, every other {@code /admin} route to ADMIN only, {@code /pos} to CASHIER and ADMIN, and everything else needs a signed-in user.
+ * <p>Public: sign-in, payment webhooks, health and metrics, API docs, product images and the guest catalog reads. {@code /admin/orders}, {@code /admin/flash-sales}, {@code /admin/labels} and the barcode generator are open to ADMIN and CASHIER (label templates can also be read by both), every other {@code /admin} route to ADMIN only, {@code /pos} to CASHIER and ADMIN, and everything else needs a signed-in user.
  */
 @Configuration
 @EnableMethodSecurity
@@ -184,6 +184,9 @@ public class SecurityConfig {
             .requestMatchers("/api/v1/admin/orders", "/api/v1/admin/orders/**").hasAnyRole("ADMIN", "CASHIER")
             // Flash sales are set up by the shop staff too (admin and cashier).
             .requestMatchers("/api/v1/admin/flash-sales", "/api/v1/admin/flash-sales/**").hasAnyRole("ADMIN", "CASHIER")
+            // Label printing and store barcodes are counter work too; templates can be read by staff but only changed by the admin.
+            .requestMatchers("/api/v1/admin/labels", "/api/v1/admin/labels/**", "/api/v1/admin/variants/*/barcode/generate").hasAnyRole("ADMIN", "CASHIER")
+            .requestMatchers(HttpMethod.GET, "/api/v1/admin/label-templates", "/api/v1/admin/label-templates/*").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
             .requestMatchers("/api/v1/pos/**").hasAnyRole("CASHIER", "ADMIN")
             .anyRequest().authenticated())

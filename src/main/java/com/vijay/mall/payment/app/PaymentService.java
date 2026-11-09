@@ -70,6 +70,18 @@ public class PaymentService {
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  private MoneyAccountService accounts;
+
+  /** Optional (plain unit tests run without it): names the money account an online payment is received in. */
+  @Autowired(required = false)
+  void setAccounts(MoneyAccountService accounts) { this.accounts = accounts; }
+
+  private SettlementService settlements;
+
+  /** Optional (plain unit tests run without it): reads how a payment was made after capture, and pulls a settlement the provider announces. */
+  @Autowired(required = false)
+  void setSettlements(SettlementService settlements) { this.settlements = settlements; }
+
   private List<PaymentRepository.Setting> switches() {
     return caches == null ? repo.settings() : caches.get(AppCaches.Name.PAYMENT_METHODS, "all", repo::settings);
   }
@@ -95,7 +107,9 @@ public class PaymentService {
     if (!"ONLINE".equals(method) || amountPaise <= 0) return Optional.empty();
     PaymentGateway g = registry.online();
     PaymentGateway.Created c = g.create(new PaymentGateway.CreateRequest(orderId, orderNo, amountPaise));
-    repo.insert(UUID.randomUUID(), orderId, g.provider(), method, amountPaise, "CREATED", c.providerOrderId(), clock.instant());
+    UUID account = accounts == null ? null : accounts.gatewayAccountFor(g.provider()).orElse(null);
+    if (account == null) repo.insert(UUID.randomUUID(), orderId, g.provider(), method, amountPaise, "CREATED", c.providerOrderId(), clock.instant());
+    else repo.insert(UUID.randomUUID(), orderId, g.provider(), method, amountPaise, "CREATED", c.providerOrderId(), clock.instant(), account);
     return Optional.ofNullable(c.session());
   }
 
@@ -134,6 +148,9 @@ public class PaymentService {
         repo.setStatus(p.id(), "CREATED", null, f.reason(), clock.instant());
         log.warn("Payment attempt failed order={} reason={}", p.orderId(), f.reason());
       });
+      case PaymentEvent.SettlementProcessed sp -> {
+        if (settlements != null) afterCommit(() -> settlements.syncOne(provider, sp.settlementId()));
+      }
       case PaymentEvent.Ignored _ -> { }
     }
   }
@@ -168,6 +185,7 @@ public class PaymentService {
     repo.setStatus(p.id(), "CAPTURED", c.providerRef(), null, clock.instant());
     log.info("Payment captured order={} ref={} amount={}", p.orderId(), c.providerRef(), c.amountPaise());
     events.publishEvent(new PaymentEvents.PaymentCaptured(p.orderId(), c.providerRef()));
+    if (settlements != null && c.providerRef() != null) afterCommit(() -> settlements.fillDetail(p.id(), p.provider(), c.providerRef()));
   }
 
   private MeterRegistry metrics;

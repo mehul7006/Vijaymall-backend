@@ -41,6 +41,8 @@ public class ReportService {
    * @param salesTodayPaise online order value placed today, in paise
    * @param ordersToday online orders placed today
    * @param newOrders online orders currently in {@code PLACED} waiting for staff
+   * @param needsAction online orders in a status staff still have to work on (PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY,
+   *                    READY_FOR_PICKUP); includes {@code newOrders}
    * @param coinsIssuedToday coins earned today
    * @param last7Days seven entries, oldest first
    * @param lowStock up to ten products low on stock
@@ -50,7 +52,8 @@ public class ReportService {
    * @param onlineRefundsTodayPaise refunds given today on returned online orders, in paise; listed apart like the counter refunds,
    *                                not subtracted from the sales figures above
    */
-  public record Dashboard(long salesTodayPaise, long ordersToday, long newOrders, long coinsIssuedToday,
+  public record Dashboard(long salesTodayPaise, long ordersToday, long newOrders, long needsAction,
+                          long coinsIssuedToday,
                           List<Day> last7Days, List<LowItem> lowStock, long posSalesTodayPaise, long posBillsToday,
                           long posRefundsTodayPaise, long onlineRefundsTodayPaise) {}
 
@@ -91,6 +94,8 @@ public class ReportService {
     long sales = scalar("SELECT COALESCE(SUM(total_paise), 0) FROM orders WHERE placed_at >= :d AND " + COUNTED, dayStart);
     long count = scalar("SELECT count(*) FROM orders WHERE placed_at >= :d AND " + COUNTED, dayStart);
     long fresh = ((Number) em.createNativeQuery("SELECT count(*) FROM orders WHERE status = 'PLACED'").getSingleResult()).longValue();
+    long action = ((Number) em.createNativeQuery("SELECT count(*) FROM orders WHERE status IN ('PLACED','CONFIRMED','PACKED','OUT_FOR_DELIVERY','READY_FOR_PICKUP')")
+        .getSingleResult()).longValue();
     long coins = scalar("SELECT COALESCE(SUM(coins), 0) FROM coin_ledger WHERE kind = 'EARN' AND created_at >= :d", dayStart);
 
     long posSales = scalar("SELECT COALESCE(SUM(total_paise), 0) FROM pos_sale WHERE created_at >= :d", dayStart);
@@ -98,7 +103,7 @@ public class ReportService {
     long posRefunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM pos_return WHERE created_at >= :d", dayStart);
     long onlineRefunds = scalar("SELECT COALESCE(SUM(refund_paise), 0) FROM order_return WHERE created_at >= :d", dayStart);
 
-    return new Dashboard(sales, count, fresh, coins, lastSevenDays(today, from), lowStock(), posSales, posBills, posRefunds, onlineRefunds);
+    return new Dashboard(sales, count, fresh, action, coins, lastSevenDays(today, from), lowStock(), posSales, posBills, posRefunds, onlineRefunds);
   }
 
   /** Always seven entries, oldest first; days without orders show zero. */

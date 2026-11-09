@@ -16,6 +16,7 @@ class PosReturnItemEntity extends BaseEntity {
   long taxablePaise;
   long cgstPaise;
   long sgstPaise;
+  long couponSharePaise;
 
   /** Required by JPA; not for application code. */
   protected PosReturnItemEntity() {}

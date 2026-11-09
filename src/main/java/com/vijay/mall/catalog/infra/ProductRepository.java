@@ -62,6 +62,34 @@ public class ProductRepository {
   }
 
   /**
+   * The admin product list with its extra filters. Counter-only and inactive products are included unless {@code active} says
+   * otherwise.
+   *
+   * @param hotSale true for products flagged hot sale, false for the others, {@code null} for both (the flag only: the window is not looked at)
+   * @param active true for active products, false for retired ones, {@code null} for both
+   * @param lowStock true to keep only products at or below their own stock alert level
+   * @param sort {@code name} (default, by English name), {@code lowStock} (emptiest first) or {@code updated} (most recently changed first)
+   */
+  public Page<ProductData> adminSearch(String q, UUID categoryId, Boolean hotSale, Boolean active, boolean lowStock, String sort,
+                                       int page, int size) {
+    Map<String, Object> params = new HashMap<>();
+    StringBuilder where = conditions(q, categoryId, false, false, true, false, null, params);
+    if (hotSale != null) where.append("and p.hotSale = ").append(hotSale).append(' ');
+    if (active != null) where.append("and p.active = ").append(active).append(' ');
+    if (lowStock) where.append("and exists (select 1 from InventoryEntity i where i.productId = p.id and i.qtyOnHand <= i.lowThreshold) ");
+    String order = switch (sort == null ? "name" : sort) {
+      case "lowStock" -> "order by (select i.qtyOnHand from InventoryEntity i where i.productId = p.id), p.nameEn, p.id";
+      case "updated" -> "order by p.updatedAt desc, p.id";
+      default -> "order by p.nameEn, p.id";
+    };
+    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + order, ProductEntity.class);
+    params.forEach(list::setParameter);
+    list.setFirstResult((int) ((long) page * size)).setMaxResults(size + 1); // one extra row tells whether another page follows
+    List<ProductData> fetched = list.getResultList().stream().map(ProductRepository::toDomain).toList();
+    return BoundedCount.assemble(fetched, page, size, () -> boundedCount("p.id", where, params));
+  }
+
+  /**
    * Counter search: active products (counter-only ones included) whose name matches {@code q} or whose id is in
    * {@code exactIds}, those exact matches first, in name order with the id as the tie-breaker (so paging is stable). With
    * {@code since} only products updated at or after it are kept, plus those whose counter attributes were saved, or a barcode
@@ -303,6 +331,22 @@ public class ProductRepository {
     e.updatedAt = now;
   }
 
+  /**
+   * Sets the hot-sale flag and window of these products in one go and stamps {@code updatedAt}.
+   * @return how many products were changed; ids that do not exist are skipped
+   */
+  @Transactional
+  public int setHotSale(Collection<UUID> ids, boolean hotSale, Instant hotStart, Instant hotEnd, Instant now) {
+    List<ProductEntity> found = jpa.findAllById(ids);
+    found.forEach(e -> {
+      e.hotSale = hotSale;
+      e.hotStart = hotStart;
+      e.hotEnd = hotEnd;
+      e.updatedAt = now;
+    });
+    return found.size();
+  }
+
   /** Switches a product on or off for sale and stamps {@code updatedAt}; does nothing when the id does not exist. */
   @Transactional
   public void setActive(UUID id, boolean active, Instant now) {
@@ -338,7 +382,7 @@ public class ProductRepository {
   @Transactional
   public void purge(UUID id) {
     em.flush();
-    for (String table : List.of("cart_item", "wishlist_item", "product_barcode", "product_pos", "stock_movement", "inventory")) {
+    for (String table : List.of("cart_item", "wishlist_item", "product_barcode", "product_pos", "stock_allocation", "stock_lot", "stock_movement", "inventory")) {
       em.createNativeQuery("delete from " + table + " where product_id = :id").setParameter("id", id).executeUpdate();
     }
     em.createNativeQuery("delete from product where id = :id").setParameter("id", id).executeUpdate();

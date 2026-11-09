@@ -10,10 +10,21 @@ import java.util.stream.IntStream;
 public final class CouponMath {
   private CouponMath() {}
 
-  /** Amount the coupon applies to: the whole subtotal, or only the lines of its categories. */
-  public static long base(Coupon c, List<PricedLine> lines, long subtotal) {
-    if (c.allCategories()) return subtotal;
-    return lines.stream().filter(l -> c.covers(l.categoryId())).mapToLong(PricedLine::lineTotalPaise).sum();
+  /**
+   * True when the coupon discounts this line: the line is one the coupon is for (see {@link Coupon#covers(PricedLine)}) and,
+   * unless {@code allowOnFlash}, it is not a flash sale line.
+   */
+  public static boolean covered(Coupon c, PricedLine line, boolean allowOnFlash) {
+    return c.covers(line) && (allowOnFlash || line.flashSaleId() == null);
+  }
+
+  /** Amount the coupon applies to: the whole subtotal, or only the covered lines (flash sale lines count). */
+  public static long base(Coupon c, List<PricedLine> lines, long subtotal) { return base(c, lines, subtotal, true); }
+
+  /** Amount the coupon applies to: the sum of the covered lines only; the whole subtotal when every line is covered. */
+  public static long base(Coupon c, List<PricedLine> lines, long subtotal, boolean allowOnFlash) {
+    if (c.unrestricted() && allowOnFlash) return subtotal;
+    return lines.stream().filter(l -> covered(c, l, allowOnFlash)).mapToLong(PricedLine::lineTotalPaise).sum();
   }
 
   /**
@@ -32,11 +43,14 @@ public final class CouponMath {
 
   /**
    * Splits a coupon discount over the cart lines, one amount per line in the same order. Only lines the coupon covers
-   * share it (in proportion to their price); lines of other categories get 0, so a Dairy coupon never lowers a
+   * share it (in proportion to their price); other lines (other categories, items not listed) get 0, so a Dairy coupon never lowers a
    * Snacks line. The amounts add up to the discount exactly (capped at what the covered lines cost).
    */
-  public static long[] perLine(Coupon c, List<PricedLine> lines, long discount) {
-    long[] weights = lines.stream().mapToLong(l -> c.covers(l.categoryId()) ? Math.max(0, l.lineTotalPaise()) : 0).toArray();
+  public static long[] perLine(Coupon c, List<PricedLine> lines, long discount) { return perLine(c, lines, discount, true); }
+
+  /** Same as {@link #perLine(Coupon, List, long)}; flash sale lines are skipped unless {@code allowOnFlash}. */
+  public static long[] perLine(Coupon c, List<PricedLine> lines, long discount, boolean allowOnFlash) {
+    long[] weights = lines.stream().mapToLong(l -> covered(c, l, allowOnFlash) ? Math.max(0, l.lineTotalPaise()) : 0).toArray();
     long covered = Arrays.stream(weights).sum();
     long amount = Math.max(0, Math.min(discount, covered));
     if (amount == 0) return new long[lines.size()];

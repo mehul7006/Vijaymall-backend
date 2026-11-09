@@ -36,11 +36,13 @@ services:
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       IMAGES_DIR: /app/data/images
+      FILES_DIR: /app/data/files
     ports:
       - "8080:8080"
       - "127.0.0.1:9090:9090"
     volumes:
       - images:/app/data/images
+      - files:/app/data/files
       - logs:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9090/actuator/health | grep -q UP || exit 1"]
@@ -52,4 +54,5 @@ services:
 volumes:
   dbdata:
   images:
+  files:
   logs:

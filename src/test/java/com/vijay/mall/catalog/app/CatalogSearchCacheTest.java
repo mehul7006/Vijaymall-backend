@@ -102,10 +102,17 @@ class CatalogSearchCacheTest {
     service.groups(null, null, false, 0, 20);
     service.groups(null, null, false, 0, 20);
     verify(products, times(1)).searchGroups(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt());
-    when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(product()), 0, 20, 1));
+    when(products.adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(product()), 0, 20, 1));
     service.adminList("rice", null, 0, 20);
     service.adminList("rice", null, 0, 20);
-    verify(products, times(1)).search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt());
+    verify(products, times(1)).adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
+    service.adminList("rice", null, null, true, true, null, 0, 20); // low stock depends on stock, which the catalog cache cannot see
+    service.adminList("rice", null, null, true, true, null, 0, 20);
+    service.adminList("rice", null, null, null, false, "lowStock", 0, 20);
+    verify(products, times(4)).adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
+    service.adminList("rice", null, true, null, false, "updated", 0, 20);
+    service.adminList("rice", null, true, null, false, "updated", 0, 20); // a filter and an order that stock does not decide: remembered
+    verify(products, times(5)).adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt());
   }
 
   @Test

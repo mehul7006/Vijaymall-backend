@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.inventory.domain.LotInfo;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -28,11 +29,26 @@ public final class PosViews {
 
   /**
    * One payment part: mode ({@code CASH}, {@code UPI}, {@code CARD} or {@code CREDIT} on a sale), amount in paise and
-   * an optional reference such as a UPI transaction id.
+   * an optional reference such as a UPI transaction id or a card approval code, the optional money account the money went to
+   * and, for a card machine, the terminal id.
    */
   public record Pay(@Size(max = 20) String mode,
                     @Min(value = 0, message = "must be at least 0") @Max(value = MAX_PAISE, message = "must be at most 100000000") long amountPaise,
-                    @Size(max = 100) String reference) {}
+                    @Size(max = 100) String reference,
+                    @Schema(description = "Optional: id of a SUCCESS card machine payment (mode CARD or UPI, same amount, not used before)") UUID terminalPaymentId,
+                    @Schema(description = "Optional: the money account the money went to; blank = the shop's default account for the mode") UUID moneyAccountId,
+                    @Size(max = 60) String terminalId) {
+    /** A payment part with no card machine payment, money account or terminal (the shape older clients send). */
+    public Pay(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null, null, null); }
+
+    /** A payment part for a card machine payment, with the default account. */
+    public Pay(String mode, long amountPaise, String reference, UUID terminalPaymentId) { this(mode, amountPaise, reference, terminalPaymentId, null, null); }
+
+    /** A payment part with a money account and terminal but no card machine payment. */
+    public Pay(String mode, long amountPaise, String reference, UUID moneyAccountId, String terminalId) {
+      this(mode, amountPaise, reference, null, moneyAccountId, terminalId);
+    }
+  }
 
   /** The largest amount any single money input accepts: 100,000,000 paise (10 lakh rupees). */
   public static final long MAX_PAISE = 100_000_000L;
@@ -134,12 +150,23 @@ public final class PosViews {
   /**
    * A product as the counter sees it: names, price and MRP in paise, how it is sold, GST, HSN, item code, whether it
    * is counter-only, stock on hand, coin flags and barcodes, plus the pack size, unit, variant name and the display name
-   * (name with variant and pack size, such as {@code Basmati Rice Premium 1 kg}).
+   * (name with variant and pack size, such as {@code Basmati Rice Premium 1 kg}). {@code lot} is set for a lot-priced product with
+   * stock: the lot the next unit comes from, the units left in it and the {@code nextPriceChange} notice (an offline till keeps it
+   * to show "after N more the price is X").
    */
   public record PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
                            int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                            boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
-                           String variantName, String displayName) {
+                           String variantName, String displayName, LotInfo lot) {
+    /** A product with no lot information (no lot-priced stock). */
+    public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
+                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
+                      String variantName, String displayName) {
+      this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
+          coinRedeemable, earnsCoins, barcodes, packSize, unit, variantName, displayName, null);
+    }
+
     /** A product without pack size, unit or variant details: the display name is the plain name. */
     public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
                       int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
@@ -149,8 +176,14 @@ public final class PosViews {
     }
   }
 
-  /** A scanned code resolved to a product, the quantity the code implies and the price of that quantity. */
-  public record Scan(PosProduct product, int qty, long linePaise) {}
+  /**
+   * A scanned code resolved to a product, the quantity the code implies and the price of that quantity. {@code lot} says which lot the
+   * unit will come from and, for a lot-priced product, when the price changes ({@code lot.nextPriceChange}); null without stock.
+   */
+  public record Scan(PosProduct product, int qty, long linePaise, LotInfo lot) {
+    /** A scan with no lot information. */
+    public Scan(PosProduct product, int qty, long linePaise) { this(product, qty, linePaise, null); }
+  }
 
   /** The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes. */
   public record PosAttributes(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, boolean posOnly,

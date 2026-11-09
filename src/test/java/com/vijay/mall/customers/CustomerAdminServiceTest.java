@@ -53,7 +53,7 @@ class CustomerAdminServiceTest {
     service = new CustomerAdminService(users, wallet, credit, orders, tokens, audit, Clock.fixed(NOW, ZoneOffset.UTC));
     when(wallet.balance(any())).thenReturn(40);
     when(orders.openOrderCount(any())).thenReturn(2L);
-    when(credit.account(any())).thenReturn(new CreditService.AccountView(id, "Asha", "9000000001", 500, 1000, 500));
+    when(credit.account(any())).thenReturn(new CreditService.AccountView(id, "Asha", "9000000001", 500, 1000, 500, false));
   }
 
   private UserRepository.Detail detail(String role, String status) {

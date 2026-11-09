@@ -80,6 +80,8 @@ public final class ReceiptText {
         out.add(split("CGST", Money.plain(r.cgstPaise()), width));
         out.add(split("SGST", Money.plain(r.sgstPaise()), width));
         out.add("-".repeat(width));
+        if (r.couponSharePaise() > 0) out.add(split("Coupon share", "-" + Money.plain(r.couponSharePaise()), width));
+        if (r.couponClawbackPaise() > 0) out.add(split("Coupon taken back", "-" + Money.plain(r.couponClawbackPaise()), width));
         out.add(split("Refund total", Money.plain(r.refundTotalPaise()), width));
         if (r.creditAdjustedPaise() > 0) out.add(split("Credit reduced", Money.plain(r.creditAdjustedPaise()), width));
         r.refunds().forEach(p -> out.add(split("Refund " + p.mode(), Money.plain(p.amountPaise()), width)));

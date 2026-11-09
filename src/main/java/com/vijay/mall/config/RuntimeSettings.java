@@ -200,6 +200,10 @@ public class RuntimeSettings implements MeterBinder {
     if (keyId && secret && !isSet(Settings.RAZORPAY_WEBHOOK_SECRET)) {
       out.add("Razorpay webhook secret is missing: payments are only confirmed by the 5-minute check, not instantly.");
     }
+    if (getBool(Settings.PAYTM_ENABLED)) {
+      List<String> missing = paytmMissing(Map.of());
+      if (!missing.isEmpty()) out.add("The Paytm card machine is on but " + String.join(", ", missing) + " is missing: card payments cannot be sent.");
+    }
     if ("http".equals(get(Settings.SMS_CHANNEL))) {
       if (!isSet(Settings.SMS_HTTP_URL)) out.add("SMS is set to your provider but the provider address is empty: mobile login cannot send codes.");
       if (!isSet(Settings.SMS_SENDER_ID) || !isSet(Settings.SMS_DLT_TEMPLATE_ID)) {
@@ -241,6 +245,7 @@ public class RuntimeSettings implements MeterBinder {
         throw e;
       }
     }
+    paytmGuard(clean);
     if (clean.entrySet().stream().anyMatch(e -> !e.getValue().isEmpty() && Settings.find(e.getKey()).secret()) && !crypto.available()) {
       throw ApiException.unprocessable("CONFIG_KEY_MISSING", "The server has no CONFIG_ENCRYPTION_KEY, so secrets cannot be stored safely", Map.of());
     }
@@ -292,6 +297,33 @@ public class RuntimeSettings implements MeterBinder {
       events.publishEvent(new SettingsChanged(Set.copyOf(changed)));
     }
     return changed;
+  }
+
+  /** The value a setting will have once {@code pending} is saved: a blank pending value means cleared (environment or default). */
+  private String effective(Def d, Map<String, String> pending) {
+    String v = pending.get(d.key());
+    if (v == null) return get(d);
+    if (!v.isEmpty()) return v;
+    String fromEnv = env.getProperty(d.envProperty());
+    return fromEnv != null && !fromEnv.isBlank() ? fromEnv : d.fallback() == null ? "" : d.fallback();
+  }
+
+  /** Names of the Paytm settings that are still empty after applying {@code pending}. */
+  private List<String> paytmMissing(Map<String, String> pending) {
+    List<String> missing = new ArrayList<>();
+    for (Def d : List.of(Settings.PAYTM_MID, Settings.PAYTM_MERCHANT_KEY, Settings.PAYTM_CHANNEL_ID)) {
+      if (effective(d, pending).isBlank()) missing.add(d.label());
+    }
+    return missing;
+  }
+
+  /** Refuses a save that would leave the Paytm card machine switched on without what it needs. */
+  private void paytmGuard(Map<String, String> pending) {
+    if (!Boolean.parseBoolean(effective(Settings.PAYTM_ENABLED, pending).trim())) return;
+    List<String> missing = paytmMissing(pending);
+    if (!missing.isEmpty()) {
+      throw ApiException.validation(Settings.PAYTM_ENABLED.key(), "The Paytm card machine cannot be on while these are empty: " + String.join(", ", missing));
+    }
   }
 
   private boolean sameSecret(String storedCipher, String plain) {
@@ -353,6 +385,14 @@ public class RuntimeSettings implements MeterBinder {
       }
     } else if (d == Settings.RAZORPAY_KEY_ID && !v.startsWith("rzp_")) {
       throw bad(d, "should start with rzp_");
+    } else if (d == Settings.PAYTM_BASE_URL || d == Settings.PAYTM_SETTLEMENT_BASE_URL) {
+      String lower = v.toLowerCase();
+      boolean local = lower.startsWith("http://localhost") || lower.startsWith("http://127.0.0.1");
+      if (!lower.startsWith("https://") && !local) throw bad(d, "must start with https://");
+    } else if (d == Settings.PAYTM_MERCHANT_KEY && v.length() != 16) {
+      throw bad(d, "must be exactly 16 characters");
+    } else if ((d == Settings.PAYTM_MID || d == Settings.PAYTM_CHANNEL_ID) && !v.matches("[A-Za-z0-9_-]+")) {
+      throw bad(d, "may contain only letters, digits, - and _");
     } else if (d == Settings.CLIENT_IP_HEADER && !v.matches("[A-Za-z0-9-]+")) {
       throw bad(d, "must be a header name like CF-Connecting-IP");
     }
