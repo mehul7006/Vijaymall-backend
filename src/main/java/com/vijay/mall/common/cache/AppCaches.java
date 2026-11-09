@@ -43,7 +43,9 @@ public class AppCaches implements MeterBinder {
     COUPONS("coupons", 60, 4, "Active coupons offered in the app"),
     DASHBOARD("dashboard", 30, 8, "Admin dashboard figures (heavy to compute)"),
     REPORT_SUMMARY("report-summary", 60, 60, "Sales report for a date range (heavy to compute)"),
-    FLASH("flash", 15, 4, "Flash sale definitions (times, discounts, caps); units left are never cached");
+    FLASH("flash", 15, 4, "Flash sale definitions (times, discounts, caps); units left are never cached"),
+    PRODUCT_LIST("product-list", 10, 400, "Which products match a shop or admin product search, in order, with the total (stock numbers are always read fresh)"),
+    ORDER_COUNTS("order-counts", 15, 500, "The total behind the admin order list paging (counting 100,000s of orders is the heavy part of the list)");
 
     /** Short name used in URLs, metrics and settings, for example {@code categories}. */
     public final String key;

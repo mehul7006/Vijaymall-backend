@@ -207,6 +207,17 @@ public class CatalogService {
   void setCaches(AppCaches caches) { this.caches = caches; }
 
   /**
+   * Remembers the result of a product search for a few seconds (the {@code product-list} cache; an admin edit clears it). Only
+   * which products match, in what order and how many is kept: stock numbers and flash offers are read fresh for every answer.
+   */
+  private <T> T searched(String key, java.util.function.Supplier<T> search) {
+    return caches == null ? search.get() : caches.get(AppCaches.Name.PRODUCT_LIST, key, search);
+  }
+
+  /** The part of a search cache key that changes with time: the hot-sale window, checked against the clock in 10-second steps. */
+  private long hotBucket(boolean hot, Instant now) { return hot ? now.getEpochSecond() / 10 : 0; }
+
+  /**
    * The active categories in display order. Served from a cache when one is available because every screen reads it.
    */
   public List<Category> categories() {
@@ -233,8 +244,9 @@ public class CatalogService {
     Instant now = clock.instant();
     int pg = Math.max(0, page);
     int sz = Page.clampSize(size);
-    Page<AdminProduct> p = withStock(includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
-        : products.searchInStock(q, categoryId, hot, now, pg, sz));
+    String key = "list|" + q + "|" + categoryId + "|" + hot + "|" + includeOutOfStock + "|" + pg + "|" + sz + "|" + hotBucket(hot, now);
+    Page<AdminProduct> p = withStock(searched(key, () -> includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
+        : products.searchInStock(q, categoryId, hot, now, pg, sz)));
     return new Page<>(flashed(p.items().stream().map(a -> a.toCustomer(now)).toList()), p.page(), p.size(), p.total());
   }
 
@@ -271,7 +283,10 @@ public class CatalogService {
   @Transactional(readOnly = true)
   public Page<ProductGroup> groups(String q, UUID categoryId, boolean hot, boolean includeOutOfStock, int page, int size) {
     Instant now = clock.instant();
-    Page<UUID> ids = products.searchGroups(q, categoryId, hot, !includeOutOfStock, now, Math.max(0, page), Page.clampSize(size));
+    int pg = Math.max(0, page);
+    int sz = Page.clampSize(size);
+    String key = "groups|" + q + "|" + categoryId + "|" + hot + "|" + includeOutOfStock + "|" + pg + "|" + sz + "|" + hotBucket(hot, now);
+    Page<UUID> ids = searched(key, () -> products.searchGroups(q, categoryId, hot, !includeOutOfStock, now, pg, sz));
     List<ProductData> rows = products.visibleMembers(ids.items());
     var stocks = inventory.stocks(rows.stream().map(ProductData::id).toList());
     if (!includeOutOfStock) {
@@ -399,7 +414,10 @@ public class CatalogService {
   // ---------- admin side ----------
   /** Admin product list with stock numbers; includes inactive and counter-only products, sorted by English name. */
   public Page<AdminProduct> adminList(String q, UUID categoryId, int page, int size) {
-    return withStock(products.search(q, categoryId, false, false, clock.instant(), Math.max(0, page), Page.clampSize(size)));
+    int pg = Math.max(0, page);
+    int sz = Page.clampSize(size);
+    Instant now = clock.instant();
+    return withStock(searched("admin|" + q + "|" + categoryId + "|" + pg + "|" + sz, () -> products.search(q, categoryId, false, false, now, pg, sz)));
   }
 
   /** One product with stock numbers for the admin; {@code NOT_FOUND} when unknown. */

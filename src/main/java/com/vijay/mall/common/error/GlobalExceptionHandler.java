@@ -1,6 +1,7 @@
 package com.vijay.mall.common.error;
 
 import com.vijay.mall.common.web.TraceIdFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -20,8 +21,10 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -78,6 +81,21 @@ public class GlobalExceptionHandler {
     return body(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_MEDIA_TYPE", "Unsupported content type", null);
   }
 
+  /** A file upload that is not sent as multipart/form-data: the caller's mistake (400), not a server fault. */
+  @ExceptionHandler(MultipartException.class)
+  ResponseEntity<ErrorBody> notMultipart(MultipartException e) {
+    return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Send the file as multipart/form-data in a part named file", null);
+  }
+
+  /**
+   * The client closed the connection while a response was being written (a phone going to the background, a dropped network,
+   * a live stream closed). Nothing can be sent any more and nothing is wrong on the server, so this is not an error.
+   */
+  @ExceptionHandler(AsyncRequestNotUsableException.class)
+  void clientGone(AsyncRequestNotUsableException e, HttpServletResponse response) {
+    log.debug("Client disconnected: {}", e.getMessage());
+  }
+
   @ExceptionHandler(MaxUploadSizeExceededException.class)
   ResponseEntity<ErrorBody> tooBig(MaxUploadSizeExceededException e) {
     return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "File too large", null);
@@ -111,9 +129,18 @@ public class GlobalExceptionHandler {
     return null;
   }
 
+  /**
+   * Anything not handled above is a server fault (500). When the response is already under way (a live event stream) there is
+   * no JSON body to send any more: the failure is logged and the stream simply ends.
+   */
   @ExceptionHandler(Exception.class)
-  ResponseEntity<ErrorBody> other(Exception e) {
+  ResponseEntity<ErrorBody> other(Exception e, HttpServletResponse response) {
     log.error("Unhandled error", e);
+    String type = response == null ? null : response.getContentType();
+    if (response != null && (response.isCommitted() || (type != null && type.startsWith("text/event-stream")))) return null;
     return body(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Something went wrong", null);
   }
+
+  /** Overload kept for callers that have no response at hand. */
+  ResponseEntity<ErrorBody> other(Exception e) { return other(e, null); }
 }

@@ -2,6 +2,7 @@ package com.vijay.mall.order.infra;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -12,10 +13,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -307,6 +311,19 @@ public class OrderRepository {
   /** All orders, newest first, optionally of one status. */
   public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
+  private AppCaches caches;
+
+  /** Optional (plain unit tests run without it): keeps the total of the admin order list for a few seconds. */
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
+
+  private long total(String status, String like, boolean anyStatus, boolean anyNumber) {
+    Supplier<Long> count = () -> anyStatus
+        ? (anyNumber ? orders.count() : orders.countByNumber(like))
+        : (anyNumber ? orders.countByStatus(status) : orders.countByStatusAndNumber(status, like));
+    return caches == null ? count.get() : caches.get(AppCaches.Name.ORDER_COUNTS, status + "|" + like, count);
+  }
+
   /** "1001" becomes "%1001%" in lower case; a % or _ typed by the person is dropped so it cannot act as a wildcard. */
   static String pattern(String q) { return "%" + q.trim().toLowerCase().replace("%", "").replace("_", "") + "%"; }
 
@@ -315,10 +332,12 @@ public class OrderRepository {
     PageRequest req = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"));
     boolean anyStatus = status == null || status.isBlank();
     boolean anyNumber = q == null || q.isBlank();
-    var result = anyStatus
-        ? (anyNumber ? orders.findAll(req) : orders.searchByNumber(pattern(q), req))
-        : (anyNumber ? orders.findByStatus(status, req)
-            : orders.searchByStatusAndNumber(status, pattern(q), req));
+    String like = anyNumber ? null : pattern(q);
+    List<OrderEntity> content = anyStatus
+        ? (anyNumber ? orders.findPageBy(req) : orders.listByNumber(like, req))
+        : (anyNumber ? orders.findPageByStatus(status, req) : orders.listByStatusAndNumber(status, like, req));
+    // counting a big table is the expensive part of a page: it is only done when the page is full, and the answer is kept for a few seconds
+    var result = PageableExecutionUtils.getPage(content, req, () -> total(status, like, anyStatus, anyNumber));
     return summaries(result, page, size);
   }
 }

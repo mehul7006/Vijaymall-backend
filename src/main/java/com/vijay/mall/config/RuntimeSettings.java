@@ -18,12 +18,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -232,7 +235,7 @@ public class RuntimeSettings implements MeterBinder {
     }
     Set<String> changed = new HashSet<>();
     Instant now = clock.instant();
-    tx.executeWithoutResult(s -> clean.forEach((key, value) -> {
+    Consumer<TransactionStatus> apply = s -> clean.forEach((key, value) -> {
       Def d = Settings.find(key);
       SettingEntity old = jpa.findById(key).orElse(null);
       if (value.isEmpty()) {
@@ -255,7 +258,15 @@ public class RuntimeSettings implements MeterBinder {
       jpa.save(e);
       changed.add(key);
       audit.log(actor, "CONFIG_CHANGE", "app_setting", key, d.secret() ? "changed" : (before == null ? "" : shown(before) + " -> ") + shown(value));
-    }));
+    });
+    try {
+      tx.executeWithoutResult(apply);
+    } catch (DataIntegrityViolationException race) {
+      // Two admins saved the same new setting at the same moment and both tried to insert it: the second one starts over
+      // and now finds the row, so it updates it instead.
+      changed.clear();
+      tx.executeWithoutResult(apply);
+    }
     if (!changed.isEmpty()) {
       for (String key : changed) {
         Def d = Settings.find(key);

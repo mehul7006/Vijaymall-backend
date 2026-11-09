@@ -182,38 +182,80 @@ class OrderRepositoryCoverageTest {
 
   @Test
   void adminListPicksTheRightQueryForEveryFilterCombination() {
-    var empty = new PageImpl<OrderEntity>(List.of());
-    when(orders.findAll(any(Pageable.class))).thenReturn(empty);
-    when(orders.searchByNumber(any(), any())).thenReturn(empty);
-    when(orders.findByStatus(any(), any())).thenReturn(empty);
-    when(orders.searchByStatusAndNumber(any(), any(), any())).thenReturn(empty);
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of());
+    when(orders.listByNumber(any(), any())).thenReturn(List.of());
+    when(orders.findPageByStatus(any(), any())).thenReturn(List.of());
+    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of());
 
     repo.adminList(null, null, 0, 10);
     repo.adminList("  ", "  ", 0, 10);
-    verify(orders, Mockito.times(2)).findAll(any(Pageable.class));
+    verify(orders, org.mockito.Mockito.times(2)).findPageBy(any(Pageable.class));
 
     repo.adminList(null, " 1001 ", 0, 10);
-    verify(orders).searchByNumber(ArgumentMatchers.eq("%1001%"), any());
+    verify(orders).listByNumber(org.mockito.ArgumentMatchers.eq("%1001%"), any());
 
     repo.adminList("PLACED", null, 0, 10);
     repo.adminList("PLACED", "", 0, 10);
-    verify(orders, Mockito.times(2)).findByStatus(ArgumentMatchers.eq("PLACED"), any());
+    verify(orders, org.mockito.Mockito.times(2)).findPageByStatus(org.mockito.ArgumentMatchers.eq("PLACED"), any());
 
     repo.adminList("PLACED", " 77 ", 0, 10);
-    verify(orders).searchByStatusAndNumber(ArgumentMatchers.eq("PLACED"), ArgumentMatchers.eq("%77%"), any());
+    verify(orders).listByStatusAndNumber(org.mockito.ArgumentMatchers.eq("PLACED"), org.mockito.ArgumentMatchers.eq("%77%"), any());
     assertThat(OrderRepository.pattern(" VSM-1_0%1 ")).as("case folded, wildcards removed").isEqualTo("%vsm-101%");
     verify(items, never()).countsFor(any());
+    verify(orders, never()).count();
+  }
+
+  @Test
+  void theTotalIsOnlyCountedWhenThePageIsFullAndKeptForAFewSeconds() {
+    UUID id = UUID.randomUUID();
+    OrderEntity e = entity(id, "PLACED", 0L);
+    when(items.countsFor(List.of(id))).thenReturn(java.util.Collections.singletonList(new Object[] {id, 2L}));
+    // a short page needs no count: the total is just what was returned
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e));
+    assertThat(repo.adminList(null, null, 0, 10).total()).isEqualTo(1);
+    verify(orders, never()).count();
+    verify(orders, never()).countByStatus(any());
+
+    // a full page needs the count; with a cache it is asked once for the same filter
+    var caches = new com.vijay.mall.common.cache.AppCaches(java.time.Clock.systemUTC());
+    repo.setCaches(caches);
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e, e));
+    when(orders.count()).thenReturn(183243L);
+    assertThat(repo.adminList(null, null, 0, 2).total()).isEqualTo(183243L);
+    assertThat(repo.adminList(null, null, 0, 2).total()).isEqualTo(183243L);
+    verify(orders, org.mockito.Mockito.times(1)).count();
+
+    when(orders.findPageByStatus(any(), any())).thenReturn(List.of(e, e));
+    when(orders.countByStatus("PLACED")).thenReturn(44794L);
+    assertThat(repo.adminList("PLACED", null, 0, 2).total()).isEqualTo(44794L);
+    when(orders.listByNumber(any(), any())).thenReturn(List.of(e, e));
+    when(orders.countByNumber("%5%")).thenReturn(9L);
+    assertThat(repo.adminList(null, "5", 0, 2).total()).isEqualTo(9L);
+    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of(e, e));
+    when(orders.countByStatusAndNumber("PLACED", "%5%")).thenReturn(3L);
+    assertThat(repo.adminList("PLACED", "5", 0, 2).total()).isEqualTo(3L);
+  }
+
+  @Test
+  void withoutACacheTheTotalIsCountedEachTime() {
+    UUID id = UUID.randomUUID();
+    OrderEntity e = entity(id, "PLACED", 0L);
+    when(items.countsFor(any())).thenReturn(List.of());
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e, e));
+    when(orders.count()).thenReturn(50L);
+    repo.adminList(null, null, 0, 2);
+    repo.adminList(null, null, 0, 2);
+    verify(orders, org.mockito.Mockito.times(2)).count();
   }
 
   @Test
   void theThreeArgumentAdminListHasNoSearchText() {
     UUID id = UUID.randomUUID();
     OrderEntity e = entity(id, "PLACED", 0L);
-    when(orders.findByStatus(ArgumentMatchers.eq("PLACED"), any()))
-        .thenReturn(new PageImpl<>(List.of(e), PageRequest.of(1, 5), 11));
-    when(items.countsFor(List.of(id))).thenReturn(Collections.singletonList(new Object[] {id, 6L}));
+    when(orders.findPageByStatus(org.mockito.ArgumentMatchers.eq("PLACED"), any())).thenReturn(List.of(e));
+    when(items.countsFor(List.of(id))).thenReturn(java.util.Collections.singletonList(new Object[] {id, 6L}));
     Page<OrderRepository.SummaryRow> p = repo.adminList("PLACED", 1, 5);
-    assertThat(p.total()).isEqualTo(11);
+    assertThat(p.total()).as("page 2 of a short result: the offset plus what was returned").isEqualTo(6);
     assertThat(p.page()).isEqualTo(1);
     assertThat(p.size()).isEqualTo(5);
     assertThat(p.items()).singleElement().satisfies(r -> {

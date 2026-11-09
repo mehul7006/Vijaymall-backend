@@ -305,4 +305,19 @@ class RuntimeSettingsTest {
     assertThat(s.get(DELIVERY_FEE)).isEqualTo(DELIVERY_FEE.fallback());
     assertThat(s.sourceOf(DELIVERY_FEE)).isEqualTo(Source.DEFAULT);
   }
+
+  @Test
+  void twoAdminsSavingTheSameNewSettingAtOnceBothSucceed() {
+    // the first attempt collides with the other admin's insert of the same key; the retry finds the row and updates it
+    when(f.jpa.save(any(SettingEntity.class))).thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"))
+        .thenAnswer(i -> {
+          SettingEntity e = i.getArgument(0);
+          f.rows.add(e);
+          return e;
+        });
+    var changed = f.settings.save(List.of(new Change("delivery.feePaise", "4000")), UUID.randomUUID());
+    assertThat(changed).containsExactly("delivery.feePaise");
+    assertThat(f.row("delivery.feePaise")).isPresent();
+    verify(f.jpa, Mockito.times(2)).save(any(SettingEntity.class));
+  }
 }

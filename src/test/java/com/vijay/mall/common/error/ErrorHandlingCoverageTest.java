@@ -65,4 +65,34 @@ class ErrorHandlingCoverageTest {
     assertThat(ev.productIds()).containsExactly(id);
     assertThat(ev.reason()).isEqualTo("SALE");
   }
+
+  @Test
+  void anUploadThatIsNotMultipartIsA400() {
+    var r = handler.notMultipart(new org.springframework.web.multipart.MultipartException("Current request is not a multipart request"));
+    assertThat(r.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(r.getBody().code()).isEqualTo("VALIDATION_FAILED");
+  }
+
+  @Test
+  void aClientThatDisconnectedIsNotAnError() {
+    var res = new org.springframework.mock.web.MockHttpServletResponse();
+    handler.clientGone(new org.springframework.web.context.request.async.AsyncRequestNotUsableException("Broken pipe"), res);
+    assertThat(res.getStatus()).isEqualTo(200); // nothing was written
+  }
+
+  @Test
+  void aFailureOnALiveStreamOrAnAlreadyStartedResponseSendsNoJsonBody() {
+    var sse = new org.springframework.mock.web.MockHttpServletResponse();
+    sse.setContentType("text/event-stream");
+    assertThat(handler.other(new IllegalStateException("boom"), sse)).isNull();
+    var committed = new org.springframework.mock.web.MockHttpServletResponse();
+    committed.setCommitted(true);
+    assertThat(handler.other(new IllegalStateException("boom"), committed)).isNull();
+    var plain = new org.springframework.mock.web.MockHttpServletResponse();
+    plain.setContentType("application/json");
+    assertThat(handler.other(new IllegalStateException("boom"), plain).getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+    var untyped = new org.springframework.mock.web.MockHttpServletResponse();
+    assertThat(handler.other(new IllegalStateException("boom"), untyped).getBody().code()).isEqualTo("INTERNAL_ERROR");
+    assertThat(handler.other(new IllegalStateException("boom")).getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+  }
 }
