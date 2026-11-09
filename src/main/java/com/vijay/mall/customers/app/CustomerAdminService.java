@@ -120,6 +120,6 @@ public class CustomerAdminService {
     return p.withItems(p.items().stream().map(r -> new OrderViews.AdminSummary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
         r.totalPaise(), r.itemCount(), r.placedAt(), u.name(), u.email(), u.mobile(), r.subtotalPaise(), r.couponCode(),
         r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(),
-        r.paymentStatus())).toList());
+        r.paymentStatus(), r.cancelledBy(), r.cancelCode())).toList());
   }
 }

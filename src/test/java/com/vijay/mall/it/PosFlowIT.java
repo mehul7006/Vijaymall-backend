@@ -217,6 +217,25 @@ class PosFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/pos/holds/" + id, cashier).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
 
+  @Test void theHeldBasketListShowsOnlyTheNewestHundred() {
+    String cashier = cashier();
+    List<Object> ids = new java.util.ArrayList<>();
+    try {
+      for (int i = 0; i < 101; i++) {
+        var made = post("/api/v1/pos/holds", cashier,
+            Map.of("label", "bulk " + i, "cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)))));
+        assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ids.add(made.getBody().get("id"));
+      }
+      var listed = getList("/api/v1/pos/holds", cashier);
+      assertThat(listed).hasSize(100);
+      assertThat(listed.get(0).get("id")).as("newest first").isEqualTo(ids.get(100));
+      assertThat(listed).noneMatch(h -> ids.get(0).equals(h.get("id")));
+    } finally {
+      ids.forEach(id -> call(HttpMethod.DELETE, "/api/v1/pos/holds/" + id, cashier, null, null));
+    }
+  }
+
   @Test void upiLinkNeedsTheShopUpiId() {
     String admin = adminToken();
     assertThat(get("/api/v1/pos/upi-link?amountPaise=100", cashier()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);

@@ -1234,3 +1234,219 @@ For stock takes a repeat returns the first call's result and applies nothing mor
 
 - **Login code e-mail failures**: `POST /api/v1/auth/otp/send` answers `503 OTP_EMAIL_FAILED` ("We could not send the sign-in code right now. Please try again in a moment.") when the shop's mail server cannot be reached; show the message and let the user retry. (Mobile codes: `503 SMS_NOT_CONFIGURED` / `502 SMS_PROVIDER_ERROR`.)
 - **`PUT /api/v1/me`**: `mobile` is validated as request validation: blank or exactly 10 digits, otherwise `400 VALIDATION_FAILED` with `details.fields.mobile` = "must be 10 digits".
+
+
+---
+## Addendum (2026-11-09 release)
+
+Everything below is new or changed in this release and **overrides** older text in this file where they differ. Money is integer paise, times are ISO-8601 UTC, error bodies are `{ code, message, traceId, details }`. Where an older section of this file says the opposite of this addendum, this addendum wins (the affected old statements are listed at the end).
+
+### Paged lists: `totalExact` and `hasMore`
+Every paged response (`items`, `page`, `size`, `total`) now also carries two fields:
+```json
+{ "items": [ ... ], "page": 0, "size": 20, "total": 10000, "totalExact": false, "hasMore": true }
+```
+| field | type | meaning |
+|---|---|---|
+| total | integer | exact while the list has 10,000 rows or fewer. A longer list reports `10000` here. |
+| totalExact | boolean | `true` when `total` is the real count; `false` when `total` is only the 10,000 cap (show "10,000+"). |
+| hasMore | boolean | always exact: `true` when another page follows this one. Page until it is `false`; do not compute it from `total`. |
+
+- Totals are counted on every request (never cached or stale). When the page itself shows the end of the list, `total` is simply rows before this page + rows on this page, exact, even for a list that is longer than 10,000 rows seen from its last page.
+- Paging endpoints in this file affected: `GET /products`, `GET /product-groups`, `GET /wallet/ledger`, `GET /admin/products`, `GET /admin/customers`, `GET /admin/customers/{id}/wallet-ledger`, `GET /admin/customers/{id}/orders` and the other paged lists of the backend. `GET /hot-sale` pages the products part but only adds `page`, `size`, `total` (see below, no `totalExact`/`hasMore` there).
+- A product search result is remembered by the server for up to 5 minutes but is cleared at once when a catalog edit commits or a product sells out or comes back in stock, so a product that appears or vanishes with stock shows up in the next list call. Stock numbers and flash prices in the answer are always fresh.
+
+### ETag and `If-None-Match` (conditional GET)
+- **Applies to exactly four public GET paths**: `/api/v1/categories`, `/api/v1/product-groups`, `/api/v1/units`, `/api/v1/hot-sale` (any query string). No other endpoint gets an ETag.
+- The `200` answer carries `ETag: "<hash>"` and `Cache-Control: no-cache`. Send the stored value back as `If-None-Match: "<hash>"` on the next call; if the body is unchanged the server answers `304 Not Modified` with no body: keep your cached copy.
+- The ETag is a hash of the body, so it differs per query string (`/hot-sale?page=1` has its own ETag). Browsers (CORS) may send `If-None-Match` and read `ETag`, `Retry-After` and `X-Trace-Id`.
+- Every `429` (`RATE_LIMITED`) now also has a `Retry-After` header in seconds, equal to `details.retryAfterSeconds`.
+
+### Image upload errors (all image uploads)
+Applies to `POST /admin/products/{id}/image` and `POST /admin/categories/{id}/image` (and any other image upload). Send `multipart/form-data` with the part named `file`; max 5 MB; JPEG, PNG or WebP.
+
+| status | code | `details.fields.file` | when |
+|---|---|---|---|
+| 400 | UNSUPPORTED_IMAGE | "must be an image (JPEG, PNG or WebP)" | the file is not a readable image |
+| 400 | FILE_TOO_LARGE | "image is too large (max 25000000 pixels)" | more than 25,000,000 pixels (width x height) |
+| 400 | FILE_TOO_LARGE | "must be 5 MB or smaller" | the upload is over 5 MB |
+| 400 | VALIDATION_FAILED | "file is empty" | empty file |
+| 400 | VALIDATION_FAILED | "send the file as multipart/form-data in a part named file" | not a multipart request (this used to be a 500) |
+
+### POST /api/v1/admin/products/{id}/image  (changed: `variants`)
+- **Who**: admin.
+- **Purpose / when the UI calls it**: Product picture upload. A product (group) can have several packs (variants), each with its own `id`; `{id}` is the pack being edited.
+- **Request**: multipart part `file` plus optional query `variants`:
+
+| `variants` | effect |
+|---|---|
+| `one` (default, also when omitted or blank) | the picture is set on this pack only |
+| `missing` | on this pack **and** on every other pack of the same product that has no picture yet; packs that already have one keep it |
+| `all` | on every pack of the product, replacing the pictures already there |
+
+The value is case-insensitive. Any other value: `400 VALIDATION_FAILED` `details.fields.variants` = "must be one, missing or all".
+- **Response**: `200` AdminProduct of the pack `{id}` (new `imageUrl`, `/img/products/<uuid>_400.jpg`; a `_1000.jpg` sibling exists).
+- **Errors**: 400 as in the upload table above and for `variants`; 404 `NOT_FOUND` unknown product.
+- **UI notes**: After `all`/`missing` re-fetch `GET /admin/products/{id}/variants` to see the other packs. A live catalog-change event is sent.
+
+### Customer picture fallback for packs
+In `GET /product-groups` and `GET /product-groups/{id}`, a `Variant` without its own picture now shows the product's picture: `variants[i].imageUrl` is the pack's own image when it has one, otherwise the group `imageUrl` (the default pack's image, else the first pack that has one). It is `null` only when no pack has a picture. The group-level `imageUrl` is unchanged. `GET /products` rows (one per pack) are **not** changed: their `imageUrl` stays the pack's own and may be `null`.
+
+### DELETE /api/v1/admin/products/{id}
+- **Who**: admin.
+- **Purpose / when the UI calls it**: "Delete product" on one pack.
+- **Request**: path `id` (the pack id). No body.
+- **Response**: `200` always, with what actually happened:
+```json
+{ "deleted": true, "deactivated": false, "reason": "Never sold, received or reviewed: removed completely" }
+```
+```json
+{ "deleted": false, "deactivated": true, "reason": "Has orders: kept for history and switched off instead" }
+```
+`deleted: true` means the pack is gone for good, together with its stock row and movements, barcodes, wishlist and cart rows. It is only done when nothing refers to it. Otherwise the pack is switched off (`active: false`) and kept for history; `reason` is then "Has <what>: kept for history and switched off instead" where `<what>` is the first match of: `orders`, `counter sales`, `purchases`, `flash sales`, `reviews`, `defective stock records`, `offline till records`. Deleting a pack that is already inactive answers `deactivated: true` again (200, nothing changes).
+- **Errors**: 404 `NOT_FOUND` for an unknown id (including a pack that was already hard-deleted).
+- **UI notes**: Branch on `deleted` / `deactivated`, show `reason`. Audited (`PRODUCT_DELETE` / `PRODUCT_DEACTIVATE`).
+
+### PATCH /api/v1/admin/products/{id}
+- **Who**: admin.
+- **Purpose / when the UI calls it**: Change only some fields of a pack (for example a price or the active switch) without resending the whole form.
+- **Request**: path `id`; JSON object containing **only the keys to change**. An absent key keeps the current value. Stock is never changed here.
+
+| key | type | rule |
+|---|---|---|
+| categoryId | uuid string | else 400 `fields.categoryId` "must be an id" |
+| nameEn, nameGu | string | not blank, else 400 "must not be blank" |
+| description | string or **null** | `null` clears it |
+| mrpPaise, pricePaise | whole number (paise) | else 400 "must be a whole number"; same price rules as PUT: price and MRP not negative ("price cannot be negative" on `fields.pricePaise`), MRP not below price (`fields.mrpPaise` "MRP must not be below the price") |
+| unit, packSize | string | text (`null` accepted); `unit` is checked against the unit list as in PUT |
+| active, hotSale, earnsCoins, coinRedeemable | boolean | else 400 "must be true or false" |
+| hotStart, hotEnd | ISO instant string or **null** | `null` clears it; end must be after start (`fields.hotEnd` "must be after hotStart"); bad text: 400 "must be a date-time such as 2026-01-31T10:00:00Z" |
+| lowThreshold | integer >= 0 | else 400 "must be 0 or more" |
+| variantName, variantOrder | string, integer | change the pack's name / order inside its product |
+
+`qtyOnHand` is **rejected**: `400 VALIDATION_FAILED` `fields.qtyOnHand` = "use the stock endpoint (POST /api/v1/admin/products/{id}/stock)". `productGroupId` and unknown keys are ignored. Types that are wrong give the 400 above with the key as the field name.
+```json
+{ "pricePaise": 4500, "hotEnd": null }
+```
+- **Response**: `200` AdminProduct (full, after the change).
+- **Errors**: 400 `VALIDATION_FAILED` (above); 404 `NOT_FOUND`.
+- **UI notes**: Use this for quick toggles (active, price). `PUT /admin/products/{id}` still replaces the editable fields; there an omitted `qtyOnHand` / `lowThreshold` keeps the stored value. To change stock use `POST /admin/products/{id}/stock`.
+
+### PUT /api/v1/admin/product-groups/{id}  (clarified)
+Leaving `active` out keeps the current value on every pack (the server writes `active` only when it is sent). Already described in the field table; no change in behaviour.
+
+### GET /api/v1/admin/categories
+- **Who**: admin.
+- **Purpose / when the UI calls it**: Category management screen (the public `GET /categories` lists only active ones).
+- **Request**: none.
+- **Response**: `200` array (not paged) of every category, hidden ones included, in shop order (`sortOrder`, then English name):
+```json
+[ { "id": "…", "nameEn": "Dairy", "nameGu": "ડેરી", "imageUrl": "/img/categories/<uuid>_400.jpg", "sortOrder": 1, "active": true } ]
+```
+`imageUrl` is `null` when there is no picture; `active: false` = hidden from the shop.
+- **Errors**: 403.
+
+### DELETE /api/v1/admin/categories/{id}
+- **Who**: admin.
+- **Request**: path `id`.
+- **Response**: `204 No Content`.
+- **Errors**: 404 `NOT_FOUND` (unknown id); `409 CATEGORY_IN_USE` ("Products or coupons still use this category; move them or hide it instead") while any product or coupon (single category or coupon category list) refers to it, active or not.
+- **UI notes**: On 409 offer to hide it instead (`PUT /admin/categories/{id}` with `active: false`). A live catalog-change event is sent.
+
+### POST /api/v1/admin/categories/{id}/image
+- **Who**: admin.
+- **Request**: multipart part `file`, same rules and errors as the product picture (see the upload table). No `variants` parameter. Stored under `/img/categories/`.
+- **Response**: `200` category in the admin shape above (`id, nameEn, nameGu, imageUrl, sortOrder, active`).
+- **Errors**: 400 upload errors; 404 `NOT_FOUND` unknown category.
+
+### GET /api/v1/hot-sale  (changed: paged products)
+- **Who**: public. ETag/304 applies (see above).
+- **Request**: query `page` (default 0), `size` (default 20, clamped to 1..50; negative page counts as 0).
+- **Response**: `200`:
+```json
+{ "banners": [ HotBanner ], "products": [ Product ], "page": 0, "size": 20, "total": 37 }
+```
+`banners`: all banners that are active and whose window contains now (not paged; always the same on every page). `products`: this page of in-stock products on hot sale now, ordered by **soonest `hotEnd` first (products with no end date last), then name**. `page`, `size`, `total` describe the products part only; `total` counts exactly up to 10,000. There is no `hasMore` / `totalExact` here: ask for the next page while `(page + 1) * size < total`.
+- **Errors**: none.
+- **UI notes**: Replaces the old "first 20 by name" behaviour; `GET /hot-sale` with no params is page 0 of 20.
+
+### POST /api/v1/auth/logout  (changed: optional `fcmToken`)
+- **Request**: body `{ "refreshToken": "…", "fcmToken": "<firebase token>" }`. `refreshToken` required (`@NotBlank`); `fcmToken` optional. When it is sent (not blank) and the refresh token is known, that push token is removed for the user the refresh token belongs to. An unknown refresh token, or a token registered to someone else, is ignored.
+- **Response**: `204`. **Errors**: 400 `VALIDATION_FAILED` for a blank `refreshToken`.
+- **UI notes**: Send your current FCM token on logout so the signed-out phone stops receiving this customer's pushes. (This replaces the old note that push tokens stay attached after logout.)
+
+### DELETE /api/v1/me/devices/{fcmToken}
+- **Who**: any signed-in user (customer app).
+- **Request**: path `fcmToken`, URL-encoded. No body.
+- **Response**: `204 No Content`, always. Idempotent: an unknown token, or one registered to another user, answers 204 and changes nothing (you can only remove your own).
+- **Errors**: 401 only.
+- **UI notes**: Call on logout if you cannot send `fcmToken` to `/auth/logout`. Push is sent through Firebase HTTP v1 once the shop saves the Firebase service-account JSON on the admin config screen and a device token is registered.
+
+### Addresses: optional `phone`
+- `POST /api/v1/me/addresses` and `PUT /api/v1/me/addresses/{id}` accept an optional `phone`: blank (or omitted/null) or exactly 10 digits. Anything else: `400 VALIDATION_FAILED` `details.fields.phone` = "must be 10 digits". Blank is stored as no phone.
+- Address responses (`GET /me/addresses`, POST, PUT) now include `"phone": "9876543210"` or `"phone": null`:
+```json
+{ "id": "…", "label": "Home", "line1": "12 Rose Apt", "area": "Satellite", "pincode": "380015", "isDefault": true, "phone": "9876543210" }
+```
+- `PUT` replaces the whole address: **omitting `phone` clears it**. Always send the current phone when editing other fields.
+- Older orders have no phone in their address snapshot (`phone: null`). Details of the order address snapshot are in file 20.
+
+### PUT /api/v1/me  (changed: blank name)
+`name` omitted or `null` keeps the saved name (unchanged). A **blank** (empty or spaces) non-null `name` is now `400 VALIDATION_FAILED` `details.fields.name` = "must not be blank". `mobile` rules are unchanged (`fields.mobile` "must be 10 digits").
+
+### Sign-in code (OTP) error messages
+Codes, statuses and `details.reason` are unchanged; the `message` is now specific (e-mail and mobile flows alike). Showing `message` to the customer is now fine.
+
+| status / code | `details.reason` | message |
+|---|---|---|
+| 422 OTP_INVALID | `WRONG` | "That code is not right. Check it and try again." |
+| 422 OTP_INVALID | `EXPIRED` (no open code, or too old) | "That code has expired. Request a new one." |
+| 422 OTP_INVALID | `LOCKED` (too many wrong tries) | "Too many wrong attempts. Request a new code." |
+| 429 RATE_LIMITED (on `POST /auth/otp/send` and the mobile send) | `details.retryAfterSeconds` N (also the `Retry-After` header) | "Too many codes requested. Try again in N seconds." (or "Too many codes requested. Try again later." when no wait time is known) |
+
+### Blocked customers
+Blocking a customer (`PATCH /admin/customers/{id}`) now takes effect on that customer's **access token** too: a blocked customer's calls are refused within 10 seconds on every server instance (immediately on the instance that handled the block, because the remembered answer is cleared), instead of when the access token expires. The refusal is the same kind of rejection as for a blocked staff member (401/403, see file 00): treat it as "signed out / account blocked". Staff accounts are still checked on every call.
+
+### GET /api/v1/admin/customers/{id}/wallet-ledger
+- **Who**: admin.
+- **Purpose / when the UI calls it**: Customer detail, "Coin history" tab.
+- **Request**: path `id`; query `page` (0), `size` (20, clamped 1..50). Always newest first (`createdAt` descending).
+- **Response**: `200` paged:
+```json
+{ "items": [ { "id": "…", "kind": "EARN", "coins": 12, "orderId": "…", "createdAt": "2026-11-08T10:15:30Z", "expiresAt": "2027-05-08T10:15:30Z" } ],
+  "page": 0, "size": 20, "total": 1, "totalExact": true, "hasMore": false }
+```
+`kind`: `EARN`, `REDEEM`, `REVERSE`, `ADJUST`, `EXPIRE`. `coins` is signed (negative for REDEEM/EXPIRE and for coins taken back). `orderId` is the order's uuid or `null` (it is an **id**, not the order number as in the customer's own `/wallet/ledger`, which has `orderNo`). `expiresAt` is `null` unless the row is an earning that expires. There is no "coins remaining" field on a row.
+- **Errors**: 404 `NOT_FOUND` for an unknown id or a staff account.
+
+### GET /api/v1/admin/customers/{id}/orders
+- **Who**: admin.
+- **Purpose / when the UI calls it**: Customer detail, "Orders" tab.
+- **Request**: path `id`; query `page`, `size` (same as above). Newest first.
+- **Response**: `200` paged, `items` are the same rows as the admin order list (`AdminSummary`, see file 20):
+```json
+{ "items": [ { "id": "…", "orderNo": "VSM-1001", "status": "DELIVERED", "fulfilment": "DELIVERY", "totalPaise": 25000, "itemCount": 3,
+    "placedAt": "2026-11-08T10:15:30Z", "customerName": "Asha", "customerEmail": null, "customerMobile": "9876543210",
+    "subtotalPaise": 26000, "couponCode": null, "couponDiscountPaise": 0, "coinsUsed": 10, "coinDiscountPaise": 1000,
+    "deliveryFeePaise": 0, "paymentMethod": "COD", "paymentStatus": "PAID", "cancelledBy": null, "cancelCode": null } ],
+  "page": 0, "size": 20, "total": 1, "totalExact": true, "hasMore": false }
+```
+`cancelledBy` and `cancelCode` are filled for a cancelled order (same values as the admin order list) and `null` otherwise.
+- **Errors**: 404 `NOT_FOUND` for an unknown id or a staff account.
+
+### POST /api/v1/admin/customers/{id}/coins  (changed: error field)
+An error raised by the coin check ("a non-zero number up to 100000", "the customer has only N coins") is now reported under **both** `details.fields.delta` and `details.fields.coins` (same message), so map either to the delta input. The `reason` error stays on `fields.reason` ("1 to 100 characters").
+```json
+{ "code": "VALIDATION_FAILED", "message": "…", "details": { "fields": { "delta": "the customer has only 5 coins", "coins": "the customer has only 5 coins" } } }
+```
+
+### GET /api/v1/admin/customers  (paging fields)
+Response also has `totalExact` and `hasMore` (see the paging section). Searching with `q` counts up to 10,000 matches.
+
+### Statements in older sections that this addendum replaces
+- Paging (global conventions): the response also has `totalExact` and `hasMore`.
+- `GET /hot-sale`: "up to 20 products, no paging" is now paged (see above).
+- `POST /auth/logout` UI note about push tokens: send `fcmToken`, or call `DELETE /me/devices/{fcmToken}`.
+- `PATCH /admin/customers/{id}` note "customer access tokens are not re-checked per call": they are now re-checked within 10 seconds.
+- `POST /admin/customers/{id}/coins`: errors are on `fields.coins` **and** `fields.delta`.
+- Address shape: has `phone`.

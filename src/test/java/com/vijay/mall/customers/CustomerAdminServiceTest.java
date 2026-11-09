@@ -165,4 +165,15 @@ class CustomerAdminServiceTest {
     assertThat(row.coinsUsed()).isEqualTo(3);
     assertThat(row.paymentStatus()).isEqualTo("PENDING");
   }
+
+  @Test
+  void aCancelledOrderKeepsWhoCancelledItAndWhy() {
+    when(users.detail(id)).thenReturn(Optional.of(detail(User.CUSTOMER, "ACTIVE")));
+    var s = new com.vijay.mall.order.domain.OrderViews.Summary(UUID.randomUUID(), "VSM-2", "CANCELLED", "DELIVERY", 900, 2, NOW, 800,
+        null, 0, 0, 0, 100, "COD", "PENDING", "SHOP", "REJECTED_BY_SHOP");
+    when(orders.list(id, 0, 20)).thenReturn(new Page<>(List.of(s), 0, 20, 1));
+    var row = service.orders(id, 0, 20).items().get(0);
+    assertThat(row.cancelledBy()).isEqualTo("SHOP");
+    assertThat(row.cancelCode()).isEqualTo("REJECTED_BY_SHOP");
+  }
 }

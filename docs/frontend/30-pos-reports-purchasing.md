@@ -25,7 +25,7 @@ Counter (cashier + admin, `/pos/**`)
 10. `GET /api/v1/pos/sales/{id}/returns` - returns already made on a bill
 11. `GET /api/v1/pos/upi-link` - UPI deep link to render as a QR
 12. `POST /api/v1/pos/holds` - park a basket
-13. `GET /api/v1/pos/holds` - list parked baskets
+13. `GET /api/v1/pos/holds` - list the newest 100 parked baskets
 14. `GET /api/v1/pos/holds/{id}` - one parked basket
 15. `DELETE /api/v1/pos/holds/{id}` - discard a parked basket
 16. `GET /api/v1/pos/reports/day` - cash-up report for a day
@@ -431,7 +431,7 @@ The "pay-out amount" = refund total minus any part that just reduces the custome
 - **UI notes**: the cart is stored as sent, the product may be gone/changed later: re-quote on resume.
 
 ### GET /api/v1/pos/holds
-- **Who**: both. Returns **all** held baskets from every cashier, newest first (not paged).
+- **Who**: both. Returns the **newest 100** held baskets from every cashier, newest first (not paged; older ones are not listed, so discard baskets you no longer need).
 - **Response**: 200 array of hold objects as above. **Errors**: none.
 
 ### GET /api/v1/pos/holds/{id}
@@ -990,3 +990,65 @@ The server stores the sale as an offline sale: `soldAt` is the sale time, the **
 ## Addendum: flash-sale prices at the counter
 
 Counter quotes and sales (`POST /pos/quote`, `POST /pos/sales`) apply a running flash sale exactly like the online quote does: the line is priced at the sale price, a line larger than the units left in the sale is **split** into a sale-price line and a normal-price line, and each line carries `flashSaleId`, `listPricePaise` and `flashDiscountPaise`. Rules specific to the counter: weighed items (grams) are never discounted by a flash sale; a bill with no customer mobile is not subject to the sale's per-customer limit; an offline bill is always recorded (it takes what is left of the sale and the rest is recorded at the till's price, so the cap can be exceeded). Coupons and coins apply on top of the sale price. See `40-flash-sales.md`.
+
+
+---
+## Addendum (2026-11-09 release)
+
+Money is in paise everywhere below. Everything here is read from the code; nothing changes the endpoints' URLs.
+
+### Payment modes are trimmed and upper-cased (sales, return refunds, credit repayments, offline lines)
+- **Applies to**: `payments[].mode` of `POST /pos/sales`, `refunds[].mode` of `POST /pos/sales/{id}/returns`, `payments[].mode` of `POST /pos/credit/payments`, and `payments[].mode` of every bill in `POST /pos/sync/sales` (also bills with `rung`).
+- **Rule**: the mode is trimmed and upper-cased, so `" cash "` is `CASH`. There are no other aliases. Allowed: `CASH`, `UPI`, `CARD`; `CREDIT` too, but only on a sale or offline bill, never on a refund or a repayment. A missing (null) mode is a 400, not a 500.
+- **Error**: `400 VALIDATION_FAILED`. `message` is `payment mode must be CASH, UPI or CARD, or CREDIT on a bill (got "xyz")` for a sale or offline bill, and `payment mode must be CASH, UPI or CARD (got "xyz")` for a refund or repayment. A missing mode says `(got none)`. The field is `details.fields['payments[i].mode']` (`'refunds[i].mode'` for return refunds), `i` = the first bad line (0-based). A null line in the array gives `details.fields['payments[i]']` = `payment line is empty`.
+- **Offline sync**: a bad mode rejects only that bill: `status` `REJECTED`, `errorCode` `VALIDATION_FAILED`, `message` = the same text (no `details` per bill).
+
+### GET /api/v1/pos/shop (changed)
+- Response gains `roundOffMode`: `NONE` or `NEAREST_RUPEE` (the admin's `gst.roundOff` setting). With `NEAREST_RUPEE` the bill total is rounded to a whole rupee (half a rupee rounds up) and `roundOffPaise` on quotes/bills shows the paise added (negative = taken off). Existing fields unchanged.
+
+### POST /api/v1/pos/quote (changed)
+- Request gains optional `manualDiscount` `{ "amountPaise": 500, "reason": "..." }`, the same object a sale takes. It is subtracted after coupon and coin discounts, so the previewed total matches the sale. **Preview only**: no reason and no manager PIN are needed; the reason and PIN are enforced when `POST /pos/sales` is called.
+- Response gains `manualDiscountPaise` (0 when none).
+- **Errors**: 400 `VALIDATION_FAILED` on `manualDiscount` for a negative amount (`must not be negative`) or one above what is left to pay after coupon and coins (`is more than the bill`).
+
+### POST /api/v1/pos/sales/{id}/returns (changed): refundMode
+- Request gains optional `refundMode`: `CASH`, `UPI` or `CARD`, paying out the whole refund in that one mode (trimmed, case-insensitive). `refunds[]` (an explicit split) still works.
+- **Default** when neither is sent: the mode of the bill if it was paid in exactly one of CASH/UPI/CARD, otherwise cash. (Before: always cash.)
+- **Errors**: 400 `VALIDATION_FAILED` on `refundMode`: sent together with a non-empty `refunds[]` (`cannot be combined with refunds: send one or the other`), or not CASH/UPI/CARD (same mode text as above, `details.fields.refundMode`). If the whole refund only reduces the customer's credit (nothing to pay out) no refund line is made and the mode is not used.
+
+### GET /api/v1/pos/sales/{id}/returns/{returnId}/receipt?width=32|48
+- **Who**: both. **Purpose**: the credit note of a return as printable text, same `{ "width": 32, "text": "..." }` shape as the sale receipt (monospace; 32 = 58 mm, 48 = 80 mm; default 32).
+- **Content** (`CreditNoteData`): shop name, address, phone, GSTIN; credit note number; the invoice number of the bill; date and time; cashier name; customer mobile (blank for walk-in); reason; returned lines (name, how sold, qty (grams for weighed), GST percent, refund for the line); taxable, CGST, SGST and total refund; how the refund was paid (mode and amount per line); `creditAdjustedPaise` (the part that only reduced the customer's credit, not paid out); shop footer.
+- **Errors**: 404 `NOT_FOUND` for an unknown bill or a return that is not on that bill; 400 `VALIDATION_FAILED` (field `width`) for a width other than 32 or 48.
+
+### GET /api/v1/pos/credit/payments/{id}/receipt?width=32|48
+- **Who**: both. **Purpose**: the receipt of a credit repayment (the `id` is the payment id returned by `POST /pos/credit/payments`). Same `{ width, text }` shape.
+- **Content** (`RepaymentData`): shop name, address, phone, GSTIN; receipt number; date and time; cashier name; customer mobile; amount paid; payment lines (mode and amount); balance before and balance after (what the customer still owes); note; shop footer. The balance after is the one recorded right after this payment, not today's balance.
+- **Errors**: 404 `NOT_FOUND` (`Payment`); 400 `VALIDATION_FAILED` (field `width`) for a bad width.
+
+### GET /api/v1/pos/products (changed): search and incremental refresh
+- `q` still matches names, and now also a **barcode or an item code (PLU)** typed exactly. The PLU is matched when `q` is 1 to 6 digits, leading zeros ignored. A product with an exact barcode/PLU match is listed first. A blank `q` lists everything.
+- New optional `updatedSince` (ISO-8601 instant, e.g. `2026-11-08T10:00:00Z`): only products changed at or after it (the product, its counter details or its barcodes). Use it to refresh an offline copy; use `catalogVersion` from `/pos/sync/status` to decide when. **Limitation**: a barcode that was only deleted is not seen by `updatedSince` (only creation times are kept for barcodes). A malformed instant is a 400.
+- Each product gains four fields: `packSize` (string, `""` when none), `unit` (string, `""` when none), `variantName` (string, `""` when none) and `displayName`. The same fields are on the product inside `GET /pos/barcode/{code}`.
+- **`displayName`** is what to show on the counter: the English `name`, then the variant name, then the pack size, e.g. `Basmati Rice Premium 1 kg`. Rules: words of the variant name that are already in the name (case-insensitive) are not repeated; a pack size already written in the name as a whole phrase is left out; with no variant and no pack size it equals `name`.
+- Paged lists carry `totalExact` and `hasMore` (see the paging note below).
+
+### Offline sync: summary of the as-rung rules (details in the section "offline bills recorded as rung")
+- `rung` snapshot: `rung.lines[]` with the till's own price, GST and discount, `payments` must add up exactly to the as-rung total; the bill is recorded as rung and never re-priced.
+- `exceptions[]` on every per-bill result: `{ "kind": "PRICE_CHANGED" | "GST_CHANGED" | "PRODUCT_INACTIVE" | "DISCOUNT" | "OVERSOLD", "detail": "..." }`; empty when nothing differs or the bill is `REJECTED`. A bill with exceptions is still `CREATED`.
+- **Coupons, coin redemption and CREDIT (udhar) are refused offline**: `REJECTED`, `VALIDATION_FAILED` (a coupon or coin redemption: `a coupon or coin redemption cannot be checked offline: ring this bill without it`; credit: `credit (udhar) cannot be given on an offline bill: it needs the customer's account`). This applies with or without `rung`.
+- **`SHIFT_NOT_OPEN` never happens on an offline bill**, even when the shop requires an open shift for counter bills: the till rang it in its own earlier shift, so the uploader needs no shift now.
+- Admin review: `GET /api/v1/admin/pos/offline-exceptions` (query `status` `OPEN`/`REVIEWED`, `page`, `size`) and `POST /api/v1/admin/pos/offline-exceptions/{id}/review` (body `{ "note": "..." }`, 404 `NOT_FOUND`, 409 `ALREADY_REVIEWED`), documented in the section above.
+
+### Flash-sale prices at the counter
+Documented in the addendum "flash-sale prices at the counter" above and in `40-flash-sales.md`: sale-price lines, split lines, `flashSaleId`, `listPricePaise`, `flashDiscountPaise`; grams items never discounted; offline bills record the till's price and show it as a `PRICE_CHANGED` exception.
+
+### GET /api/v1/pos/holds (changed): newest 100 only
+- Returns **at most the newest 100** held baskets, newest first, from every cashier. There is no paging: older baskets beyond the 100th are not returned (they still exist and `GET /pos/holds/{id}` and `DELETE /pos/holds/{id}` still work for them). Discard baskets you no longer need.
+- `POST /pos/holds` is unchanged.
+
+### Paging fields: stock movements and audit log
+`GET /api/v1/admin/stock-movements` and `GET /api/v1/admin/audit-log` (and the other paged lists) now return `{ "items": [...], "page": 0, "size": 20, "total": 123, "totalExact": true, "hasMore": false }`.
+- `total` is exact up to **10,000** rows. Above that, `total` = `10000` and `totalExact` = `false` (show "10,000+").
+- `hasMore` is **always exact**: keep paging until it is `false`. Do not compute "last page" from `total` when `totalExact` is `false`.
+- No cached totals: the numbers are never out of date. Existing fields are unchanged.

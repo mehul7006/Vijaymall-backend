@@ -1137,3 +1137,147 @@ For a category coupon the minimum counts only what is spent in its categories. I
     "applicable": false, "discountPaise": 0, "reason": "MIN_ORDER", "message": "Add Rs 1000 more to use this coupon (minimum order Rs 2000).", "shortfallPaise": 100000, "worksWithCoins": true } ]
 ```
 - **UI notes**: refetch when the cart changes (debounce) and on a `catalog` event with `area: "COUPONS"`. The `discountPaise` shown here is exactly what `POST /cart/quote` will give when that code is applied. `worksWithCoins: false` means coins cannot be spent in the same order as this coupon.
+
+
+---
+## Addendum (2026-11-09 release)
+
+Everything below was checked against the code of this release. Money is paise. Where this addendum and the older text above disagree, **this addendum wins** (the places are listed in "Older text this replaces").
+
+### Order cancel info: `cancelledBy`, `cancelCode`, `cancelReason`
+Every order representation that carries `cancelReason` now also carries `cancelledBy` and `cancelCode`: `GET /orders/{id}`, `POST /orders/{id}/cancel`, `GET /admin/orders/{id}`, the admin status/reject responses, and the list rows `GET /orders` and `GET /admin/orders` (rows have the two codes but not `cancelReason`). All three are `null` while the order is not cancelled.
+
+| `cancelCode` | `cancelledBy` | set when | `cancelReason` |
+|---|---|---|---|
+| `CUSTOMER_CANCELLED` | `CUSTOMER` | `POST /orders/{id}/cancel` | the customer's `reason` (trimmed), or `null` if none was sent |
+| `REJECTED_BY_SHOP` | `SHOP` | `POST /admin/orders/{id}/reject` | the staff `reason` (1..200 chars) |
+| `CANCELLED_BY_SHOP` | `SHOP` | `POST /admin/orders/{id}/status` with `"status": "CANCELLED"` | the staff `note` (trimmed), or `null` if the note was empty |
+| `PAYMENT_TIMEOUT` | `SYSTEM` | the unpaid online order expired (`paymentExpiresAt` passed) | `null` |
+| `PAYMENT_FAILED` | `SYSTEM` | the online payment failed while the order was waiting for payment | `null` |
+
+- `cancelReason` is **raw text exactly as typed**. It no longer has the English prefix "Rejected by shop: " (orders rejected before this release stored it with that prefix; the server strips it when it shows the order, so you never see it). Translate the **code** into your own words and show `cancelReason` as the reason line when it is not null. Do not build a message from `cancelReason` alone: system cancellations have none.
+- Orders cancelled before this release were backfilled best-effort from their history (rows that could not be classified stay `null`/`null`, so treat a `CANCELLED` order with `cancelCode: null` as "Cancelled").
+- The same `cancelCode` / `cancelReason` appear in the `ORDER_STATUS` notification event; no new call is needed.
+
+Example, after `POST /api/v1/admin/orders/{id}/status` with `{ "status": "CANCELLED", "note": "Cannot deliver to this area" }` (response 200, `AdminView`, shortened):
+
+```json
+{ "id": "…", "orderNo": "1001", "status": "CANCELLED", "cancelledBy": "SHOP", "cancelCode": "CANCELLED_BY_SHOP",
+  "cancelReason": "Cannot deliver to this area", "customerName": "Asha", "customerEmail": "a@b.com", "customerMobile": "9876543210" }
+```
+
+`POST /admin/orders/{id}/reject` with `{ "reason": "Item out of stock" }` answers the same shape with `"cancelCode": "REJECTED_BY_SHOP"`, `"cancelReason": "Item out of stock"`. Both calls free stock, coins and the coupon and queue the online refund in the same way. Errors are unchanged (reject: 400 `VALIDATION_FAILED` `fields.reason` when blank or over 200; both: 404 `NOT_FOUND`, 409 `ILLEGAL_TRANSITION`, 409 `VERSION_CONFLICT`; status: also 409 `AWAITING_PAYMENT` for a non-cancel target on an unpaid online order). Differences between the two: `/reject` requires a reason and gives code `REJECTED_BY_SHOP`; `/status` with `CANCELLED` accepts an empty note (then `cancelReason` is `null`) and gives `CANCELLED_BY_SHOP`. `/reject` stays the recommended call for the "Reject" button.
+
+### Order item `imageUrl`
+Each line in `items[]` of `GET /orders/{id}`, `POST /orders` (placed order), `POST /orders/{id}/cancel` and `GET /admin/orders/{id}` has a new field `imageUrl` (string or `null`):
+
+```json
+{ "productId": "…", "name": "Basmati rice 1 kg", "qty": 2, "unitPricePaise": 12000, "lineTotalPaise": 24000, "nameGu": "…",
+  "unitLabel": "1 kg", "couponDiscountPaise": 0, "imageUrl": "/media/products/rice.webp" }
+```
+
+- It is a **snapshot of the product picture taken when the order was placed**, so it stays the same if the product picture changes or the product is deleted. `null` when the product had no picture then.
+- Existing orders were backfilled from the product's **current** picture at migration time; products without a picture stay `null`. Use the same image widget and placeholder as the catalog.
+- `GET /orders/{id}/reorder`: each reorder `Line` also has `imageUrl`: the product's picture **now**, falling back to the one kept on the old order line when the product is gone or has no picture.
+
+### GET /api/v1/admin/orders: search and paging (replaces the old `q` text)
+- **Who / request**: unchanged (admin or cashier; `status`, `q`, `page`, `size`). New meaning of the search box:
+
+| param | rules |
+|---|---|
+| `q` | matches the **order number** (contains) **or the customer's name, mobile number or e-mail** (contains). Case-insensitive; surrounding spaces are trimmed; `%` and `_` characters are ignored. Blank = no search |
+| `status` | one of the status names; blank = all; not validated (unknown value = empty page). Combines with `q` (both must hold) |
+| `page`, `size` | `page` 0-based; `size` default 20, clamped to 1..50 |
+
+- Customer matching uses at most the **200 newest matching customers**: with a very short text (one or two letters) on a big customer base, orders of older matching customers may not appear. Ask the user to type more of the name, mobile or e-mail.
+- No error for "no match": `items` is `[]`. Only the common errors.
+- **Row fields**: all `AdminSummary` fields as before plus `cancelledBy`, `cancelCode` (see above), and the paging fields below:
+
+```json
+{ "items": [ { "id": "…", "orderNo": "1001", "status": "CANCELLED", "fulfilment": "DELIVERY", "totalPaise": 88000, "itemCount": 2,
+               "placedAt": "2026-11-08T10:15:30Z", "customerName": "Asha", "customerEmail": "a@b.com", "customerMobile": "9876543210",
+               "subtotalPaise": 90000, "couponCode": null, "couponDiscountPaise": 0, "coinsUsed": 0, "coinDiscountPaise": 0,
+               "deliveryFeePaise": 4000, "paymentMethod": "COD", "paymentStatus": "NONE",
+               "cancelledBy": "SHOP", "cancelCode": "REJECTED_BY_SHOP" } ],
+  "page": 0, "size": 20, "total": 1, "totalExact": true, "hasMore": false }
+```
+
+- **UI notes**: search by typing "98765", "asha" or "a@b" works from the same box; debounce it.
+
+### Paging fields `totalExact` and `hasMore` (all paged lists)
+Every paged response (`{ items, page, size, total }`) now also has `totalExact` (boolean) and `hasMore` (boolean). They are present on every list in this guide (for example `GET /orders`, `GET /admin/orders`, `GET /admin/payments/anomalies`, `GET /admin/refunds`, `GET /admin/audit-log`), not only the big ones.
+
+| field | meaning |
+|---|---|
+| `total` | exact number of rows up to **10,000**. If the list has more than 10,000 rows, `total` is `10000` and `totalExact` is `false` |
+| `totalExact` | `false` only when `total` is just the 10,000 ceiling: show "10,000+" instead of the number |
+| `hasMore` | **always exact**: `true` when another page follows this one. Page until it is `false`; do not compute it from `total` |
+
+Rules for the app: never cache a total between calls (it is fresh on every call); when `hasMore` is `false` the `total` equals the real row count even if the list is long. Lists that are known to be small keep `totalExact: true` and `hasMore` worked out from `total`.
+
+### Coupon messages and the cart coupon preview (code check of the addendum above)
+The coupon addendum above matches the code. Details worth adding:
+- `POST /cart/quote` is refused with `422 COUPON_INVALID`, `message` ready to show, `details.reason` one of `NOT_FOUND`, `EXPIRED`, `MIN_ORDER`, `CATEGORY`, `LIMIT_REACHED`, `FIRST_ORDER_ONLY`. Only `MIN_ORDER` adds `details.minOrderPaise` and `details.shortfallPaise`. Amounts in messages are rupees: `Rs 669`, or `Rs 669.50` when there are paise. Example:
+
+```json
+{ "code": "COUPON_INVALID", "message": "Add Rs 669 more to use this coupon (minimum order Rs 999).",
+  "traceId": "…", "details": { "reason": "MIN_ORDER", "minOrderPaise": 99900, "shortfallPaise": 66900 } }
+```
+- For a category coupon the shortfall counts only what is spent in the coupon's categories. `LIMIT_REACHED` message is "You have already used this coupon the allowed number of times." when this customer hit the per-customer limit, otherwise "This coupon has been used up."
+- `POST /cart/coupons`: `reason` is one of `EXPIRED`, `MIN_ORDER`, `CATEGORY`, `LIMIT_REACHED`, `FIRST_ORDER_ONLY` (`NOT_FOUND` cannot occur: only coupons on offer are tried). `message`/`reason` are `null` and `shortfallPaise` is 0 for an applicable coupon; `shortfallPaise` is 0 for every reason except `MIN_ORDER`. If the **cart itself** cannot be priced (for example `OUT_OF_STOCK`, unknown product), the call answers that error (the same error `POST /cart/quote` would give), not a list. Empty or missing `items` is `400 VALIDATION_FAILED`.
+
+### 429 and the `Retry-After` header
+Every `429` (`RATE_LIMITED`) now has the standard `Retry-After: <seconds>` response header, always equal to `details.retryAfterSeconds` in the JSON body (both from the global per-IP limit and from endpoint limits such as login codes). Use either; wait that long before retrying and do not retry sooner. The header is readable by browser/web clients (CORS exposes `ETag`, `Retry-After`, `X-Trace-Id`). Other statuses never carry it. Login-code requests that hit the limit keep code `RATE_LIMITED` but the message now reads "Too many codes requested. Try again in N seconds." (or "...Try again later." if no wait is known).
+
+```
+HTTP/1.1 429
+Retry-After: 42
+{ "code": "RATE_LIMITED", "message": "…", "traceId": "…", "details": { "retryAfterSeconds": 42 } }
+```
+
+### Image upload errors (all admin image uploads, for example the shop logo)
+All are `400` with the problem on `details.fields.file`:
+
+| `code` | `details.fields.file` / when |
+|---|---|
+| `UNSUPPORTED_IMAGE` | "must be an image (JPEG, PNG or WebP)": the bytes are not a readable image |
+| `FILE_TOO_LARGE` | "image is too large (max 25000000 pixels)": picture dimensions width x height over 25 million pixels |
+| `FILE_TOO_LARGE` | "must be 5 MB or smaller": the upload is over the 5 MB limit (`message` is "File too large") |
+| `VALIDATION_FAILED` | "send the file as multipart/form-data in a part named file": the request was not multipart (this used to be a 500) |
+
+```json
+{ "code": "UNSUPPORTED_IMAGE", "message": "must be an image (JPEG, PNG or WebP)", "traceId": "…",
+  "details": { "fields": { "file": "must be an image (JPEG, PNG or WebP)" } } }
+```
+Branch on `code` (translate it) and show `details.fields.file` as the fallback text.
+
+### Date-time request fields are lenient (India time)
+Any request field of type instant/date-time (JSON request bodies; fields that are typed as an instant on the server) accepts three forms; query parameters documented as plain `YYYY-MM-DD` dates are unchanged.
+
+| you send | read as |
+|---|---|
+| `2026-11-09T10:00:00Z` or `2026-11-09T15:30:00+05:30` | that exact instant (unchanged) |
+| `2026-11-09T10:00:00` (no zone) | 10:00 **India time** (Asia/Kolkata) |
+| `2026-11-09` | start of that day (00:00) **India time** |
+
+Anything else is still `400`. Responses are unchanged: always UTC with `Z`. Keep sending `Z`/an offset where you can.
+
+### Refunds and payments
+No endpoint, field or behaviour of `POST /admin/refunds/{id}/retry`, `GET /admin/refunds`, the payment webhook or the payment anomalies list was changed by this release (the commit touches no payment code); the only effect is that their paged responses now carry `totalExact` and `hasMore`. A cancelled order still queues the refund of a captured online payment (reason `order cancelled`), and an order cancelled by `PAYMENT_TIMEOUT`/`PAYMENT_FAILED` has nothing to refund.
+
+### Admin configuration: login codes in the server log exist only in the dev profile
+- **Setting keys**: no new keys. `GET/PUT /admin/config` keys `otp.channel` (`console`/`email`) and `sms.channel` (`none`/`console`/`http`) behave differently on a real (non-dev) server:
+  - `PUT /admin/config` with `otp.channel` = `console` or `sms.channel` = `console` is refused: `400 VALIDATION_FAILED`, `details.fields["otp.channel"]` = "E-mail sending console (login codes written to the server log) exists only in the dev profile: use email"; for `sms.channel` the field is `sms.channel`, the label is "SMS sending" and the advice is "use http or none". Nothing in the request is saved (saves are atomic). Offer only `email` (and `http`/`none`) in the pickers on a production app build; the server will refuse `console` anyway.
+  - If a `console` value was saved earlier (on a dev server), a real server ignores it: `GET /admin/config` shows the effective value (`email` for `otp.channel`, `none` for `sms.channel`) and the config `issues` list adds "Login codes in the server log are saved as the setting but ignored: this is not a dev server, so codes go by e-mail (and SMS only if set up)."
+- **Server start-up (`ProdConfigGuard`)**: outside the `dev` and `test` profiles the server refuses to start with an unsafe configuration; new rules: environment `OTP_CHANNEL` must be `email` (message "OTP_CHANNEL must be email (console codes exist only in the dev profile)") and `SMS_CHANNEL` must not be `console` ("SMS_CHANNEL must be http or none (console codes exist only in the dev profile)"). The existing checks (JWT secret, OTP pepper, empty `OTP_FIXED_CODE`, admin e-mail, payment keys) are unchanged. The app never sees this guard: the server simply is not reachable until fixed.
+- **`GET /admin/config/bootstrap`** has one more item, in the list after "Fixed login code":
+
+```json
+{ "name": "Login codes in the server log", "setBy": "OTP_CHANNEL, SMS_CHANNEL", "state": "OK", "detail": "off (codes are sent by e-mail or SMS)" }
+```
+`detail` is one of "off (codes are sent by e-mail or SMS)" (`OK`), "on (dev server: codes are printed in the log)" (`OK`, dev/test only), or "not allowed here: the server refuses to start with it outside the dev profile" (`UNSAFE`). Colour it like the other items.
+
+### Older text this replaces
+- `POST /admin/orders/{id}/status` UI notes above say cancelling through `status` "leaves `cancelReason` empty": now the `note` becomes `cancelReason` (code `CANCELLED_BY_SHOP`).
+- `POST /admin/orders/{id}/reject` above says `cancelReason` = "Rejected by shop: <reason>": now it is the raw `<reason>` with `cancelCode` `REJECTED_BY_SHOP`.
+- `GET /admin/orders` above says `q` is only the order number, and its example has no `totalExact`/`hasMore`/cancel fields: see the section above.

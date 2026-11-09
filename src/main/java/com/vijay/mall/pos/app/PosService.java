@@ -721,7 +721,7 @@ public class PosService implements ReferenceLookup {
     }
   }
 
-  /** All parked baskets, newest first. */
+  /** The newest 100 parked baskets, newest first (the list is capped so forgotten baskets cannot slow the counter). */
   public List<HoldView> holds() { return holds.all().stream().map(this::toView).toList(); }
 
   /**

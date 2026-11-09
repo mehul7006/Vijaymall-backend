@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,8 +33,13 @@ public class PosHoldRepository {
     return toDomain(jpa.save(e));
   }
 
-  /** Every parked basket, newest first (shared by all cashiers). */
-  public List<HoldRecord> all() { return jpa.findAllByOrderByCreatedAtDesc().stream().map(PosHoldRepository::toDomain).toList(); }
+  /** The most baskets the list returns: a counter never has this many parked at once, and the list must stay quick if forgotten ones pile up. */
+  public static final int MAX_LISTED = 100;
+
+  /** The newest {@link #MAX_LISTED} parked baskets, newest first (shared by all cashiers). */
+  public List<HoldRecord> all() {
+    return jpa.findAllByOrderByCreatedAtDesc(PageRequest.of(0, MAX_LISTED)).stream().map(PosHoldRepository::toDomain).toList();
+  }
 
   /** One parked basket by id. */
   public Optional<HoldRecord> find(UUID id) { return jpa.findById(id).map(PosHoldRepository::toDomain); }
