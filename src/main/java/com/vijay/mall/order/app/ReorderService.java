@@ -29,9 +29,16 @@ public class ReorderService {
    * qty is what can be added to the basket now (never more than asked for or in stock). reason is null when the whole
    * quantity is available, LOW_STOCK when only part is, OUT_OF_STOCK or UNAVAILABLE (removed or hidden) when none is.
    * unitPricePaise is today's price; priceChanged tells the app it differs from the earlier order.
+   * imageUrl is the product's picture now, or the one kept on the old order when the product is gone.
    */
   public record Line(UUID productId, String name, String nameGu, String unitLabel, int requestedQty, int qty,
-                     long unitPricePaise, boolean priceChanged, boolean available, String reason) {}
+                     long unitPricePaise, boolean priceChanged, boolean available, String reason, String imageUrl) {
+    /** A line without picture. */
+    public Line(UUID productId, String name, String nameGu, String unitLabel, int requestedQty, int qty,
+                long unitPricePaise, boolean priceChanged, boolean available, String reason) {
+      this(productId, name, nameGu, unitLabel, requestedQty, qty, unitPricePaise, priceChanged, available, reason, null);
+    }
+  }
 
   /**
    * Result of the check.
@@ -66,12 +73,12 @@ public class ReorderService {
   static Line line(OrderViews.Item item, Product now) {
     if (now == null) {
       return new Line(item.productId(), item.name(), item.nameGu(), item.unitLabel(), item.qty(), 0, item.unitPricePaise(),
-          false, false, UNAVAILABLE);
+          false, false, UNAVAILABLE, item.imageUrl());
     }
     int available = Math.max(0, now.qtyAvailable());
     int qty = Math.min(item.qty(), available);
     String reason = available == 0 ? OUT_OF_STOCK : qty < item.qty() ? LOW_STOCK : null;
     return new Line(item.productId(), item.name(), item.nameGu(), item.unitLabel(), item.qty(), qty, now.pricePaise(),
-        now.pricePaise() != item.unitPricePaise(), qty > 0, reason);
+        now.pricePaise() != item.unitPricePaise(), qty > 0, reason, now.imageUrl() != null ? now.imageUrl() : item.imageUrl());
   }
 }

@@ -96,6 +96,9 @@ public class CreditRepository {
   /** How much credit earlier returns of this bill already cancelled, in paise. */
   public long returnedAgainst(UUID saleId) { return ledgerJpa.returnedAgainst(saleId); }
 
+  /** The ledger line written by a repayment (it holds the balance after the payment), if any. */
+  public Optional<Entry> entryOfPayment(UUID paymentId) { return ledgerJpa.findFirstByPaymentId(paymentId).map(CreditRepository::toEntry); }
+
   /** Newest first. */
   public Page<Entry> ledger(UUID userId, int page, int size) {
     var result = ledgerJpa.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));

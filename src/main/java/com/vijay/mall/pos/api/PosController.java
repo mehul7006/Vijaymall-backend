@@ -21,10 +21,12 @@ import com.vijay.mall.pos.app.ShopService;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
+import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -64,14 +66,34 @@ public class PosController {
     SaleInput toInput() { return new SaleInput(cart.toCart(), payments, cashTenderedPaise, manualDiscount); }
   }
 
+  /**
+   * Request body for a price preview: the same basket fields as a cart plus the optional manual discount a sale takes, so
+   * the previewed total matches the sale. No reason or PIN is needed to preview.
+   */
+  public record QuoteBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
+                          CoinRedemption.Mode coinMode, Integer percent, PosViews.ManualDiscount manualDiscount) {
+    Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
+  }
+
+  /** The shop settings the till needs, plus whether bills are rounded ({@code NONE} or {@code NEAREST_RUPEE}). */
+  public record ShopView(String shopName, String address, String phone, String gstin, String stateCode, String upiId,
+                         String invoicePrefix, String receiptFooter, String weighedPrefix, WeighedMode weighedMode,
+                         String promise, String details, String roundOffMode) {
+    static ShopView of(ShopSetting s, String roundOffMode) {
+      return new ShopView(s.shopName(), s.address(), s.phone(), s.gstin(), s.stateCode(), s.upiId(), s.invoicePrefix(),
+          s.receiptFooter(), s.weighedPrefix(), s.weighedMode(), s.promise(), s.details(), roundOffMode);
+    }
+  }
+
   /** Request body for parking a basket: an optional label for the cashier and the basket itself. */
   public record HoldBody(String label, @NotNull @Valid CartBody cart) {}
 
   /**
    * Request body for a return against a bill: the sold lines and quantities coming back, a reason and how the refund
-   * is paid out.
+   * is paid out: either an explicit {@code refunds} split or a {@code refundMode} (CASH, UPI or CARD) for the whole pay-out,
+   * never both.
    */
-  public record ReturnBody(@NotEmpty List<ReturnLine> items, String reason, List<Pay> refunds) {}
+  public record ReturnBody(@NotEmpty List<ReturnLine> items, String reason, List<Pay> refunds, String refundMode) {}
 
   /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
   public record Receipt(int width, String text) {}
@@ -103,9 +125,12 @@ public class PosController {
     this.shop = shop;
   }
 
-  /** Returns the shop settings the till needs (name, address, GSTIN, UPI id, receipt footer, scale settings). */
+  /**
+   * Returns the shop settings the till needs (name, address, GSTIN, UPI id, receipt footer, scale settings) and
+   * {@code roundOffMode} ({@code NONE} or {@code NEAREST_RUPEE}, the gst.roundOff setting).
+   */
   @GetMapping("/shop")
-  public ShopSetting shop() { return shop.get(); }
+  public ShopView shop() { return ShopView.of(shop.get(), pos.roundOffMode()); }
 
   /**
    * Resolves a scanned barcode or weighed-scale label to a product, quantity and line price. Answers 404 for an
@@ -114,16 +139,24 @@ public class PosController {
   @GetMapping("/barcode/{code}")
   public Scan scan(@PathVariable String code) { return catalog.scan(code); }
 
-  /** Searches the products sellable at the counter by name, page by page. */
+  /**
+   * Searches the products sellable at the counter, page by page. {@code q} matches names, and also a barcode or an item code
+   * (PLU) exactly; a product with an exact barcode or code match comes first. {@code updatedSince} (ISO-8601 instant) keeps only
+   * products changed at or after it, for an offline till refreshing its copy.
+   */
   @GetMapping("/products")
   public Page<PosProduct> products(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
-                                   @RequestParam(defaultValue = "20") int size) {
-    return catalog.search(q, page, size);
+                                   @RequestParam(defaultValue = "20") int size,
+                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant updatedSince) {
+    return catalog.search(q, page, size, updatedSince);
   }
 
-  /** Prices a basket (discounts, GST, coins, round-off) without recording anything. */
+  /**
+   * Prices a basket (discounts, GST, coins, round-off) without recording anything. An optional {@code manualDiscount} is
+   * subtracted like on a sale (no PIN is needed to preview); a negative amount or one above the bill answers 400.
+   */
   @PostMapping("/quote")
-  public BillView quote(@Valid @RequestBody CartBody body) { return pos.quote(body.toCart()); }
+  public BillView quote(@Valid @RequestBody QuoteBody body) { return pos.quote(body.toCart(), body.manualDiscount()); }
 
   /**
    * Completes a bill (201). Requires an {@code Idempotency-Key} header: repeating the same key returns the first bill
@@ -153,6 +186,12 @@ public class PosController {
     return new Receipt(width, pos.receipt(id, width));
   }
 
+  /** Returns the credit note of a return as printable text for the given paper width (32 or 48). 404 if the return is not on this bill. */
+  @GetMapping("/sales/{id}/returns/{returnId}/receipt")
+  public Receipt creditNoteReceipt(@PathVariable UUID id, @PathVariable UUID returnId, @RequestParam(defaultValue = "32") int width) {
+    return new Receipt(width, pos.creditNoteReceipt(id, returnId, width));
+  }
+
   /**
    * Takes goods back against a bill (201): issues a credit note, puts stock back (or into defective stock), adjusts
    * coins and pays out the refund. Requires an {@code Idempotency-Key} header; a repeat returns the first return.
@@ -163,7 +202,7 @@ public class PosController {
   @ResponseStatus(HttpStatus.CREATED)
   public ReturnRecord refund(@PathVariable UUID id, @RequestHeader("Idempotency-Key") String key,
                              @Valid @RequestBody ReturnBody body) {
-    return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds()));
+    return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds(), body.refundMode()));
   }
 
   /** Lists the returns already made against a bill. */

@@ -2,6 +2,7 @@ package com.vijay.mall.common.security;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vijay.mall.common.AppProps;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ErrorBody;
 import com.vijay.mall.common.web.TraceIdFilter;
 import com.vijay.mall.identity.infra.UserRepository;
@@ -84,11 +85,25 @@ public class SecurityConfig {
     };
   }
 
-  /** Staff tokens are checked against the account on every call; customers' tokens are not (they are short-lived). */
+  /** Staff tokens are checked against the account on every call, uncached. */
   static boolean isBlockedStaff(String role, String subject, UserRepository users) {
     if (!"CASHIER".equals(role) && !"ADMIN".equals(role)) return false;
     try {
       return users.isBlocked(UUID.fromString(subject));
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
+  /**
+   * Customers' tokens are re-checked too, but through a 10-second cache, so the database sees each customer at most once per
+   * 10 seconds. Staff are not handled here (see {@link #isBlockedStaff}).
+   */
+  static boolean isBlockedCustomer(String role, String subject, UserRepository users, AppCaches caches) {
+    if ("CASHIER".equals(role) || "ADMIN".equals(role)) return false;
+    try {
+      UUID id = UUID.fromString(subject);
+      return caches.get(AppCaches.Name.BLOCKED_USERS, id, () -> users.isBlocked(id));
     } catch (IllegalArgumentException e) {
       return false;
     }
@@ -103,7 +118,7 @@ public class SecurityConfig {
 
   @Bean
   SecurityFilterChain filterChain(HttpSecurity http, JsonMapper om,
-                                  UserRepository users) throws Exception {
+                                  UserRepository users, AppCaches caches) throws Exception {
     AuthenticationEntryPoint entry =
         (req, res, ex) -> write(res, om, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Please sign in again");
     AccessDeniedHandler denied =
@@ -111,8 +126,9 @@ public class SecurityConfig {
 
     JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
     converter.setJwtGrantedAuthoritiesConverter(jwt -> {
-      if (isBlockedStaff(jwt.getClaimAsString("role"), jwt.getSubject(), users)) {
-        // A blocked cashier or admin loses access at once, not when the 15-minute token runs out.
+      String role = jwt.getClaimAsString("role");
+      if (isBlockedStaff(role, jwt.getSubject(), users) || isBlockedCustomer(role, jwt.getSubject(), users, caches)) {
+        // A blocked cashier or admin loses access at once, a blocked customer within 10 seconds, not when the 15-minute token runs out.
         throw new DisabledException("account blocked");
       }
       Collection<GrantedAuthority> list =

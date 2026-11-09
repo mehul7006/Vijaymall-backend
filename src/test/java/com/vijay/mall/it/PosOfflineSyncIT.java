@@ -329,4 +329,25 @@ class PosOfflineSyncIT extends IntegrationTestBase {
     assertThat((String) results.get(8).get("message")).contains("credit");
     assertThat(stockOf(pid)).isEqualTo(before);
   }
+
+  @Test
+  void anOfflineBillWithASpacedModeIsRecordedAndOneWithAnUnknownModeIsRefusedWithTheValue() {
+    String cashier = cashier();
+    Object pid = rice();
+    Map cart = Map.of("items", List.of(Map.of("productId", pid, "qty", 1)));
+    long total = priceOf(cashier, cart);
+    String good = UUID.randomUUID().toString();
+    String bad = UUID.randomUUID().toString();
+    Map spaced = bill(good, null, cart, total);
+    spaced.put("payments", List.of(Map.of("mode", " cash ", "amountPaise", total)));
+    Map unknown = bill(bad, null, cart, total);
+    unknown.put("payments", List.of(Map.of("mode", "xyz", "amountPaise", total)));
+    var results = upload(cashier, List.of(spaced, unknown));
+    assertThat(results.get(0).get("status")).isEqualTo("CREATED");
+    var stored = get("/api/v1/pos/sales/" + results.get(0).get("saleId"), cashier).getBody();
+    assertThat(((Map) ((List) stored.get("payments")).get(0)).get("mode")).isEqualTo("CASH");
+    assertThat(results.get(1).get("status")).isEqualTo("REJECTED");
+    assertThat(results.get(1).get("errorCode")).isEqualTo("VALIDATION_FAILED");
+    assertThat((String) results.get(1).get("message")).contains("(got \"xyz\")");
+  }
 }

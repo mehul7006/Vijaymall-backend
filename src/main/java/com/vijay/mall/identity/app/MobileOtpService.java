@@ -10,7 +10,6 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,8 +70,7 @@ public class MobileOtpService {
   public void send(String rawMobile, String ip) {
     String mobile = require(rawMobile);
     // SMS costs money: a tight limit per number and the same per-address budget as email codes.
-    limiter.check("otp-mobile:" + mobile, perMobileHour, 3600);
-    limiter.check("otp-ip:" + ip, ipPerHour, 3600);
+    limit("otp-mobile:" + mobile, perMobileHour, ip, ipPerHour);
     String fixed = props.otp().fixedCode();
     String code = (fixed != null && !fixed.isBlank()) ? fixed : String.format("%05d", random.nextInt(100000));
     Instant now = clock.instant();
@@ -101,7 +99,15 @@ public class MobileOtpService {
   /** 98******10 : keeps the log useful without storing the full number. */
   static String mask(String mobile) { return mobile.substring(0, 2) + "******" + mobile.substring(8); }
 
-  private static ApiException invalid(String reason) {
-    return ApiException.unprocessable("OTP_INVALID", "The code is not valid", Map.of("reason", reason));
+  private static ApiException invalid(String reason) { return OtpErrors.invalid(reason); }
+
+  /** Runs the send limits; a refusal keeps its code and wait time but gets an OTP-specific message. */
+  private void limit(String ownKey, int ownMax, String ip, int ipMax) {
+    try {
+      limiter.check(ownKey, ownMax, 3600);
+      limiter.check("otp-ip:" + ip, ipMax, 3600);
+    } catch (ApiException e) {
+      throw OtpErrors.tooManyCodes(e);
+    }
   }
 }

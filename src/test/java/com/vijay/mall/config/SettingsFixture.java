@@ -36,6 +36,7 @@ final class SettingsFixture {
   SettingsFixture() { this(KEY); }
 
   SettingsFixture(String encryptionKey) {
+    env.setActiveProfiles("dev"); // an ordinary development server unless a test says otherwise
     crypto = new ConfigCrypto(encryptionKey);
     when(jpa.findAll()).thenAnswer(i -> new ArrayList<>(rows));
     when(jpa.findById(anyString())).thenAnswer(i -> rows.stream().filter(r -> r.name.equals(i.getArgument(0))).findFirst());

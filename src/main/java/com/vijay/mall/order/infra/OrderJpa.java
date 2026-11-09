@@ -25,24 +25,16 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
   /** One page of the orders of one status, without a count. */
   List<OrderEntity> findPageByStatus(String status, Pageable page);
 
-  /** Number of orders of one status. */
-  long countByStatus(String status);
 
   /** Same as {@link #searchByNumber} but one page without the count. */
   @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern")
   List<OrderEntity> listByNumber(@Param("pattern") String pattern, Pageable page);
 
-  /** How many orders have a number matching the pattern. */
-  @Query("select count(o) from OrderEntity o where lower(o.orderNo) like :pattern")
-  long countByNumber(@Param("pattern") String pattern);
 
   /** Same as {@link #searchByStatusAndNumber} but one page without the count. */
   @Query("select o from OrderEntity o where o.status = :status and lower(o.orderNo) like :pattern")
   List<OrderEntity> listByStatusAndNumber(@Param("status") String status, @Param("pattern") String pattern, Pageable page);
 
-  /** How many orders of this status have a number matching the pattern. */
-  @Query("select count(o) from OrderEntity o where o.status = :status and lower(o.orderNo) like :pattern")
-  long countByStatusAndNumber(@Param("status") String status, @Param("pattern") String pattern);
 
   /** pattern is already lower-case with % around it. Written out (not derived) so it uses the lower(order_no) search index. */
   @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern")
@@ -50,6 +42,17 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
 
   @Query("select o from OrderEntity o where o.status = :status and lower(o.orderNo) like :pattern")
   Page<OrderEntity> searchByStatusAndNumber(@Param("status") String status, @Param("pattern") String pattern, Pageable page);
+
+  /** A page of orders whose number matches the pattern or that belong to one of the users (no count). */
+  @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern or o.userId in :users")
+  List<OrderEntity> listByNumberOrUsers(@Param("pattern") String pattern, @Param("users") Collection<UUID> users, Pageable page);
+
+
+  /** Same as {@link #listByNumberOrUsers} for one status. */
+  @Query("select o from OrderEntity o where o.status = :status and (lower(o.orderNo) like :pattern or o.userId in :users)")
+  List<OrderEntity> listByStatusAndNumberOrUsers(@Param("status") String status, @Param("pattern") String pattern,
+                                                 @Param("users") Collection<UUID> users, Pageable page);
+
 
   long countByUserIdAndStatusNot(UUID userId, String status);
 

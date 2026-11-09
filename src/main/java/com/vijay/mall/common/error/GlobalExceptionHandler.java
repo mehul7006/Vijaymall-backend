@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -44,7 +45,10 @@ public class GlobalExceptionHandler {
   ResponseEntity<ErrorBody> api(ApiException e) {
     if (e.status().is5xxServerError()) log.error("Request failed: {} {}", e.code(), e.getMessage());
     else log.info("Request rejected: {} {}", e.code(), e.getMessage());
-    return body(e.status(), e.code(), e.getMessage(), e.details());
+    ResponseEntity.BodyBuilder out = ResponseEntity.status(e.status());
+    Long retryAfter = e.retryAfterSeconds();
+    if (retryAfter != null) out.header(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfter)); // standard header for any 429
+    return out.body(new ErrorBody(e.code(), e.getMessage(), trace(), e.details()));
   }
 
   @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -84,7 +88,8 @@ public class GlobalExceptionHandler {
   /** A file upload that is not sent as multipart/form-data: the caller's mistake (400), not a server fault. */
   @ExceptionHandler(MultipartException.class)
   ResponseEntity<ErrorBody> notMultipart(MultipartException e) {
-    return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Send the file as multipart/form-data in a part named file", null);
+    return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Send the file as multipart/form-data in a part named file",
+        Map.of("fields", Map.of("file", "send the file as multipart/form-data in a part named file")));
   }
 
   /**
@@ -96,9 +101,11 @@ public class GlobalExceptionHandler {
     log.debug("Client disconnected: {}", e.getMessage());
   }
 
+  /** An upload over the multipart limit (5 MB): 400 {@code FILE_TOO_LARGE} with the message on {@code details.fields.file}. */
   @ExceptionHandler(MaxUploadSizeExceededException.class)
   ResponseEntity<ErrorBody> tooBig(MaxUploadSizeExceededException e) {
-    return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "File too large", null);
+    return body(HttpStatus.BAD_REQUEST, "FILE_TOO_LARGE", "File too large",
+        Map.of("fields", Map.of("file", "must be 5 MB or smaller")));
   }
 
   @ExceptionHandler(AccessDeniedException.class)

@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -131,6 +132,10 @@ public class RuntimeSettings implements MeterBinder {
   public String get(Def d) {
     ensureLoaded();
     String v = stored.get(d.key());
+    // a "console" channel saved on a dev server must never take effect on a real one: codes would end up in the log
+    if (v != null && "console".equals(v) && (d == Settings.OTP_CHANNEL || d == Settings.SMS_CHANNEL) && !consoleCodesAllowed()) {
+      return d == Settings.OTP_CHANNEL ? "email" : "none";
+    }
     if (v != null) return v;
     String fromEnv = env.getProperty(d.envProperty());
     if (fromEnv != null && !fromEnv.isBlank()) return fromEnv;
@@ -197,6 +202,9 @@ public class RuntimeSettings implements MeterBinder {
       if (!isSet(Settings.SMS_SENDER_ID) || !isSet(Settings.SMS_DLT_TEMPLATE_ID)) {
         out.add("SMS sender id or DLT template id is empty: Indian operators will not deliver the messages.");
       }
+    }
+    if (("console".equals(stored.get(Settings.OTP_CHANNEL.key())) || "console".equals(stored.get(Settings.SMS_CHANNEL.key()))) && !consoleCodesAllowed()) {
+      out.add("Login codes in the server log are saved as the setting but ignored: this is not a dev server, so codes go by e-mail (and SMS only if set up).");
     }
     if ("email".equals(get(Settings.OTP_CHANNEL)) && "localhost".equals(get(Settings.SMTP_HOST))) {
       out.add("E-mail login codes are on but the SMTP server is still localhost: no e-mail will arrive.");
@@ -314,8 +322,12 @@ public class RuntimeSettings implements MeterBinder {
         return Long.toString(n);
       }
       case BOOLEAN, ENUM -> {
-        return d.allowed().stream().filter(a -> a.equalsIgnoreCase(v)).findFirst()
+        String chosen = d.allowed().stream().filter(a -> a.equalsIgnoreCase(v)).findFirst()
             .orElseThrow(() -> bad(d, "must be one of: " + String.join(", ", d.allowed())));
+        if ((d == Settings.OTP_CHANNEL || d == Settings.SMS_CHANNEL) && "console".equals(chosen) && !consoleCodesAllowed()) {
+          throw bad(d, "console (login codes written to the server log) exists only in the dev profile: use " + (d == Settings.OTP_CHANNEL ? "email" : "http or none"));
+        }
+        return chosen;
       }
       default -> { /* text and secrets: checked below */ }
     }
@@ -341,6 +353,11 @@ public class RuntimeSettings implements MeterBinder {
     } else if (d == Settings.CLIENT_IP_HEADER && !v.matches("[A-Za-z0-9-]+")) {
       throw bad(d, "must be a header name like CF-Connecting-IP");
     }
+  }
+
+  /** Whether this server may write login codes to its log: only the dev and test profiles. A real server never does. */
+  boolean consoleCodesAllowed() {
+    return env.acceptsProfiles(Profiles.of("dev", "test"));
   }
 
   private JsonNode parse(Def d, String v) {

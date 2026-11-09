@@ -16,15 +16,9 @@ public final class ReceiptText {
      * @throws IllegalArgumentException if the width is not 32 or 48
      */
     public static String render(ReceiptData r, int width) {
-        if (width != 32 && width != 48) {
-            throw new IllegalArgumentException("width must be 32 or 48");
-        }
+        checkWidth(width);
         List<String> out = new ArrayList<>();
-        out.add(center(r.shopName(), width));
-        wrap(r.address(), width).forEach(l -> out.add(center(l, width)));
-        if (!r.phone().isBlank()) out.add(center("Ph: " + r.phone(), width));
-        if (!r.gstin().isBlank()) out.add(center("GSTIN: " + r.gstin(), width));
-        out.add("-".repeat(width));
+        header(out, r.shopName(), r.address(), r.phone(), r.gstin(), width);
         out.add("TAX INVOICE");
         out.add(split("Inv: " + r.invoiceNo(), "", width));
         out.add(r.dateTime());
@@ -57,6 +51,84 @@ public final class ReceiptText {
         out.add("-".repeat(width));
         wrap(r.footer(), width).forEach(l -> out.add(center(l, width)));
         return out.stream().collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    /**
+     * Lays a credit note (the receipt of a return) out as plain text: shop header, credit note and original invoice numbers,
+     * the returned lines with quantity and refund, the GST split, the refund payments and the refund total.
+     *
+     * @param width characters per line; only 32 and 48 are accepted
+     * @throws IllegalArgumentException if the width is not 32 or 48
+     */
+    public static String renderCreditNote(CreditNoteData r, int width) {
+        checkWidth(width);
+        List<String> out = new ArrayList<>();
+        header(out, r.shopName(), r.address(), r.phone(), r.gstin(), width);
+        out.add("CREDIT NOTE");
+        out.add(split("CN: " + r.creditNoteNo(), "", width));
+        out.add(split("Orig Inv: " + r.invoiceNo(), "", width));
+        out.add(r.dateTime());
+        out.add("Cashier: " + r.cashier() + (r.customer().isBlank() ? "" : "  Cust: " + r.customer()));
+        out.add("-".repeat(width));
+        r.lines().forEach(l -> {
+            wrap(l.name(), width).forEach(out::add);
+            String qty = l.soldBy() == SoldBy.WEIGHT ? "%d.%03d kg".formatted(l.qty() / 1000, l.qty() % 1000) : "%d".formatted(l.qty());
+            out.add(split("  Returned " + qty + " (" + l.gstPercent() + "%)", Money.plain(l.refundPaise()), width));
+        });
+        out.add("-".repeat(width));
+        out.add(split("Taxable", Money.plain(r.taxablePaise()), width));
+        out.add(split("CGST", Money.plain(r.cgstPaise()), width));
+        out.add(split("SGST", Money.plain(r.sgstPaise()), width));
+        out.add("-".repeat(width));
+        out.add(split("Refund total", Money.plain(r.refundTotalPaise()), width));
+        if (r.creditAdjustedPaise() > 0) out.add(split("Credit reduced", Money.plain(r.creditAdjustedPaise()), width));
+        r.refunds().forEach(p -> out.add(split("Refund " + p.mode(), Money.plain(p.amountPaise()), width)));
+        if (!r.reason().isBlank()) wrap("Reason: " + r.reason(), width).forEach(out::add);
+        out.add("-".repeat(width));
+        wrap(r.footer(), width).forEach(l -> out.add(center(l, width)));
+        return out.stream().collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    /**
+     * Lays the receipt of a credit repayment out as plain text: shop header, receipt number, customer, amount, the payment
+     * modes and the credit balance before and after.
+     *
+     * @param width characters per line; only 32 and 48 are accepted
+     * @throws IllegalArgumentException if the width is not 32 or 48
+     */
+    public static String renderRepayment(RepaymentData r, int width) {
+        checkWidth(width);
+        List<String> out = new ArrayList<>();
+        header(out, r.shopName(), r.address(), r.phone(), r.gstin(), width);
+        out.add("CREDIT PAYMENT RECEIPT");
+        out.add(split("Receipt: " + r.receiptNo(), "", width));
+        out.add(r.dateTime());
+        out.add("Cashier: " + r.cashier());
+        out.add("Customer: " + r.customer());
+        out.add("-".repeat(width));
+        out.add(split("Balance before", Money.plain(r.balanceBeforePaise()), width));
+        r.payments().forEach(p -> out.add(split("Paid " + p.mode(), Money.plain(p.amountPaise()), width)));
+        out.add(split("Amount paid", Money.plain(r.amountPaise()), width));
+        out.add(split("Balance after", Money.plain(r.balanceAfterPaise()), width));
+        if (!r.note().isBlank()) wrap("Note: " + r.note(), width).forEach(out::add);
+        out.add("-".repeat(width));
+        wrap(r.footer(), width).forEach(l -> out.add(center(l, width)));
+        return out.stream().collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    private static void checkWidth(int width) {
+        if (width != 32 && width != 48) {
+            throw new IllegalArgumentException("width must be 32 or 48");
+        }
+    }
+
+    /** The shop name, address, phone and GSTIN, centred, followed by a rule. */
+    private static void header(List<String> out, String shopName, String address, String phone, String gstin, int width) {
+        out.add(center(shopName, width));
+        wrap(address, width).forEach(l -> out.add(center(l, width)));
+        if (!phone.isBlank()) out.add(center("Ph: " + phone, width));
+        if (!gstin.isBlank()) out.add(center("GSTIN: " + gstin, width));
+        out.add("-".repeat(width));
     }
 
     /** Centres a line by padding the left; a line as wide as the paper is returned unchanged. */

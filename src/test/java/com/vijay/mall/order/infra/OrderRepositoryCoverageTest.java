@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
+import com.vijay.mall.identity.infra.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.time.Instant;
@@ -206,46 +207,131 @@ class OrderRepositoryCoverageTest {
   }
 
   @Test
-  void theTotalIsOnlyCountedWhenThePageIsFullAndKeptForAFewSeconds() {
-    UUID id = UUID.randomUUID();
-    OrderEntity e = entity(id, "PLACED", 0L);
-    when(items.countsFor(List.of(id))).thenReturn(java.util.Collections.singletonList(new Object[] {id, 2L}));
-    // a short page needs no count: the total is just what was returned
-    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e));
-    assertThat(repo.adminList(null, null, 0, 10).total()).isEqualTo(1);
-    verify(orders, never()).count();
-    verify(orders, never()).countByStatus(any());
-
-    // a full page needs the count; with a cache it is asked once for the same filter
-    var caches = new com.vijay.mall.common.cache.AppCaches(java.time.Clock.systemUTC());
-    repo.setCaches(caches);
-    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e, e));
-    when(orders.count()).thenReturn(183243L);
-    assertThat(repo.adminList(null, null, 0, 2).total()).isEqualTo(183243L);
-    assertThat(repo.adminList(null, null, 0, 2).total()).isEqualTo(183243L);
-    verify(orders, org.mockito.Mockito.times(1)).count();
-
-    when(orders.findPageByStatus(any(), any())).thenReturn(List.of(e, e));
-    when(orders.countByStatus("PLACED")).thenReturn(44794L);
-    assertThat(repo.adminList("PLACED", null, 0, 2).total()).isEqualTo(44794L);
-    when(orders.listByNumber(any(), any())).thenReturn(List.of(e, e));
-    when(orders.countByNumber("%5%")).thenReturn(9L);
-    assertThat(repo.adminList(null, "5", 0, 2).total()).isEqualTo(9L);
-    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of(e, e));
-    when(orders.countByStatusAndNumber("PLACED", "%5%")).thenReturn(3L);
-    assertThat(repo.adminList("PLACED", "5", 0, 2).total()).isEqualTo(3L);
+  void aSearchAlsoFindsOrdersOfCustomersMatchingTheText() {
+    UserRepository users = mock(UserRepository.class);
+    repo.setUsers(users);
+    UUID c = UUID.randomUUID();
+    when(users.idsMatching("%9876%", OrderRepository.MAX_CUSTOMER_MATCHES)).thenReturn(List.of(c));
+    when(orders.listByNumberOrUsers(any(), any(), any())).thenReturn(List.of());
+    when(orders.listByStatusAndNumberOrUsers(any(), any(), any(), any())).thenReturn(List.of());
+    repo.adminList(null, "9876", 0, 10);
+    verify(orders).listByNumberOrUsers(ArgumentMatchers.eq("%9876%"), ArgumentMatchers.eq(List.of(c)), any());
+    repo.adminList("PLACED", "9876", 0, 10);
+    verify(orders).listByStatusAndNumberOrUsers(ArgumentMatchers.eq("PLACED"), ArgumentMatchers.eq("%9876%"),
+        ArgumentMatchers.eq(List.of(c)), any());
+    verify(orders, never()).listByNumber(any(), any());
+    // no text, no customer lookup
+    repo.adminList(null, null, 0, 10);
+    verify(users, Mockito.times(2)).idsMatching(any(), ArgumentMatchers.anyInt());
   }
 
   @Test
-  void withoutACacheTheTotalIsCountedEachTime() {
+  void aSearchWithNoMatchingCustomerFallsBackToTheOrderNumberQueries() {
+    UserRepository users = mock(UserRepository.class);
+    repo.setUsers(users);
+    when(users.idsMatching(any(), ArgumentMatchers.anyInt())).thenReturn(List.of());
+    when(orders.listByNumber(any(), any())).thenReturn(List.of());
+    repo.adminList(null, "5", 0, 10);
+    verify(orders).listByNumber(ArgumentMatchers.eq("%5%"), any());
+    verify(orders, never()).listByNumberOrUsers(any(), any(), any());
+  }
+
+  @Test
+  void cancelInfoAndItemPictureAreStoredAndRead() {
     UUID id = UUID.randomUUID();
-    OrderEntity e = entity(id, "PLACED", 0L);
+    OrderEntity e = entity(id, "CANCELLED", 1L);
+    when(orders.findById(id)).thenReturn(Optional.of(e));
+    repo.setCancelInfo(id, "SYSTEM", "PAYMENT_TIMEOUT", null);
+    assertThat(e.cancelledBy).isEqualTo("SYSTEM");
+    assertThat(e.cancelCode).isEqualTo("PAYMENT_TIMEOUT");
+    assertThat(e.cancelReason).isNull();
+    var row = repo.find(id).orElseThrow();
+    assertThat(row.cancelledBy()).isEqualTo("SYSTEM");
+    assertThat(row.cancelCode()).isEqualTo("PAYMENT_TIMEOUT");
+    UUID gone = UUID.randomUUID();
+    when(orders.findById(gone)).thenReturn(Optional.empty());
+    repo.setCancelInfo(gone, "SHOP", "X", "y");
+
+    var line = new OrderRepository.NewItem(UUID.randomUUID(), "Rice", 50, 2, 100, true, true, "R", "kg", 0, "/rice.png");
+    repo.insertItem(id, line);
+    ArgumentCaptor<OrderItemEntity> saved = ArgumentCaptor.forClass(OrderItemEntity.class);
+    verify(items).save(saved.capture());
+    assertThat(saved.getValue().imageUrl).isEqualTo("/rice.png");
+    when(items.findByOrderIdOrderByName(id)).thenReturn(List.of(saved.getValue()));
+    assertThat(repo.items(id)).singleElement().satisfies(i -> assertThat(i.imageUrl()).isEqualTo("/rice.png"));
+    assertThat(new OrderRepository.SummaryRow(id, id, "N", "PLACED", "PICKUP", 1, 1, NOW, 1, null, 0, 0, 0, 0, "COD", "NONE").cancelCode()).isNull();
+    assertThat(new OrderRepository.Row(id, "N", id, "PICKUP", "PLACED", 1, null, 0, 0, 0, 0, 1, 0, false, "COD", "NONE", null, null, NOW, 5,
+        null, null, true).cancelledBy()).isNull();
+  }
+
+  private Query countReturns(long n) {
+    Query q = mock(Query.class);
+    when(em.createNativeQuery(org.mockito.ArgumentMatchers.anyString())).thenReturn(q);
+    when(q.getSingleResult()).thenReturn(n);
+    return q;
+  }
+
+  @Test
+  void aShortPageSettlesTheTotalWithoutAnyCount() {
+    OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
     when(items.countsFor(any())).thenReturn(List.of());
-    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e, e));
-    when(orders.count()).thenReturn(50L);
-    repo.adminList(null, null, 0, 2);
-    repo.adminList(null, null, 0, 2);
-    verify(orders, org.mockito.Mockito.times(2)).count();
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e));
+    var page = repo.adminList(null, null, 0, 10);
+    assertThat(page.total()).isEqualTo(1);
+    assertThat(page.totalExact()).isTrue();
+    assertThat(page.hasMore()).isFalse();
+    verify(em, never()).createNativeQuery(org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void aFullPageIsCountedExactlyUpToTheCapWithoutCachingAnything() {
+    OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
+    when(items.countsFor(any())).thenReturn(List.of());
+    when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of(e, e, e)); // 3 read for a page of 2: another page follows
+    Query q = countReturns(183_243L);
+    var page = repo.adminList(null, null, 0, 2);
+    assertThat(page.items()).hasSize(2);
+    assertThat(page.total()).isEqualTo(10_000);
+    assertThat(page.totalExact()).as("more than the cap: honest about it").isFalse();
+    assertThat(page.hasMore()).isTrue();
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 limit 10001) bounded");
+    countReturns(4_321L);
+    assertThat(repo.adminList(null, null, 0, 2).total()).as("asked again, counted again: never stale").isEqualTo(4_321);
+    assertThat(repo.adminList(null, null, 0, 2).totalExact()).isTrue();
+  }
+
+  @Test
+  void theCountFollowsTheSameFiltersAsThePage() {
+    OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
+    when(items.countsFor(any())).thenReturn(List.of());
+    when(orders.findPageByStatus(any(), any())).thenReturn(List.of(e, e, e));
+    when(orders.listByNumber(any(), any())).thenReturn(List.of(e, e, e));
+    when(orders.listByStatusAndNumber(any(), any(), any())).thenReturn(List.of(e, e, e));
+    Query q = countReturns(44_794L);
+    repo.adminList("PLACED", null, 0, 2);
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and o.status = :status limit 10001) bounded");
+    verify(q).setParameter("status", "PLACED");
+    repo.adminList(null, "77", 0, 2);
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and lower(o.order_no) like :pattern limit 10001) bounded");
+    verify(q).setParameter("pattern", "%77%");
+    repo.adminList("PLACED", "77", 0, 2);
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and o.status = :status and lower(o.order_no) like :pattern limit 10001) bounded");
+  }
+
+  @Test
+  void aSearchThatAlsoMatchesCustomersCountsTheirOrdersToo() {
+    UserRepository users = mock(UserRepository.class);
+    repo.setUsers(users);
+    UUID c = UUID.randomUUID();
+    OrderEntity e = entity(UUID.randomUUID(), "PLACED", 0L);
+    when(items.countsFor(any())).thenReturn(List.of());
+    when(users.idsMatching(any(), ArgumentMatchers.anyInt())).thenReturn(List.of(c));
+    when(orders.listByNumberOrUsers(any(), any(), any())).thenReturn(List.of(e, e, e));
+    Query q = countReturns(12L);
+    var page = repo.adminList(null, "7", 0, 2);
+    assertThat(page.total()).isEqualTo(12);
+    verify(em).createNativeQuery("select count(*) from (select 1 from orders o where 1 = 1 and (lower(o.order_no) like :pattern or o.user_id in (:users)) limit 10001) bounded");
+    verify(q).setParameter("users", List.of(c));
   }
 
   @Test

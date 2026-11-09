@@ -320,4 +320,33 @@ class RuntimeSettingsTest {
     assertThat(f.row("delivery.feePaise")).isPresent();
     verify(f.jpa, Mockito.times(2)).save(any(SettingEntity.class));
   }
+
+  @Test
+  void consoleLoginCodesExistOnlyInTheDevProfile() {
+    f.env.setActiveProfiles(); // a real server: no dev or test profile
+    assertThat(s.consoleCodesAllowed()).isFalse();
+    assertThatThrownBy(() -> s.save(List.of(c(OTP_CHANNEL, "console")), UUID.randomUUID())).isInstanceOf(ApiException.class)
+        .hasMessageContaining("only in the dev profile");
+    assertThatThrownBy(() -> s.save(List.of(c(SMS_CHANNEL, "CONSOLE")), UUID.randomUUID())).isInstanceOf(ApiException.class);
+    f.env.setProperty("app.otp.allow-console", "true");
+    assertThat(s.consoleCodesAllowed()).as("there is no switch that turns it on outside dev").isFalse();
+    f.env.setActiveProfiles("dev");
+    assertThat(s.consoleCodesAllowed()).isTrue();
+    assertThat(s.save(List.of(c(OTP_CHANNEL, "console")), UUID.randomUUID())).containsExactly("otp.channel");
+    assertThat(s.get(OTP_CHANNEL)).isEqualTo("console");
+    f.env.setActiveProfiles("test");
+    assertThat(s.consoleCodesAllowed()).isTrue();
+  }
+
+  @Test
+  void aConsoleChannelSavedOnADevServerIsIgnoredWhenTheSameDatabaseRunsAsARealServer() {
+    f.env.setActiveProfiles("dev");
+    s.save(List.of(c(OTP_CHANNEL, "console"), c(SMS_CHANNEL, "console")), UUID.randomUUID());
+    assertThat(s.get(OTP_CHANNEL)).isEqualTo("console");
+    assertThat(s.issues()).noneMatch(i -> i.startsWith("Login codes in the server log"));
+    f.env.setActiveProfiles(); // the same rows, now read by a real server
+    assertThat(s.get(OTP_CHANNEL)).as("codes would end up in the log: e-mail instead").isEqualTo("email");
+    assertThat(s.get(SMS_CHANNEL)).isEqualTo("none");
+    assertThat(s.issues()).anyMatch(i -> i.startsWith("Login codes in the server log are saved as the setting but ignored"));
+  }
 }

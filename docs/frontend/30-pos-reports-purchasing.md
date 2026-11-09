@@ -984,3 +984,9 @@ The server stores the sale as an offline sale: `soldAt` is the sale time, the **
 - **Refunds on returned online orders in the reports**: `GET /api/v1/admin/dashboard` gains `onlineRefundsTodayPaise`, and the sales summary (`GET /api/v1/admin/reports/summary`) gains `onlineRefundsPaise`: refunds given in the period on returned online orders (paise). Like the counter refunds (`posRefundsTodayPaise` / `posRefundsPaise`) they are **listed apart and not subtracted** from the sales figures: show net sales as sales minus both refund figures if you want a net view.
 - **`POST /api/v1/admin/purchases`**: a repeated `Idempotency-Key` returns the first delivery only if the request is the same delivery (supplier, invoice number and lines); the same key with a different delivery answers `409 IDEMPOTENCY_KEY_REUSED`.
 - **`POST /api/v1/admin/stock-takes`**: each product's stock row is locked while it is counted, so a sale cannot change the quantity between the read and the adjustment.
+
+
+---
+## Addendum: flash-sale prices at the counter
+
+Counter quotes and sales (`POST /pos/quote`, `POST /pos/sales`) apply a running flash sale exactly like the online quote does: the line is priced at the sale price, a line larger than the units left in the sale is **split** into a sale-price line and a normal-price line, and each line carries `flashSaleId`, `listPricePaise` and `flashDiscountPaise`. Rules specific to the counter: weighed items (grams) are never discounted by a flash sale; a bill with no customer mobile is not subject to the sale's per-customer limit; an offline bill is always recorded (it takes what is left of the sale and the rest is recorded at the till's price, so the cap can be exceeded). Coupons and coins apply on top of the sale price. See `40-flash-sales.md`.

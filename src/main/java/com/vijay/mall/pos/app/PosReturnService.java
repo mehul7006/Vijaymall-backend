@@ -170,7 +170,7 @@ public class PosReturnService {
         : credit.returnAdjustment(sale.customerId(), saleId, creditOnBill, refundTotal, now);
     long payOut = refundTotal - creditAdjust;
 
-    List<Pay> refunds = in.refunds() == null || in.refunds().isEmpty() ? List.of(new Pay("CASH", payOut, null)) : in.refunds();
+    List<Pay> refunds = refundLines(sale, in, payOut);
     if (payOut == 0) refunds = List.of();
     try {
       PaymentRules.checkRefund(refunds.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList(),
@@ -219,6 +219,34 @@ public class PosReturnService {
     log.info("POS return note={} bill={} cashier={} refund={} creditReduced={} coinsClawed={} coinsRestored={}", noteNo,
         sale.invoiceNo(), cashierId, refundTotal, creditAdjust, clawed, restore);
     return returnId;
+  }
+
+  /**
+   * The refund payment lines: the explicit split when given, else one line for the whole pay-out in the requested refund
+   * mode, else in the bill's own mode (when it was paid in exactly one of CASH, UPI or CARD) or cash.
+   */
+  private static List<Pay> refundLines(SaleRecord sale, ReturnInput in, long payOut) {
+    boolean split = in.refunds() != null && !in.refunds().isEmpty();
+    boolean modeGiven = in.refundMode() != null && !in.refundMode().isBlank();
+    if (split && modeGiven) throw ApiException.validation("refundMode", "cannot be combined with refunds: send one or the other");
+    if (split) return PayModes.normalize(in.refunds(), false, "refunds");
+    String mode;
+    if (modeGiven) {
+      try {
+        mode = PaymentRules.requireMode(in.refundMode(), false);
+      } catch (IllegalArgumentException e) {
+        throw ApiException.validation("refundMode", e.getMessage());
+      }
+    } else {
+      mode = billMode(sale);
+    }
+    return List.of(new Pay(mode, payOut, null));
+  }
+
+  /** The mode the bill was paid in when it was exactly one of CASH, UPI or CARD; otherwise CASH. */
+  private static String billMode(SaleRecord sale) {
+    List<String> modes = sale.payments().stream().map(p -> PaymentRules.normalizeMode(p.mode())).distinct().toList();
+    return modes.size() == 1 && PaymentRules.MODES.contains(modes.get(0)) ? modes.get(0) : "CASH";
   }
 
   /** Adds up duplicate lines and checks every line belongs to the bill. */

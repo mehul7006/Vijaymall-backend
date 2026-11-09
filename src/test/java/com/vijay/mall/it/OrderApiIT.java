@@ -259,6 +259,38 @@ class OrderApiIT extends IntegrationTestBase {
   }
 
   @Test
+  void adminSearchFindsOrdersByOrderNumberCustomerNameMobileAndEmail() {
+    String admin = adminToken();
+    String email = freshEmail();
+    String t = token(email);
+    String tag = UUID.randomUUID().toString().replace("-", "").substring(0, 8).replaceAll("[0-9]", "q");
+    String mobile = "9" + String.format("%09d", Math.abs(UUID.randomUUID().getMostSignificantBits()) % 1_000_000_000L);
+    assertThat(call(HttpMethod.PUT, "/api/v1/me", t, Map.of("name", "Zeta " + tag, "mobile", mobile), null).getStatusCode().is2xxSuccessful())
+        .isTrue();
+    var order = place(t, cart(product(t, "Potato Chips"), 1, Map.of())).getBody();
+    String id = (String) order.get("id");
+    String orderNo = (String) order.get("orderNo");
+    place(token(freshEmail()), cart(product(t, "Potato Chips"), 1, Map.of())); // somebody else's order must not match
+
+    for (String q : List.of(mobile, mobile.substring(2, 8), tag.toUpperCase(), tag, email.toUpperCase(), email.substring(0, 12),
+        orderNo, orderNo.toLowerCase())) {
+      var found = (List<Map<String, Object>>) get("/api/v1/admin/orders?size=50&q=" + q, admin).getBody().get("items");
+      assertThat(found).as(q).anyMatch(o -> id.equals(o.get("id")));
+    }
+    var byMobile = (List<Map<String, Object>>) get("/api/v1/admin/orders?size=50&q=" + mobile, admin).getBody().get("items");
+    assertThat(byMobile).singleElement().satisfies(o -> {
+      assertThat(o.get("customerMobile")).isEqualTo(mobile);
+      assertThat(o.get("customerName")).isEqualTo("Zeta " + tag);
+    });
+    var withStatus = (List<Map<String, Object>>) get("/api/v1/admin/orders?size=50&status=PLACED&q=" + mobile, admin).getBody().get("items");
+    assertThat(withStatus).singleElement().satisfies(o -> assertThat(o.get("id")).isEqualTo(id));
+    var otherStatus = (List<Map<String, Object>>) get("/api/v1/admin/orders?size=50&status=DELIVERED&q=" + mobile, admin).getBody().get("items");
+    assertThat(otherStatus).isEmpty();
+    var nothing = (List<Map<String, Object>>) get("/api/v1/admin/orders?size=50&q=no-such-customer-" + tag, admin).getBody().get("items");
+    assertThat(nothing).isEmpty();
+  }
+
+  @Test
   void dashboardCountsTodaysOrders() {
     String admin = adminToken();
     post("/api/v1/admin/cache/refresh/dashboard", admin, null);

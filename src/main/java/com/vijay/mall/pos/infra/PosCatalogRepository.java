@@ -4,9 +4,11 @@ import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.SoldBy;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -29,6 +31,16 @@ public class PosCatalogRepository {
 
   private static ProductPos toDomain(ProductPosEntity e) {
     return new ProductPos(e.productId, SoldBy.valueOf(e.soldBy), e.plu, e.gstPercent, e.hsn);
+  }
+
+  /**
+   * Products whose counter attributes or barcodes were written at or after the instant. A barcode that was only removed leaves no
+   * trace (barcodes have a creation time but no update time), so removing the last barcode alone is not seen here.
+   */
+  public Set<UUID> changedSince(Instant since) {
+    Set<UUID> ids = new LinkedHashSet<>(pos.changedSince(since));
+    ids.addAll(barcodes.changedSince(since));
+    return ids;
   }
 
   /** The counter attributes saved for a product, if any. */

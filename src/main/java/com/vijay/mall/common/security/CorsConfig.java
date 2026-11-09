@@ -17,7 +17,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class CorsConfig {
 
   static final List<String> METHODS = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
-  static final List<String> HEADERS = List.of("Authorization", "Content-Type", "Idempotency-Key", "Accept");
+  /** Request headers a browser may send: the sign-in token, JSON, the repeat-safe key and the conditional-GET validator. */
+  static final List<String> HEADERS = List.of("Authorization", "Content-Type", "Idempotency-Key", "Accept", "If-None-Match");
+  /** Response headers a browser script may read (ETag for revalidation, Retry-After after a 429, the trace id for support). */
+  static final List<String> EXPOSED = List.of("ETag", "Retry-After", "X-Trace-Id");
 
   @Bean
   CorsConfigurationSource corsConfigurationSource(
@@ -30,7 +33,7 @@ public class CorsConfig {
     api.setAllowedOriginPatterns(origins);
     api.setAllowedMethods(METHODS);
     api.setAllowedHeaders(HEADERS);
-    api.setExposedHeaders(List.of("X-Trace-Id"));
+    api.setExposedHeaders(EXPOSED);
     api.setAllowCredentials(false);
     api.setMaxAge(3600L);
     source.registerCorsConfiguration("/api/**", api);

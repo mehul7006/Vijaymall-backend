@@ -35,6 +35,10 @@ public class DeviceRepository {
   @Transactional
   public void deleteAll(UUID userId) { jpa.deleteAllOf(userId); }
 
+  /** Forgets one push token, but only if it is registered to this user (sign-out); nothing happens otherwise. */
+  @Transactional
+  public void deleteOwned(UUID userId, String token) { jpa.deleteOwnedToken(userId, token); }
+
   /** Forgets one push token (Firebase said the app was uninstalled or the token is no longer valid). */
   @Transactional
   public void deleteToken(String token) { jpa.deleteByToken(token); }

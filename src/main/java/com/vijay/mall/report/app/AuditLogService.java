@@ -53,7 +53,7 @@ public class AuditLogService {
       String name = u == null ? null : u.name() != null && !u.name().isBlank() ? u.name() : u.email();
       return new Row(e.id(), e.actorId(), name, e.action(), e.entity(), e.entityId(), e.change(), e.at());
     }).toList();
-    return new Page<>(rows, p.page(), p.size(), p.total());
+    return p.withItems(rows);
   }
 
   private static String blank(String s) { return s == null || s.isBlank() ? null : s.strip(); }

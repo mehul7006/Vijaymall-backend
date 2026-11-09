@@ -5,6 +5,7 @@ import com.vijay.mall.identity.app.AuthService;
 import com.vijay.mall.identity.app.MobileAuthService;
 import com.vijay.mall.identity.app.MobileOtpService;
 import com.vijay.mall.identity.app.OtpService;
+import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.identity.app.TokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -58,15 +59,24 @@ public class AuthController {
    */
   public record RefreshReq(@NotBlank String refreshToken) {}
 
+  /**
+   * Request body to sign out.
+   * @param refreshToken the opaque refresh token to revoke
+   * @param fcmToken optional push token of this phone; when given it is unregistered for the signed-out user
+   */
+  public record LogoutReq(@NotBlank String refreshToken, String fcmToken) {}
+
   private final OtpService otp;
   private final AuthService auth;
   private final TokenService tokens;
   private final MobileOtpService mobileOtp;
   private final MobileAuthService mobileAuth;
+  private final ProfileService profile;
 
   /** Creates the controller with the e-mail and mobile OTP, authentication and token services (wired by Spring). */
   public AuthController(OtpService otp, AuthService auth, TokenService tokens, MobileOtpService mobileOtp,
-                        MobileAuthService mobileAuth) {
+                        MobileAuthService mobileAuth, ProfileService profile) {
+    this.profile = profile;
     this.otp = otp;
     this.auth = auth;
     this.tokens = tokens;
@@ -129,10 +139,15 @@ public class AuthController {
     return tokens.refresh(body.refreshToken());
   }
 
-  /** Signs the device out by revoking the given refresh token; answers 204 even when the token is unknown. */
+  /**
+   * Signs the device out by revoking the given refresh token; answers 204 even when the token is unknown. When an
+   * {@code fcmToken} is sent too, that push token is unregistered for the user the refresh token belongs to.
+   */
   @PostMapping("/logout")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void logout(@Valid @RequestBody RefreshReq body) {
-    tokens.logout(body.refreshToken());
+  public void logout(@Valid @RequestBody LogoutReq body) {
+    tokens.logout(body.refreshToken()).ifPresent(userId -> {
+      if (body.fcmToken() != null && !body.fcmToken().isBlank()) profile.unregisterDevice(userId, body.fcmToken());
+    });
   }
 }

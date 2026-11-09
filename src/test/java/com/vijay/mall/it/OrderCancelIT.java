@@ -11,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 
 /** Cancelling puts stock back; customers cannot touch other people's orders or cancel late. */
+@SuppressWarnings({"unchecked", "rawtypes"})
 class OrderCancelIT extends IntegrationTestBase {
 
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -74,6 +75,75 @@ class OrderCancelIT extends IntegrationTestBase {
     assertThat(stock(admin, pid)).isEqualTo(before);
     assertThat(post("/api/v1/admin/orders/" + id + "/reject", admin, Map.of("reason", "again")).getStatusCode().is4xxClientError())
         .as("a closed order cannot be rejected twice").isTrue();
+  }
+
+  @Test
+  void cancellingThroughTheStatusEndpointShowsTheStaffNoteAsTheReason() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var res = post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CANCELLED", "note", "  shop closed today "));
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(res.getBody()).containsEntry("cancelReason", "shop closed today").containsEntry("cancelledBy", "SHOP")
+        .containsEntry("cancelCode", "CANCELLED_BY_SHOP");
+    var mine = get("/api/v1/orders/" + id, cust).getBody();
+    assertThat(mine).containsEntry("cancelReason", "shop closed today").containsEntry("cancelledBy", "SHOP")
+        .containsEntry("cancelCode", "CANCELLED_BY_SHOP");
+  }
+
+  @Test
+  void cancellingThroughTheStatusEndpointWithoutANoteStillSaysWhoDidIt() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var res = post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CANCELLED"));
+    assertThat(res.getBody().get("cancelReason")).isNull();
+    assertThat(res.getBody()).containsEntry("cancelledBy", "SHOP").containsEntry("cancelCode", "CANCELLED_BY_SHOP");
+  }
+
+  @Test
+  void aRejectedOrderShowsTheRawReasonAndWhoRejectedIt() {
+    String admin = adminToken();
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var res = post("/api/v1/admin/orders/" + id + "/reject", admin, Map.of("reason", "sold out"));
+    assertThat(res.getBody()).containsEntry("cancelReason", "sold out").containsEntry("cancelledBy", "SHOP")
+        .containsEntry("cancelCode", "REJECTED_BY_SHOP");
+    assertThat(get("/api/v1/orders/" + id, cust).getBody()).containsEntry("cancelReason", "sold out");
+    var listed = (List<Map<String, Object>>) get("/api/v1/orders?size=5", cust).getBody().get("items");
+    assertThat(listed).anyMatch(o -> id.equals(o.get("id")) && "REJECTED_BY_SHOP".equals(o.get("cancelCode")));
+  }
+
+  @Test
+  void anOldRejectedRowStillShowsCleanTextWithoutThePrefix() {
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    jdbc.update("update orders set status = 'CANCELLED', cancel_reason = 'Rejected by shop: no stock', cancelled_by = 'SHOP', "
+        + "cancel_code = 'REJECTED_BY_SHOP' where id = ?::uuid", id);
+    assertThat(get("/api/v1/orders/" + id, cust).getBody()).containsEntry("cancelReason", "no stock");
+  }
+
+  @Test
+  void aCustomerCancelRecordsTheCustomerAndTheirReason() {
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var res = post("/api/v1/orders/" + id + "/cancel", cust, Map.of("reason", "changed my mind"));
+    assertThat(res.getBody()).containsEntry("cancelledBy", "CUSTOMER").containsEntry("cancelCode", "CUSTOMER_CANCELLED")
+        .containsEntry("cancelReason", "changed my mind");
+    String other = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var plain = post("/api/v1/orders/" + other + "/cancel", cust, null);
+    assertThat(plain.getBody().get("cancelReason")).isNull();
+    assertThat(plain.getBody()).containsEntry("cancelledBy", "CUSTOMER").containsEntry("cancelCode", "CUSTOMER_CANCELLED");
+    assertThat(get("/api/v1/orders/" + id, cust).getBody()).containsEntry("cancelledBy", "CUSTOMER");
+  }
+
+  @Test
+  void anOrderThatIsNotCancelledHasNoCancelFields() {
+    String cust = token(freshEmail());
+    String id = place(cust, productByName(cust, "Potato Chips").get("id"), 1);
+    var body = get("/api/v1/orders/" + id, cust).getBody();
+    assertThat(body.get("cancelledBy")).isNull();
+    assertThat(body.get("cancelCode")).isNull();
   }
 
   @Test

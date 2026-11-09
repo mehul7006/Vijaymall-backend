@@ -10,6 +10,7 @@ import com.vijay.mall.pos.app.PosViews.PosAttributes;
 import com.vijay.mall.pos.app.PosViews.PosProduct;
 import com.vijay.mall.pos.app.PosViews.Scan;
 import com.vijay.mall.pos.domain.BarcodeParser;
+import com.vijay.mall.pos.domain.DisplayNames;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.domain.ScannedCode;
@@ -19,9 +20,11 @@ import com.vijay.mall.pos.infra.PosCatalogRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -98,9 +101,33 @@ public class PosCatalogService {
    * @param page zero-based page number
    * @param size page size
    */
-  public Page<PosProduct> search(String q, int page, int size) {
-    Page<ProductData> found = catalog.posSearch(q, page, size);
-    return new Page<>(views(found.items()), found.page(), found.size(), found.total());
+  public Page<PosProduct> search(String q, int page, int size) { return search(q, page, size, null); }
+
+  /**
+   * Searches counter products. {@code q} matches names, and also any barcode or the item code (PLU) exactly; a product with
+   * an exact barcode or code match is listed first. With {@code updatedSince} only products whose data changed at or after
+   * that instant are returned: the product itself, its counter attributes or its barcodes (a removed barcode alone is not
+   * seen, because only creation times are kept for barcodes).
+   *
+   * @param page zero-based page number
+   * @param size page size
+   * @param updatedSince keep only products changed at or after this instant (null = all)
+   */
+  public Page<PosProduct> search(String q, int page, int size, Instant updatedSince) {
+    Set<UUID> exact = exactMatches(q);
+    Page<ProductData> found = exact.isEmpty() && updatedSince == null ? catalog.posSearch(q, page, size)
+        : catalog.posSearch(q, exact, updatedSince, updatedSince == null ? Set.of() : repo.changedSince(updatedSince), page, size);
+    return found.withItems(views(found.items()));
+  }
+
+  /** Products that own the typed text as a barcode or as an item code (PLU, leading zeros ignored). */
+  private Set<UUID> exactMatches(String q) {
+    Set<UUID> ids = new LinkedHashSet<>();
+    if (q == null || q.isBlank()) return ids;
+    String t = q.strip();
+    repo.productByBarcode(t).ifPresent(ids::add);
+    if (t.matches("\\d{1,6}")) repo.findByPlu(normalizePlu(t)).map(ProductPos::productId).ifPresent(ids::add);
+    return ids;
   }
 
   private PosProduct one(UUID id) {
@@ -113,11 +140,14 @@ public class PosCatalogService {
     List<UUID> ids = items.stream().map(ProductData::id).toList();
     Map<UUID, ProductPos> pos = repo.forProducts(ids);
     var stocks = inventory.stocks(ids);
+    Map<UUID, String> variants = catalog.posVariantNames(ids);
     return items.stream().map(p -> {
       ProductPos a = pos.get(p.id());
+      String variant = variants.getOrDefault(p.id(), "");
+      String pack = p.packSize() == null ? "" : p.packSize();
       return new PosProduct(p.id(), p.nameEn(), p.nameGu(), p.pricePaise(), p.mrpPaise(), a.soldBy(), a.gstPercent(), a.hsn(),
           a.plu(), a.soldBy() == SoldBy.WEIGHT, stocks.get(p.id()).qty(), p.imageUrl(), p.coinRedeemable(), p.earnsCoins(),
-          repo.barcodesOf(p.id()));
+          repo.barcodesOf(p.id()), pack, p.unit() == null ? "" : p.unit(), variant, DisplayNames.of(p.nameEn(), variant, pack));
     }).toList();
   }
 

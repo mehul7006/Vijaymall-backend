@@ -12,11 +12,20 @@ import java.util.UUID;
 public final class OrderViews {
   private OrderViews() {}
 
-  /** One order line as it was at order time, so it still reads right after the product is edited. */
+  /**
+   * One order line as it was at order time, so it still reads right after the product is edited.
+   * @param imageUrl the product picture when the order was placed; null for lines whose product had none
+   */
   @Schema(name = "OrderItem")
   public record Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise, String nameGu,
-                     String unitLabel, long couponDiscountPaise) {
-    /** couponDiscountPaise is this line's share of the order's coupon discount. */
+                     String unitLabel, long couponDiscountPaise, String imageUrl) {
+    /** Without the picture snapshot; couponDiscountPaise is this line's share of the order's coupon discount. */
+    public Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise, String nameGu,
+                String unitLabel, long couponDiscountPaise) {
+      this(productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, couponDiscountPaise, null);
+    }
+
+    /** Without coupon share and picture. */
     public Item(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise, String nameGu,
                 String unitLabel) {
       this(productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, 0);
@@ -39,18 +48,40 @@ public final class OrderViews {
    * One row of the customer's order list.
    * @param totalPaise amount to pay, in paise
    * @param itemCount total units on the order
+   * @param cancelledBy CUSTOMER, SHOP or SYSTEM once cancelled, else null
+   * @param cancelCode why it was cancelled (see {@link View}), else null
    */
   @Schema(name = "OrderSummary")
 
   public record Summary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
                         Instant placedAt, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
-                        long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {}
+                        long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus,
+                        String cancelledBy, String cancelCode) {
+    /** Without who cancelled the order and why. */
+    public Summary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
+                   Instant placedAt, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                   long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {
+      this(id, orderNo, status, fulfilment, totalPaise, itemCount, placedAt, subtotalPaise, couponCode,
+          couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, paymentMethod, paymentStatus, null, null);
+    }
+  }
 
   /** Same money fields as {@link Summary} (and as {@link View}), so the customer and the shop always read the same numbers. */
   public record AdminSummary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
                              Instant placedAt, String customerName, String customerEmail, String customerMobile,
                              long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
-                             long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {}
+                             long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus,
+                             String cancelledBy, String cancelCode) {
+    /** Without who cancelled the order and why. */
+    public AdminSummary(UUID id, String orderNo, String status, String fulfilment, long totalPaise, int itemCount,
+                        Instant placedAt, String customerName, String customerEmail, String customerMobile,
+                        long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                        long coinDiscountPaise, long deliveryFeePaise, String paymentMethod, String paymentStatus) {
+      this(id, orderNo, status, fulfilment, totalPaise, itemCount, placedAt, customerName, customerEmail,
+          customerMobile, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise,
+          deliveryFeePaise, paymentMethod, paymentStatus, null, null);
+    }
+  }
 
   /**
    * The customer's full view of one order.
@@ -60,13 +91,27 @@ public final class OrderViews {
    * @param cancelReason why it was cancelled or rejected, if it was
    * @param coinBalance the customer's current coin balance
    * @param paymentExpiresAt when an unpaid online order is cancelled; only set while it waits for payment
+   * @param cancelledBy CUSTOMER, SHOP or SYSTEM once cancelled, else null
+   * @param cancelCode CUSTOMER_CANCELLED, REJECTED_BY_SHOP, CANCELLED_BY_SHOP, PAYMENT_TIMEOUT or PAYMENT_FAILED; null when not cancelled
    */
   public record View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                      String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
                      long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
                      List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance,
-                     Instant paymentExpiresAt) {
+                     Instant paymentExpiresAt, String cancelledBy, String cancelCode) {
+    /** Without who cancelled the order and why. */
+    public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
+                String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,
+                long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
+                long totalPaise, int coinsEarned, Address address, PaymentSession paymentSession,
+                List<Step> timeline, Instant placedAt, String slot, String cancelReason, Integer coinBalance,
+                Instant paymentExpiresAt) {
+      this(id, orderNo, status, fulfilment, paymentMethod, paymentStatus, items, subtotalPaise, couponCode,
+          couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise, coinsEarned, address,
+          paymentSession, timeline, placedAt, slot, cancelReason, coinBalance, paymentExpiresAt, null, null);
+    }
+
     /** Without the time the customer has left to pay (only set while an online order waits for payment). */
     public View(UUID id, String orderNo, String status, String fulfilment, String paymentMethod,
                 String paymentStatus, List<Item> items, long subtotalPaise, String couponCode,

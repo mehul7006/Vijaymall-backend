@@ -35,6 +35,26 @@ class OrderViewsCoverageTest {
   }
 
   @Test
+  void newerFieldsDefaultToNullInTheShorterConstructors() {
+    UUID p = UUID.randomUUID();
+    var item = new OrderViews.Item(p, "Rice", 2, 50, 100, "Chokha", "kg", 7);
+    assertThat(item.couponDiscountPaise()).isEqualTo(7);
+    assertThat(item.imageUrl()).isNull();
+    var view = new OrderViews.View(UUID.randomUUID(), "VSM-1", "CANCELLED", "PICKUP", "COD", "NONE", List.of(item), 1000, null, 0, 0, 0,
+        0, 1000, 0, null, null, List.of(), AT, null, "why", 5, AT);
+    assertThat(view.paymentExpiresAt()).isEqualTo(AT);
+    assertThat(view.cancelledBy()).isNull();
+    assertThat(view.cancelCode()).isNull();
+    var summary = new OrderViews.Summary(UUID.randomUUID(), "VSM-1", "CANCELLED", "PICKUP", 100, 1, AT, 100, null, 0, 0, 0, 0, "COD", "NONE");
+    assertThat(summary.cancelledBy()).isNull();
+    assertThat(summary.cancelCode()).isNull();
+    var admin = new OrderViews.AdminSummary(UUID.randomUUID(), "VSM-1", "CANCELLED", "PICKUP", 100, 1, AT, "A", "a@b.c", "9", 100, null,
+        0, 0, 0, 0, "COD", "NONE");
+    assertThat(admin.cancelledBy()).isNull();
+    assertThat(admin.cancelCode()).isNull();
+  }
+
+  @Test
   void itemConstructorsDefaultTheMissingFields() {
     UUID p = UUID.randomUUID();
     var five = new OrderViews.Item(p, "Rice", 2, 50, 100);

@@ -25,7 +25,6 @@ class CacheInvalidatorTest {
     assertThat(empty(Name.CATEGORIES)).isTrue();
     assertThat(empty(Name.BANNERS)).isTrue();
     assertThat(empty(Name.PRODUCT_LIST)).as("an admin product edit shows in the shop at once").isTrue();
-    assertThat(empty(Name.ORDER_COUNTS)).as("order totals only expire by time").isFalse();
     assertThat(empty(Name.SHOP)).isFalse();
 
     invalidator.on(new CatalogChanged(CatalogChanged.COUPONS, Instant.now()));

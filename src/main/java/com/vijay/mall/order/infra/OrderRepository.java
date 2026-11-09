@@ -2,7 +2,9 @@ package com.vijay.mall.order.infra;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
-import com.vijay.mall.common.cache.AppCaches;
+import com.vijay.mall.common.persistence.BoundedCount;
+import com.vijay.mall.common.persistence.Window;
+import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -13,13 +15,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,12 +33,25 @@ public class OrderRepository {
    * @param version optimistic-lock version used by {@link #updateStatus}
    * @param stockReserved whether the order currently holds shelf stock
    * @param coinsCredited whether the earned coins were already paid out
+   * @param cancelledBy CUSTOMER, SHOP or SYSTEM once cancelled
+   * @param cancelCode machine readable reason of the cancel
    */
   public record Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                     String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                     long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
                     String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
-                    String cancelReason, boolean stockReserved) {
+                    String cancelReason, boolean stockReserved, String cancelledBy, String cancelCode) {
+    /** A row without who cancelled it and why (both {@code null}). */
+    public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
+               String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
+               long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
+               String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
+               String cancelReason, boolean stockReserved) {
+      this(id, orderNo, userId, fulfilment, status, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount,
+          deliveryFee, total, coinsEarned, coinsCredited, paymentMethod, paymentStatus, addressSnapshot, expiresAt,
+          placedAt, version, deliverySlot, cancelReason, stockReserved, null, null);
+    }
+
     /** A row without the stock-reserved flag (taken as {@code false}). */
     public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
@@ -76,9 +89,16 @@ public class OrderRepository {
    * @param earns whether the line earns coins
    * @param redeemable whether coins may pay for it
    * @param couponDiscount this line's share of the coupon discount, in paise
+   * @param imageUrl the product picture now, kept with the line
    */
   public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
-                        boolean redeemable, String nameGu, String unitLabel, long couponDiscount) {
+                        boolean redeemable, String nameGu, String unitLabel, long couponDiscount, String imageUrl) {
+    /** A line without picture. */
+    public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
+                   boolean redeemable, String nameGu, String unitLabel, long couponDiscount) {
+      this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, nameGu, unitLabel, couponDiscount, null);
+    }
+
     /** A line without coupon share. */
     public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
                    boolean redeemable, String nameGu, String unitLabel) {
@@ -95,7 +115,16 @@ public class OrderRepository {
   public record SummaryRow(UUID id, UUID userId, String orderNo, String status, String fulfilment, long totalPaise,
                            int itemCount, Instant placedAt, long subtotalPaise, String couponCode,
                            long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
-                           String paymentMethod, String paymentStatus) {}
+                           String paymentMethod, String paymentStatus, String cancelledBy, String cancelCode) {
+    /** A line without who cancelled the order and why. */
+    public SummaryRow(UUID id, UUID userId, String orderNo, String status, String fulfilment, long totalPaise,
+                      int itemCount, Instant placedAt, long subtotalPaise, String couponCode,
+                      long couponDiscountPaise, int coinsUsed, long coinDiscountPaise, long deliveryFeePaise,
+                      String paymentMethod, String paymentStatus) {
+      this(id, userId, orderNo, status, fulfilment, totalPaise, itemCount, placedAt, subtotalPaise, couponCode,
+          couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, paymentMethod, paymentStatus, null, null);
+    }
+  }
 
   private final OrderJpa orders;
   private final OrderItemJpa items;
@@ -117,7 +146,7 @@ public class OrderRepository {
     return new Row(e.id, e.orderNo, e.userId, e.fulfilment, e.status, e.subtotalPaise, e.couponCode, e.couponDiscountPaise,
         e.coinsUsed, e.coinDiscountPaise, e.deliveryFeePaise, e.totalPaise, e.coinsEarned, e.coinsCredited, e.paymentMethod,
         e.paymentStatus, e.addressSnapshot, e.expiresAt, e.placedAt, e.version == null ? 0 : e.version, e.deliverySlot,
-        e.cancelReason, e.stockReserved);
+        e.cancelReason, e.stockReserved, e.cancelledBy, e.cancelCode);
   }
 
   /**
@@ -182,6 +211,7 @@ public class OrderRepository {
     e.couponDiscountPaise = i.couponDiscount();
     e.earnsCoins = i.earns();
     e.coinRedeemable = i.redeemable();
+    e.imageUrl = i.imageUrl();
     items.save(e);
   }
 
@@ -215,7 +245,7 @@ public class OrderRepository {
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
         .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
-            i.unitLabel, i.couponDiscountPaise)).toList();
+            i.unitLabel, i.couponDiscountPaise, i.imageUrl)).toList();
   }
 
   /** The order's status changes, oldest first. */
@@ -252,9 +282,20 @@ public class OrderRepository {
   @Transactional
   public void setStockReserved(UUID id, boolean reserved) { orders.findById(id).ifPresent(e -> e.stockReserved = reserved); }
 
-  /** Stores why the order was cancelled or rejected. */
+  /**
+   * Stores who cancelled the order, the machine readable reason and the free text (which may be {@code null}).
+   * @param by CUSTOMER, SHOP or SYSTEM
+   * @param code for example PAYMENT_TIMEOUT
+   * @param reason the raw text shown to the customer, without any prefix
+   */
   @Transactional
-  public void setCancelReason(UUID id, String reason) { orders.findById(id).ifPresent(e -> e.cancelReason = reason); }
+  public void setCancelInfo(UUID id, String by, String code, String reason) {
+    orders.findById(id).ifPresent(e -> {
+      e.cancelledBy = by;
+      e.cancelCode = code;
+      e.cancelReason = reason;
+    });
+  }
 
   /** The person's latest delivered or picked-up order that contains the product. */
   public Optional<UUID> latestCompletedOrderWith(UUID userId, UUID productId) {
@@ -293,14 +334,19 @@ public class OrderRepository {
   }
 
   private Page<SummaryRow> summaries(org.springframework.data.domain.Page<OrderEntity> page, int pageNo, int size) {
-    List<UUID> ids = page.getContent().stream().map(e -> e.id).toList();
+    return summaries(new Page<>(page.getContent(), pageNo, size, page.getTotalElements()));
+  }
+
+  /** Turns a page of order rows into list rows (with the number of items of each), keeping the page's total, exactness and hasMore. */
+  private Page<SummaryRow> summaries(Page<OrderEntity> page) {
+    List<UUID> ids = page.items().stream().map(e -> e.id).toList();
     Map<UUID, Integer> counts = ids.isEmpty() ? Map.of() : items.countsFor(ids).stream()
         .collect(Collectors.toMap(r -> (UUID) r[0], r -> ((Number) r[1]).intValue()));
-    List<SummaryRow> rows = page.getContent().stream()
+    List<SummaryRow> rows = page.items().stream()
         .map(e -> new SummaryRow(e.id, e.userId, e.orderNo, e.status, e.fulfilment, e.totalPaise,
             counts.getOrDefault(e.id, 0), e.placedAt, e.subtotalPaise, e.couponCode, e.couponDiscountPaise, e.coinsUsed,
-            e.coinDiscountPaise, e.deliveryFeePaise, e.paymentMethod, e.paymentStatus)).toList();
-    return new Page<>(rows, pageNo, size, page.getTotalElements());
+            e.coinDiscountPaise, e.deliveryFeePaise, e.paymentMethod, e.paymentStatus, e.cancelledBy, e.cancelCode)).toList();
+    return new Page<>(rows, page.page(), page.size(), page.total(), page.totalExact(), page.hasMore());
   }
 
   /** A customer's orders, newest first. */
@@ -311,33 +357,53 @@ public class OrderRepository {
   /** All orders, newest first, optionally of one status. */
   public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
-  private AppCaches caches;
+  private UserRepository users;
 
-  /** Optional (plain unit tests run without it): keeps the total of the admin order list for a few seconds. */
+  /** Optional (plain unit tests run without it): lets the admin search find orders by the customer's name, mobile or e-mail. */
   @Autowired(required = false)
-  void setCaches(AppCaches caches) { this.caches = caches; }
+  void setUsers(UserRepository users) { this.users = users; }
 
-  private long total(String status, String like, boolean anyStatus, boolean anyNumber) {
-    Supplier<Long> count = () -> anyStatus
-        ? (anyNumber ? orders.count() : orders.countByNumber(like))
-        : (anyNumber ? orders.countByStatus(status) : orders.countByStatusAndNumber(status, like));
-    return caches == null ? count.get() : caches.get(AppCaches.Name.ORDER_COUNTS, status + "|" + like, count);
+  /** At most this many matching customers are used by one admin search, so a very short text cannot build a huge query. */
+  static final int MAX_CUSTOMER_MATCHES = 200;
+
+  /**
+   * How many orders match, counting at most {@link BoundedCount#CAP} + 1 rows (see {@link BoundedCount}): exact, never cached, and
+   * as cheap on 5 million orders as on 5,000.
+   */
+  private long boundedTotal(String status, String like, List<UUID> customers, boolean anyStatus, boolean anyNumber) {
+    StringBuilder from = new StringBuilder("orders o where 1 = 1");
+    Map<String, Object> params = new HashMap<>();
+    if (!anyStatus) {
+      from.append(" and o.status = :status");
+      params.put("status", status);
+    }
+    if (!anyNumber) {
+      from.append(customers.isEmpty() ? " and lower(o.order_no) like :pattern" : " and (lower(o.order_no) like :pattern or o.user_id in (:users))");
+      params.put("pattern", like);
+      if (!customers.isEmpty()) params.put("users", customers);
+    }
+    return BoundedCount.count(em, from.toString(), params);
   }
 
   /** "1001" becomes "%1001%" in lower case; a % or _ typed by the person is dropped so it cannot act as a wildcard. */
   static String pattern(String q) { return "%" + q.trim().toLowerCase().replace("%", "").replace("_", "") + "%"; }
 
-  /** Orders newest first, optionally of one status and/or whose order number contains q (so staff can type "1001"). */
+  /** Orders newest first, optionally of one status and/or whose order number or customer (name, mobile, e-mail) contains q. */
   public Page<SummaryRow> adminList(String status, String q, int page, int size) {
-    PageRequest req = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"));
+    Window req = Window.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt")); // one extra row tells whether another page follows
     boolean anyStatus = status == null || status.isBlank();
     boolean anyNumber = q == null || q.isBlank();
     String like = anyNumber ? null : pattern(q);
+    // customers whose name, mobile or e-mail contains the text: their orders match as well as the order number
+    List<UUID> customers = anyNumber || users == null ? List.of() : users.idsMatching(like, MAX_CUSTOMER_MATCHES);
+    boolean withCustomers = !customers.isEmpty();
     List<OrderEntity> content = anyStatus
-        ? (anyNumber ? orders.findPageBy(req) : orders.listByNumber(like, req))
-        : (anyNumber ? orders.findPageByStatus(status, req) : orders.listByStatusAndNumber(status, like, req));
-    // counting a big table is the expensive part of a page: it is only done when the page is full, and the answer is kept for a few seconds
-    var result = PageableExecutionUtils.getPage(content, req, () -> total(status, like, anyStatus, anyNumber));
-    return summaries(result, page, size);
+        ? (anyNumber ? orders.findPageBy(req)
+            : withCustomers ? orders.listByNumberOrUsers(like, customers, req) : orders.listByNumber(like, req))
+        : (anyNumber ? orders.findPageByStatus(status, req)
+            : withCustomers ? orders.listByStatusAndNumberOrUsers(status, like, customers, req)
+            : orders.listByStatusAndNumber(status, like, req));
+    // the total is exact: no count when the page settles it, otherwise a count that stops at BoundedCount.CAP rows
+    return summaries(BoundedCount.assemble(content, page, size, () -> boundedTotal(status, like, customers, anyStatus, anyNumber)));
   }
 }

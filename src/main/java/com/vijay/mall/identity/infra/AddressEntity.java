@@ -16,6 +16,8 @@ class AddressEntity extends BaseEntity {
   String line1;
   String area;
   String pincode;
+  /** Optional contact phone of the address (10 digits). */
+  String phone;
   @Column(name = "is_default") boolean defaultAddress;
   Instant createdAt;
 

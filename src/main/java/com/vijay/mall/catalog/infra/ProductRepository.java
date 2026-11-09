@@ -2,6 +2,7 @@ package com.vijay.mall.catalog.infra;
 
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.persistence.BoundedCount;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.TypedQuery;
@@ -60,24 +61,85 @@ public class ProductRepository {
     return run(q, categoryId, hotOnly, onlyActive, includePosOnly, false, now, page, size);
   }
 
+  /**
+   * Counter search: active products (counter-only ones included) whose name matches {@code q} or whose id is in
+   * {@code exactIds}, those exact matches first. With {@code since} only products updated at or after it, or whose id is in
+   * {@code alsoChanged}, are kept.
+   */
+  public Page<ProductData> searchForCounter(String q, Collection<UUID> exactIds, Instant since, Collection<UUID> alsoChanged,
+                                            int page, int size) {
+    Map<String, Object> params = new HashMap<>();
+    StringBuilder where = conditions(null, null, false, true, true, false, null, params);
+    boolean hasText = q != null && !q.isBlank();
+    boolean hasExact = hasText && !exactIds.isEmpty();
+    if (hasText) {
+      where.append("and (lower(p.nameEn) like :q or lower(p.nameGu) like :q");
+      params.put("q", "%" + q.trim().toLowerCase() + "%");
+      if (hasExact) {
+        where.append(" or p.id in :exact");
+        params.put("exact", exactIds);
+      }
+      where.append(") ");
+    }
+    if (since != null) {
+      where.append("and (p.updatedAt >= :since");
+      params.put("since", since);
+      if (!alsoChanged.isEmpty()) {
+        where.append(" or p.id in :changed");
+        params.put("changed", alsoChanged);
+      }
+      where.append(") ");
+    }
+    String order = hasExact ? "order by case when p.id in :exact then 0 else 1 end, p.nameEn" : "order by p.nameEn";
+    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + order, ProductEntity.class);
+    params.forEach(list::setParameter);
+    list.setFirstResult((int) ((long) page * size)).setMaxResults(size + 1); // one extra row tells whether another page follows
+    List<ProductData> fetched = list.getResultList().stream().map(ProductRepository::toDomain).toList();
+    return BoundedCount.assemble(fetched, page, size, () -> boundedCount("p.id", where, params));
+  }
+
   /** The customer shop list: active, not counter-only, and with stock on hand. */
   public Page<ProductData> searchInStock(String q, UUID categoryId, boolean hotOnly, Instant now, int page, int size) {
     return run(q, categoryId, hotOnly, true, false, true, now, page, size);
   }
 
+  /** The hot-sale screen list: in-stock products on hot sale now, the soonest ending window first (no end last), then by name. */
+  public Page<ProductData> searchHotInStock(Instant now, int page, int size) {
+    return run(null, null, true, true, false, true, now, page, size, true);
+  }
+
   private Page<ProductData> run(String q, UUID categoryId, boolean hotOnly, boolean onlyActive, boolean includePosOnly,
                                 boolean inStockOnly, Instant now, int page, int size) {
+    return run(q, categoryId, hotOnly, onlyActive, includePosOnly, inStockOnly, now, page, size, false);
+  }
+
+  private Page<ProductData> run(String q, UUID categoryId, boolean hotOnly, boolean onlyActive, boolean includePosOnly,
+                                boolean inStockOnly, Instant now, int page, int size, boolean hotOrder) {
     Map<String, Object> params = new HashMap<>();
     StringBuilder where = conditions(q, categoryId, hotOnly, onlyActive, includePosOnly, inStockOnly, now, params);
-    TypedQuery<Long> count = em.createQuery("select count(p) from ProductEntity p " + where, Long.class);
-    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + "order by p.nameEn", ProductEntity.class);
-    params.forEach((k, v) -> {
-      count.setParameter(k, v);
-      list.setParameter(k, v);
-    });
-    list.setFirstResult((int) ((long) page * size)).setMaxResults(size);
-    List<ProductData> items = list.getResultList().stream().map(ProductRepository::toDomain).toList();
-    return new Page<>(items, page, size, count.getSingleResult());
+    TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where
+        + (hotOrder ? "order by case when p.hotEnd is null then 1 else 0 end, p.hotEnd, p.nameEn, p.id" : "order by p.nameEn"),
+        ProductEntity.class);
+    params.forEach(list::setParameter);
+    list.setFirstResult((int) ((long) page * size)).setMaxResults(size + 1); // one extra row tells whether another page follows
+    List<ProductData> fetched = list.getResultList().stream().map(ProductRepository::toDomain).toList();
+    // exact total: no count when the page settles it, otherwise a count that stops at BoundedCount.CAP rows
+    return BoundedCount.assemble(fetched, page, size, () -> boundedCount("p.id", where, params));
+  }
+
+  /**
+   * How many rows match, counting at most {@link BoundedCount#CAP} + 1 (exact below that, never cached, and as cheap on a million
+   * products as on a thousand).
+   *
+   * @param select what is counted: {@code p.id} for products, {@code distinct p.productGroupId} for product groups
+   * @param where the filter built by {@link #conditions}
+   * @param params the filter's parameters
+   */
+  private long boundedCount(String select, CharSequence where, Map<String, Object> params) {
+    TypedQuery<Long> q = em.createQuery("select count(*) from (select " + select + " as k from ProductEntity p " + where + "order by " + select.replace("distinct ", "") + " limit "
+        + (BoundedCount.CAP + 1) + ") bounded", Long.class);
+    params.forEach(q::setParameter);
+    return q.getSingleResult();
   }
 
   /** The WHERE clause shared by the product list and the product-group list; fills {@code params}. */
@@ -112,15 +174,12 @@ public class ProductRepository {
                                  int size) {
     Map<String, Object> params = new HashMap<>();
     StringBuilder where = conditions(q, categoryId, hotOnly, true, false, inStockOnly, now, params);
-    TypedQuery<Long> count = em.createQuery("select count(distinct p.productGroupId) from ProductEntity p " + where, Long.class);
     TypedQuery<UUID> list = em.createQuery("select p.productGroupId from ProductEntity p " + where
         + "group by p.productGroupId order by min(p.nameEn), p.productGroupId", UUID.class);
-    params.forEach((k, v) -> {
-      count.setParameter(k, v);
-      list.setParameter(k, v);
-    });
-    list.setFirstResult((int) ((long) page * size)).setMaxResults(size);
-    return new Page<>(list.getResultList(), page, size, count.getSingleResult());
+    params.forEach(list::setParameter);
+    list.setFirstResult((int) ((long) page * size)).setMaxResults(size + 1); // one extra row tells whether another page follows
+    List<UUID> fetched = list.getResultList();
+    return BoundedCount.assemble(fetched, page, size, () -> boundedCount("distinct p.productGroupId", where, params));
   }
 
   /** Visible (active, not counter-only) variants of these groups, each group's variants in display order. */
@@ -243,6 +302,48 @@ public class ProductRepository {
     e.earnsCoins = earns;
     e.coinRedeemable = redeemable;
     e.updatedAt = now;
+  }
+
+  /** Switches a product on or off for sale and stamps {@code updatedAt}; does nothing when the id does not exist. */
+  @Transactional
+  public void setActive(UUID id, boolean active, Instant now) {
+    jpa.findById(id).ifPresent(e -> {
+      e.active = active;
+      e.updatedAt = now;
+    });
+  }
+
+  /**
+   * Says what still refers to this product, or null when nothing does (so it can be deleted for good). The answer names the
+   * first kind of record found: order lines, counter sale lines, purchase lines, flash-sale items, reviews, defective stock
+   * or offline-till exceptions. Returns and flash-sale consumption hang off those lines, so they are covered too.
+   */
+  @Transactional(readOnly = true)
+  public String usedBy(UUID id) {
+    Object r = em.createNativeQuery("select case "
+        + "when exists (select 1 from order_item where product_id = :id) then 'orders' "
+        + "when exists (select 1 from pos_sale_item where product_id = :id) then 'counter sales' "
+        + "when exists (select 1 from purchase_item where product_id = :id) then 'purchases' "
+        + "when exists (select 1 from flash_sale_item where product_id = :id) then 'flash sales' "
+        + "when exists (select 1 from product_review where product_id = :id) then 'reviews' "
+        + "when exists (select 1 from defective_stock where product_id = :id) then 'defective stock records' "
+        + "when exists (select 1 from pos_offline_exception where product_id = :id) then 'offline till records' "
+        + "else null end").setParameter("id", id).getSingleResult();
+    return (String) r;
+  }
+
+  /**
+   * Removes a product row together with its inventory row, stock movements, counter attributes and barcodes, wish-list and
+   * cart rows. Call only when {@link #usedBy} returned null; the caller runs it inside one transaction.
+   */
+  @Transactional
+  public void purge(UUID id) {
+    em.flush();
+    for (String table : List.of("cart_item", "wishlist_item", "product_barcode", "product_pos", "stock_movement", "inventory")) {
+      em.createNativeQuery("delete from " + table + " where product_id = :id").setParameter("id", id).executeUpdate();
+    }
+    em.createNativeQuery("delete from product where id = :id").setParameter("id", id).executeUpdate();
+    em.clear();
   }
 
   /** Sets whether the product is sold at the counter only. */

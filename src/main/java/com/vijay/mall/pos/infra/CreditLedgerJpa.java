@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -10,6 +11,9 @@ import org.springframework.data.repository.query.Param;
 /** Spring Data access to {@code credit_ledger}, the history of every change to customers' credit balances. */
 interface CreditLedgerJpa extends JpaRepository<CreditLedgerEntity, UUID> {
   Page<CreditLedgerEntity> findByUserId(UUID userId, Pageable page);
+
+  /** The ledger line a repayment wrote. */
+  Optional<CreditLedgerEntity> findFirstByPaymentId(UUID paymentId);
 
   /** Credit that earlier returns of one bill already took off the customer's account. */
   @Query("select coalesce(sum(-l.deltaPaise), 0) from CreditLedgerEntity l where l.saleId = :sale and l.kind = 'RETURN'")

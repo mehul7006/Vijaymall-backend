@@ -2,6 +2,8 @@ package com.vijay.mall.catalog.api;
 
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.app.ImageStore;
+import com.vijay.mall.catalog.app.ProductPatch;
+import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
@@ -16,11 +18,13 @@ import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -155,6 +159,23 @@ public class AdminCatalogController {
         : catalog.setVariant(id, b.variantName(), b.variantOrder(), CurrentUser.id());
   }
 
+  /**
+   * Changes only the fields present in the JSON body; everything else (including stock) stays as it is.
+   * <p>Accepted keys are those of the PUT body except {@code qtyOnHand} (a 400: use the stock endpoint) and {@code productGroupId}.
+   * An explicit {@code null} clears {@code hotStart}, {@code hotEnd} and {@code description}. Same price and window validation as PUT.
+   */
+  @PatchMapping("/products/{id}")
+  public AdminProduct patch(@PathVariable UUID id, @RequestBody Map<String, Object> body) {
+    return catalog.patch(id, new ProductPatch(body), CurrentUser.id());
+  }
+
+  /**
+   * Deletes a product that was never sold, received or reviewed; otherwise switches it off instead.
+   * <p>Always answers 200 with {@code deleted}, {@code deactivated} and a {@code reason}; 404 for an unknown id.
+   */
+  @DeleteMapping("/products/{id}")
+  public CatalogService.DeleteResult delete(@PathVariable UUID id) { return catalog.deleteProduct(id, CurrentUser.id()); }
+
   /** Every variant of the product this id belongs to, including inactive ones, with stock. */
   @GetMapping("/products/{id}/variants")
   public List<AdminProduct> variants(@PathVariable UUID id) { return catalog.adminVariants(id); }
@@ -166,7 +187,7 @@ public class AdminCatalogController {
     return catalog.addVariant(id, b.toInput(), CurrentUser.id());
   }
 
-  /** Edits the name, description, category and flags that all variants of a product share. */
+  /** Edits the name, description, category and flags that all variants of a product share; leaving {@code active} out keeps the current value. */
   @PutMapping("/product-groups/{id}")
   public List<AdminProduct> updateGroup(@PathVariable UUID id, @Valid @RequestBody GroupBody b) {
     return catalog.updateGroup(id, b.toInput(), CurrentUser.id());
@@ -194,11 +215,15 @@ public class AdminCatalogController {
   /**
    * Uploads a product picture (multipart field {@code file}), stores a 400 px and a 1000 px version and links it to the product.
    * <p>A validation error is returned for an empty file, a file that is not an image, or one that is too large.
+   * @param variants {@code one} (default) sets the picture on this pack only; {@code missing} also on the other packs of the
+   *                 product that have none; {@code all} on every pack, replacing existing pictures
    */
   @PostMapping("/products/{id}/image")
-  public AdminProduct image(@PathVariable UUID id, @RequestParam("file") MultipartFile file) throws IOException {
+  public AdminProduct image(@PathVariable UUID id, @RequestParam("file") MultipartFile file,
+                            @RequestParam(value = "variants", required = false) String variants) throws IOException {
+    CatalogService.ImageScope scope = CatalogService.ImageScope.parse(variants);
     if (file.isEmpty()) throw ApiException.validation("file", "file is empty");
-    return catalog.setImage(id, images.save(file.getBytes(), "products"));
+    return catalog.setImage(id, images.save(file.getBytes(), "products"), scope);
   }
 
   /** Creates a category; answers 201 Created and is repeat-safe with an {@code Idempotency-Key}. */
@@ -208,6 +233,22 @@ public class AdminCatalogController {
     return AdminOps.run(ops, key, "category-create", CurrentUser.id(), AdminOps.fingerprint(b),
         () -> catalog.createCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active()),
         c -> c.id().toString(), ref -> catalog.categories().stream().filter(c -> c.id().toString().equals(ref)).findFirst().orElse(null));
+  }
+
+  /** Every category including hidden ones (with active and imageUrl), in the shop order. */
+  @GetMapping("/categories")
+  public List<AdminCategory> allCategories() { return catalog.adminCategories(); }
+
+  /** Deletes a category; 409 {@code CATEGORY_IN_USE} while a product or coupon refers to it, 404 when unknown; answers 204. */
+  @DeleteMapping("/categories/{id}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void deleteCategory(@PathVariable UUID id) { catalog.deleteCategory(id); }
+
+  /** Uploads a category picture (multipart field {@code file}) with the same rules as a product picture; returns the category. */
+  @PostMapping("/categories/{id}/image")
+  public AdminCategory categoryImage(@PathVariable UUID id, @RequestParam("file") MultipartFile file) throws IOException {
+    if (file.isEmpty()) throw ApiException.validation("file", "file is empty");
+    return catalog.setCategoryImage(id, images.save(file.getBytes(), "categories"));
   }
 
   /** Renames, reorders or switches a category on or off; 404 when the category does not exist. */

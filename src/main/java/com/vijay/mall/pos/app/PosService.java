@@ -29,10 +29,12 @@ import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.pos.domain.Money;
 import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
+import com.vijay.mall.pos.domain.CreditNoteData;
 import com.vijay.mall.pos.domain.PaymentRules;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
+import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleItemRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
@@ -60,7 +62,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -129,7 +130,16 @@ public class PosService implements ReferenceLookup {
   // ---------- pricing ----------
   /** Prices a basket at current prices and shows discounts, GST and coins. Changes nothing. */
   @Transactional(readOnly = true)
-  public BillView quote(Cart cart) {
+  public BillView quote(Cart cart) { return quote(cart, null); }
+
+  /**
+   * Same as {@link #quote(Cart)} with the manual discount a sale would carry, so the preview total matches the sale. Only the
+   * amount is checked (not negative, not above the bill): the reason and the manager's PIN are enforced when the bill is rung.
+   *
+   * @throws ApiException 400 for a negative amount or one above the bill
+   */
+  @Transactional(readOnly = true)
+  public BillView quote(Cart cart, ManualDiscount manualDiscount) {
     Priced base = price(cart.items());
     String mobile = mobile(cart.customerMobile());
     requireCustomerForPromo(cart, mobile);
@@ -137,9 +147,19 @@ public class PosService implements ReferenceLookup {
     UUID userId = customer.map(User::id).orElse(mobile == null ? null : UUID.randomUUID());
     Priced priced = flashed(base, userId);
     Quote q = quotes.quoteLines(userId, priced.lines(), cart.couponCode(), cart.coinMode(), cart.percent());
-    BillCalculator.Bill bill = bill(priced.drafts(), q);
+    long subtotal = priced.drafts().stream().mapToLong(BillCalculator.Draft::linePaise).sum();
+    long manual = previewManual(manualDiscount, subtotal - q.couponDiscountPaise() - q.coinDiscountPaise());
+    BillCalculator.Bill bill = bill(priced.drafts(), q, manual);
     int balance = customer.map(u -> wallet.balance(u.id())).orElse(0);
-    return view(bill, q, mobile == null ? 0 : q.coinsToEarn(), balance, roundOff(bill.totalPaise()));
+    return view(bill, q, mobile == null ? 0 : q.coinsToEarn(), balance, roundOff(bill.totalPaise()), manual);
+  }
+
+  /** The manual discount amount for a preview: no reason or PIN needed, but never negative or more than what is left to pay. */
+  private static long previewManual(ManualDiscount md, long remaining) {
+    if (md == null || md.amountPaise() == 0) return 0;
+    if (md.amountPaise() < 0) throw ApiException.validation("manualDiscount", "must not be negative");
+    if (md.amountPaise() > remaining) throw ApiException.validation("manualDiscount", "is more than the bill");
+    return md.amountPaise();
   }
 
   /** Invoice numbers of counter bills and credit note numbers of returns, for screens that only hold the id. */
@@ -160,20 +180,25 @@ public class PosService implements ReferenceLookup {
         : BillCalculator.build(drafts, q.couponDiscountPaise() + q.coinDiscountPaise() + manual);
   }
 
+  /** The round-off mode now in force for counter bills: {@code NEAREST_RUPEE} or {@code NONE}. */
+  public String roundOffMode() {
+    return settings != null && "NEAREST_RUPEE".equals(settings.get(Settings.GST_ROUND_OFF)) ? "NEAREST_RUPEE" : "NONE";
+  }
+
   /**
    * Rounding of the bill to the nearest rupee, when the admin switched it on (gst.roundOff = NEAREST_RUPEE): the paise that must be
    * added (or taken off, when negative) to reach a whole rupee, half a rupee rounding up. Zero when rounding is off.
    */
   private long roundOff(long totalPaise) {
-    if (settings == null || !"NEAREST_RUPEE".equals(settings.get(Settings.GST_ROUND_OFF))) return 0;
+    if (!"NEAREST_RUPEE".equals(roundOffMode())) return 0;
     return Math.floorDiv(totalPaise + 50, 100) * 100 - totalPaise;
   }
 
-  private static BillView view(BillCalculator.Bill b, Quote q, long coinsToEarn, int balance, long roundOff) {
+  private static BillView view(BillCalculator.Bill b, Quote q, long coinsToEarn, int balance, long roundOff, long manual) {
     List<BillLine> lines = b.lines().stream().map(l -> new BillLine(l.productId(), l.name(), l.soldBy(), l.qty(),
         l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent())).toList();
     return new BillView(lines, b.subtotalPaise(), q.couponCode(), q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(),
-        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff);
+        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff, manual);
   }
 
   private Priced price(List<Item> items) {
@@ -359,7 +384,7 @@ public class PosService implements ReferenceLookup {
     Manual manual = resolveManual(cashierId, admin, in.manualDiscount(), subtotal,
         subtotal - q.couponDiscountPaise() - q.coinDiscountPaise());
     BillCalculator.Bill bill = bill(priced.drafts(), q, manual.amountPaise());
-    List<Pay> pays = in.payments() == null ? List.of() : in.payments();
+    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     long roundOff = roundOff(bill.totalPaise());
     long payable = bill.totalPaise() + roundOff;
@@ -474,8 +499,7 @@ public class PosService implements ReferenceLookup {
     if (coupon || coins) {
       throw ApiException.validation("cart", "a coupon or coin redemption cannot be checked offline: ring this bill without it");
     }
-    List<Pay> pays = in.payments() == null ? List.of() : in.payments();
-    if (pays.stream().anyMatch(Objects::isNull)) throw ApiException.validation("payments", "a payment line is empty");
+    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     if (PaymentRules.creditAmount(payLines) > 0) {
       throw ApiException.validation("payments", "credit (udhar) cannot be given on an offline bill: it needs the customer's account");
@@ -630,7 +654,7 @@ public class PosService implements ReferenceLookup {
   public String receipt(UUID id, int width) {
     SaleRecord s = get(id);
     ShopSetting shopInfo = shop.get();
-    String cashier = users.findById(s.cashierId()).map(u -> u.name() != null && !u.name().isBlank() ? u.name() : u.email()).orElse("");
+    String cashier = cashierName(s.cashierId());
     List<ReceiptLine> lines = s.items().stream().map(i -> new ReceiptLine(i.name(), i.soldBy(), i.qty(), i.unitPricePaise(),
         i.netPaise(), i.gstPercent())).toList();
     List<ReceiptData.PaymentLine> pays = s.payments().stream().map(p -> new ReceiptData.PaymentLine(p.mode(), p.amountPaise())).toList();
@@ -643,6 +667,40 @@ public class PosService implements ReferenceLookup {
     } catch (IllegalArgumentException e) {
       throw ApiException.validation("width", e.getMessage());
     }
+  }
+
+  /**
+   * Renders the credit note of a return as plain text for a thermal printer.
+   *
+   * @param saleId the bill the goods came from
+   * @param returnId the return (credit note)
+   * @param width characters per line, 32 or 48
+   * @throws ApiException 404 for an unknown bill or a return that does not belong to it, 400 for a bad width
+   */
+  public String creditNoteReceipt(UUID saleId, UUID returnId, int width) {
+    SaleRecord s = get(saleId);
+    ReturnRecord r = sales.returnsOf(saleId).stream().filter(x -> x.id().equals(returnId)).findFirst()
+        .orElseThrow(() -> ApiException.notFound("Credit note"));
+    ShopSetting shopInfo = shop.get();
+    Map<UUID, SaleItemRecord> byId = s.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
+    List<CreditNoteData.Line> lines = r.items().stream().map(i -> {
+      SaleItemRecord sold = byId.get(i.saleItemId());
+      return new CreditNoteData.Line(sold.name(), sold.soldBy(), i.qty(), sold.gstPercent(), i.refundPaise());
+    }).toList();
+    List<ReceiptData.PaymentLine> refunds = r.refunds().stream().map(p -> new ReceiptData.PaymentLine(p.mode(), p.amountPaise())).toList();
+    CreditNoteData data = new CreditNoteData(shopInfo.shopName(), shopInfo.address(), shopInfo.phone(), shopInfo.gstin(),
+        r.creditNoteNo(), s.invoiceNo(), STAMP.format(r.createdAt().atZone(InvoiceNumbers.SHOP_ZONE)), cashierName(r.cashierId()),
+        s.customerMobile() == null ? "" : s.customerMobile(), r.reason() == null ? "" : r.reason(), lines, r.taxablePaise(),
+        r.cgstPaise(), r.sgstPaise(), r.refundPaise(), refunds, r.creditAdjustedPaise(), shopInfo.receiptFooter());
+    try {
+      return ReceiptText.renderCreditNote(data, width);
+    } catch (IllegalArgumentException e) {
+      throw ApiException.validation("width", e.getMessage());
+    }
+  }
+
+  private String cashierName(UUID id) {
+    return users.findById(id).map(u -> u.name() != null && !u.name().isBlank() ? u.name() : u.email()).orElse("");
   }
 
   // ---------- held baskets ----------

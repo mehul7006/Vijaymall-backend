@@ -1,6 +1,9 @@
 package com.vijay.mall.identity.infra;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.cache.AppCaches;
+import com.vijay.mall.common.persistence.BoundedCount;
+import com.vijay.mall.common.persistence.Window;
 import com.vijay.mall.identity.domain.User;
 import java.time.Instant;
 import java.util.Collection;
@@ -8,7 +11,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -177,10 +182,18 @@ public class UserRepository {
   /** Customers (not staff, not deleted accounts), newest first; q matches part of the name, e-mail or mobile number. */
   public Page<Detail> searchCustomers(String q, int page, int size) {
     String text = q == null ? "" : q.strip().toLowerCase();
-    var found = jpa.searchCustomers(text, "%" + text.replace("%", "").replace("_", "") + "%", PageRequest.of(page, size));
-    return new Page<>(found.getContent().stream()
-        .map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt)).toList(), page, size, found.getTotalElements());
+    String pattern = "%" + text.replace("%", "").replace("_", "") + "%";
+    var found = jpa.listCustomers(text, pattern, Window.of(page, size, Sort.unsorted())); // one extra row tells whether another page follows
+    var rows = found.stream().map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt)).toList();
+    // exact total: no count when the page settles it, otherwise a count that stops at BoundedCount.CAP rows
+    return BoundedCount.assemble(rows, page, size, () -> jpa.countCustomersUpTo(text, pattern, BoundedCount.CAP + 1));
   }
+
+  /**
+   * Ids of up to {@code limit} users whose name, e-mail or mobile contains the pattern (case-insensitive), newest accounts first.
+   * @param pattern lower-case text wrapped in {@code %}, already free of wildcards typed by a person
+   */
+  public List<UUID> idsMatching(String pattern, int limit) { return jpa.idsMatching(pattern, PageRequest.of(0, limit)); }
 
   /** An active admin and the hash of their manager-approval PIN. */
   public record AdminPin(UUID id, String hash) {}
@@ -192,9 +205,18 @@ public class UserRepository {
   /** Active admins that have a manager-approval PIN, with its hash. */
   public List<AdminPin> adminPins() { return jpa.adminsWithPin().stream().map(e -> new AdminPin(e.id, e.approvalPinHash)).toList(); }
 
-  /** Sets the account status, {@code ACTIVE} or {@code BLOCKED}. */
+  private AppCaches caches;
+
+  /** Optional (plain unit tests run without it): lets a block or unblock take effect at once instead of after the cached answer expires. */
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
+
+  /** Sets the account status, {@code ACTIVE} or {@code BLOCKED}, and forgets the remembered "is blocked" answer for that person. */
   @Transactional
-  public void setStatus(UUID id, String status) { jpa.findById(id).ifPresent(e -> e.status = status); }
+  public void setStatus(UUID id, String status) {
+    jpa.findById(id).ifPresent(e -> e.status = status);
+    if (caches != null) caches.evict(AppCaches.Name.BLOCKED_USERS, id);
+  }
 
   /** Active admin users, used to address "new order" notifications. */
   public List<UUID> adminIds() { return jpa.activeAdminIds(); }

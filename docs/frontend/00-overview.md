@@ -51,7 +51,7 @@ ISO-8601 in UTC (`2026-11-08T17:52:42Z`). The shop's own clock is India time (`A
 UUID strings. Order numbers and invoice numbers are human-readable strings for display and search; use `id` for API calls.
 
 ### Pagination
-List endpoints that page return `{ "items": [...], "page": 0, "size": 20, "total": 123 }`. `page` starts at 0. `size` is clamped to between 1 and 50 (asking for more returns 50). Plain lists (no page object) are documented per endpoint.
+List endpoints that page return `{ "items": [...], "page": 0, "size": 20, "total": 123, "totalExact": true, "hasMore": true }`. `total` is exact up to 10,000 rows; above that it is `10000` with `totalExact: false` (show "10,000+"). `hasMore` is always exact: page until it is `false`. `page` starts at 0. `size` is clamped to between 1 and 50 (asking for more returns 50). Plain lists (no page object) are documented per endpoint.
 
 ### Language
 Catalog items carry English and Gujarati names (`nameEn`, `nameGu`). Show the one matching the user's language and fall back to English.

@@ -74,6 +74,32 @@ class NotificationServiceTest {
   }
 
   @Test
+  void aRejectedOrderTellsTheCustomerTheShopsReasonFromTheCancelCode() {
+    when(profiles.deviceTokens(customer)).thenReturn(List.of());
+    service.on(msg("ORDER_STATUS", "{\"orderNo\":\"VM-9\",\"userId\":\"" + customer
+        + "\",\"status\":\"CANCELLED\",\"note\":\"sold out\",\"cancelCode\":\"REJECTED_BY_SHOP\",\"cancelReason\":\"sold out\"}"));
+    verify(repo).insert(customer, "Order rejected", "Sorry, we could not accept order VM-9 (sold out). Anything you paid will be refunded.",
+        "ORDER", "VM-9", NOW);
+  }
+
+  @Test
+  void aRejectedOrderQueuedBeforeCancelCodesStillReadsTheReasonFromTheNote() {
+    when(profiles.deviceTokens(customer)).thenReturn(List.of());
+    service.on(msg("ORDER_STATUS", "{\"orderNo\":\"VM-9\",\"userId\":\"" + customer
+        + "\",\"status\":\"CANCELLED\",\"note\":\"rejected by shop: closed today\"}"));
+    verify(repo).insert(customer, "Order rejected", "Sorry, we could not accept order VM-9 (closed today). Anything you paid will be refunded.",
+        "ORDER", "VM-9", NOW);
+  }
+
+  @Test
+  void otherCancelsAreSimpleStatusUpdates() {
+    when(profiles.deviceTokens(customer)).thenReturn(List.of());
+    service.on(msg("ORDER_STATUS", "{\"orderNo\":\"VM-9\",\"userId\":\"" + customer
+        + "\",\"status\":\"CANCELLED\",\"note\":\"payment timeout\",\"cancelCode\":\"PAYMENT_TIMEOUT\",\"cancelReason\":\"\"}"));
+    verify(repo).insert(customer, "Order update", "Order VM-9 is now cancelled.", "ORDER", "VM-9", NOW);
+  }
+
+  @Test
   void unknownEventTypesAreIgnored() {
     service.on(msg("SOMETHING_ELSE", "{}"));
     verifyNoInteractions(repo, push);

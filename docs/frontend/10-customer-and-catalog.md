@@ -560,7 +560,7 @@ Concepts: 1 coin = `paisePerCoin` paise. Coins can pay at most `maxRedeemPercent
 ### GET /api/v1/wallet/ledger
 - **Who**: customer.
 - **Purpose / when the UI calls it**: "Coin history" list.
-- **Request**: query `page`, `size` (see Paging; default 20, max 50). Order as returned by the server (newest first is expected; not asserted in code - sort by `createdAt` desc client-side if you need certainty).
+- **Request**: query `page`, `size` (see Paging; default 20, max 50). Always **newest first** (sorted by `createdAt` descending by the server; part of the contract). A row with `coins: 0` can appear (a refund lot) and can be hidden.
 - **Response**: `200` paged:
 ```json
 { "items": [ { "id": "…", "kind": "EARN", "coins": 12, "orderNo": "VSM-1001",
@@ -989,7 +989,7 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 | hotSale | boolean | no | null -> false | |
 | hotStart / hotEnd | instant | no | if both set, end must not be before start (400 `fields.hotEnd`) | |
 | earnsCoins, coinRedeemable | boolean | no | null -> true | |
-| active | boolean | no | `Boolean` passed through as given; send it explicitly (true/false). Omitting (null) behaviour is not specified by this layer. | applies to all variants |
+| active | boolean | no | Omitted (null) **keeps the current value** on every variant (the server only writes `active` when it is sent); `true`/`false` set it for all variants | applies to all variants |
 
 - **Response**: `200` array of AdminProduct (all variants).
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND`.

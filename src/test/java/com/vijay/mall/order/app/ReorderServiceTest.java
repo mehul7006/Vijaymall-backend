@@ -34,6 +34,18 @@ class ReorderServiceTest {
   }
 
   @Test
+  void theLinePictureIsTheLiveOneOrElseTheOneKeptOnTheOrder() {
+    var kept = new OrderViews.Item(id, "Rice", 3, 5000, 15000, "ચોખા", "1 kg", 0, "/old.png");
+    var live = new Product(id, UUID.randomUUID(), "Rice", "ચોખા", "", 6000, 5000, "kg", "1", "/new.png", true, 10, false, true, true,
+        id, 0, 0);
+    assertThat(ReorderService.line(kept, live).imageUrl()).isEqualTo("/new.png");
+    assertThat(ReorderService.line(kept, product(5000, 10)).imageUrl()).as("live product has no picture").isEqualTo("/old.png");
+    assertThat(ReorderService.line(kept, null).imageUrl()).as("hidden product").isEqualTo("/old.png");
+    var shorter = new ReorderService.Line(id, "Rice", "R", "kg", 1, 1, 5, false, true, null);
+    assertThat(shorter.imageUrl()).isNull();
+  }
+
+  @Test
   void noStockOrHiddenProductIsUnavailable() {
     var none = ReorderService.line(item, product(5000, 0));
     assertThat(none.available()).isFalse();

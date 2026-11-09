@@ -111,4 +111,58 @@ class CustomerAdminServiceTest {
     service.adjustCoins(id, -5, "x".repeat(100), actor);
     verify(wallet).adminAdjust(id, -5, actor, "x".repeat(100));
   }
+
+  @Test
+  void coinErrorsAreReportedUnderDeltaAndStillUnderCoins() {
+    when(users.detail(id)).thenReturn(Optional.of(detail(User.CUSTOMER, "ACTIVE")));
+    when(wallet.adminAdjust(id, 0, actor, "x")).thenThrow(ApiException.validation("coins", "a non-zero number"));
+    assertThatThrownBy(() -> service.adjustCoins(id, 0, "x", actor)).isInstanceOfSatisfying(ApiException.class, e -> {
+      assertThat(e.status().value()).isEqualTo(400);
+      assertThat(e.details().get("fields")).isEqualTo(java.util.Map.of("delta", "a non-zero number", "coins", "a non-zero number"));
+    });
+  }
+
+  @Test
+  void otherWalletErrorsPassThroughUnchanged() {
+    when(users.detail(id)).thenReturn(Optional.of(detail(User.CUSTOMER, "ACTIVE")));
+    ApiException other = ApiException.notFound("Wallet");
+    when(wallet.adminAdjust(id, 3, actor, "x")).thenThrow(other);
+    assertThatThrownBy(() -> service.adjustCoins(id, 3, "x", actor)).isSameAs(other);
+    ApiException otherField = ApiException.validation("amount", "bad");
+    when(wallet.adminAdjust(id, 4, actor, "x")).thenThrow(otherField);
+    assertThatThrownBy(() -> service.adjustCoins(id, 4, "x", actor)).isSameAs(otherField);
+  }
+
+  @Test
+  void walletLedgerAndOrdersNeedARealCustomer() {
+    when(users.detail(id)).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.walletLedger(id, 0, 20)).isInstanceOf(ApiException.class);
+    assertThatThrownBy(() -> service.orders(id, 0, 20)).isInstanceOf(ApiException.class);
+    verify(wallet, never()).ledger(any(), anyInt(), anyInt());
+  }
+
+  @Test
+  void walletLedgerDelegatesToTheWallet() {
+    when(users.detail(id)).thenReturn(Optional.of(detail(User.CUSTOMER, "ACTIVE")));
+    var row = new com.vijay.mall.wallet.infra.WalletRepository.LedgerRow(UUID.randomUUID(), "EARN", 5, null, NOW, NOW);
+    when(wallet.ledger(id, 1, 500)).thenReturn(new Page<>(List.of(row), 1, 50, 1));
+    assertThat(service.walletLedger(id, 1, 500).items()).containsExactly(row);
+  }
+
+  @Test
+  void ordersAreShownAsAdminRowsWithTheCustomerDetails() {
+    when(users.detail(id)).thenReturn(Optional.of(detail(User.CUSTOMER, "ACTIVE")));
+    var s = new com.vijay.mall.order.domain.OrderViews.Summary(UUID.randomUUID(), "VSM-1", "PLACED", "DELIVERY", 900, 2, NOW, 800,
+        "C1", 10, 3, 3, 100, "COD", "PENDING");
+    when(orders.list(id, 0, 20)).thenReturn(new Page<>(List.of(s), 0, 20, 1));
+    var out = service.orders(id, 0, 20);
+    assertThat(out.total()).isEqualTo(1);
+    var row = out.items().get(0);
+    assertThat(row.orderNo()).isEqualTo("VSM-1");
+    assertThat(row.customerName()).isEqualTo("Asha");
+    assertThat(row.customerEmail()).isEqualTo("a@x.com");
+    assertThat(row.customerMobile()).isEqualTo("9000000001");
+    assertThat(row.coinsUsed()).isEqualTo(3);
+    assertThat(row.paymentStatus()).isEqualTo("PENDING");
+  }
 }

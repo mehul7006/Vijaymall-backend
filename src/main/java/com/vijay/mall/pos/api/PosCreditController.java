@@ -9,8 +9,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -57,5 +59,11 @@ public class PosCreditController {
   @ResponseStatus(HttpStatus.CREATED)
   public CreditService.Receipt collect(@RequestHeader("Idempotency-Key") String key, @Valid @RequestBody RepaymentBody body) {
     return credit.collect(CurrentUser.id(), key, body.customerMobile(), body.payments(), body.note());
+  }
+
+  /** The receipt of a repayment as printable text for the given paper width (32 or 48): amount, modes, balance before and after. */
+  @GetMapping("/payments/{id}/receipt")
+  public PosController.Receipt receipt(@PathVariable UUID id, @RequestParam(defaultValue = "32") int width) {
+    return new PosController.Receipt(width, credit.receiptText(id, width));
   }
 }

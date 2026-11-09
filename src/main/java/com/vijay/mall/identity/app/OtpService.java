@@ -9,7 +9,6 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,8 +82,7 @@ public class OtpService {
   @Transactional
   public void send(String rawEmail, String ip) {
     String email = normalize(rawEmail);
-    limiter.check("otp-email:" + email, perEmailHour, 3600);
-    limiter.check("otp-ip:" + ip, ipPerHour, 3600);
+    limit("otp-email:" + email, perEmailHour, ip, ipPerHour);
     String code = fixedCode().orElseGet(() -> String.format("%05d", random.nextInt(100000)));
     Instant now = clock.instant();
     repo.insert(email, OtpHasher.otpHash(props.otp().pepper(), email, code), now.plus(Duration.ofMinutes(5)), now);
@@ -114,8 +112,16 @@ public class OtpService {
     return at <= 1 ? "***" : email.charAt(0) + "***" + email.substring(at);
   }
 
-  private static ApiException invalid(String reason) {
-    return ApiException.unprocessable("OTP_INVALID", "The code is not valid", Map.of("reason", reason));
+  private static ApiException invalid(String reason) { return OtpErrors.invalid(reason); }
+
+  /** Runs the send limits; a refusal keeps its code and wait time but gets an OTP-specific message. */
+  private void limit(String ownKey, int ownMax, String ip, int ipMax) {
+    try {
+      limiter.check(ownKey, ownMax, 3600);
+      limiter.check("otp-ip:" + ip, ipMax, 3600);
+    } catch (ApiException e) {
+      throw OtpErrors.tooManyCodes(e);
+    }
   }
 
   @Scheduled(cron = "0 30 3 * * *")

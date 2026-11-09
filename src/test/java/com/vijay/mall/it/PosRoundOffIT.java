@@ -64,4 +64,18 @@ class PosRoundOffIT extends IntegrationTestBase {
     var quote = post("/api/v1/pos/quote", cashier, Map.of("items", List.of(Map.of("productId", riceId(cashier), "qty", 1)))).getBody();
     assertThat(((Number) quote.get("roundOffPaise")).longValue()).isZero();
   }
+
+  @Test
+  void shopInfoAndQuoteShowTheRoundingAndTheManualDiscountTogether() {
+    String cashier = token(CASHIER);
+    setting("NEAREST_RUPEE");
+    assertThat(get("/api/v1/pos/shop", cashier).getBody().get("roundOffMode")).isEqualTo("NEAREST_RUPEE");
+    Map body = new java.util.HashMap<>(Map.of("items", List.of(Map.of("productId", riceId(cashier), "qty", 3))));
+    body.put("manualDiscount", Map.of("amountPaise", 333));
+    var quote = post("/api/v1/pos/quote", cashier, body).getBody();
+    assertThat(((Number) quote.get("manualDiscountPaise")).longValue()).isEqualTo(333);
+    assertThat(((Number) quote.get("totalPaise")).longValue() % 100).isZero();
+    setting("NONE");
+    assertThat(get("/api/v1/pos/shop", cashier).getBody().get("roundOffMode")).isEqualTo("NONE");
+  }
 }

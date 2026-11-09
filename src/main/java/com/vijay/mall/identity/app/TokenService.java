@@ -11,6 +11,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -96,10 +98,15 @@ public class TokenService {
     return issue(user, row.deviceId());
   }
 
-  /** Revokes the given refresh token; an unknown token is ignored. */
+  /**
+   * Revokes the given refresh token; an unknown token is ignored.
+   * @return the user the token belongs to, or empty when the token is unknown
+   */
   @Transactional
-  public void logout(String refreshToken) {
-    refreshTokens.findByHash(OtpHasher.sha256Hex(refreshToken))
-        .ifPresent(r -> refreshTokens.revoke(r.id(), clock.instant()));
+  public Optional<UUID> logout(String refreshToken) {
+    return refreshTokens.findByHash(OtpHasher.sha256Hex(refreshToken)).map(r -> {
+      refreshTokens.revoke(r.id(), clock.instant());
+      return r.userId();
+    });
   }
 }

@@ -1,5 +1,6 @@
 package com.vijay.mall.catalog.app;
 
+import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
@@ -24,13 +25,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -75,8 +79,39 @@ public class CatalogService {
   public record StockMovementView(UUID id, UUID productId, String name, String packLabel, int delta, String reason,
                                   Instant at, UUID cashierId, UUID refId, String ref) {}
 
-  /** The hot-sale screen: the banners that are live now and the in-stock products currently on hot sale. */
-  public record HotSale(List<HotBanner> banners, List<Product> products) {}
+  /**
+   * The hot-sale screen: the banners that are live now (all of them) and one page of the in-stock products currently on hot
+   * sale, soonest ending window first. page, size and total describe the products part only.
+   */
+  public record HotSale(List<HotBanner> banners, List<Product> products, int page, int size, long total) {
+    /** A single page holding all the given products. */
+    public HotSale(List<HotBanner> banners, List<Product> products) {
+      this(banners, products, 0, products.size(), products.size());
+    }
+  }
+
+  /** What a product delete did: removed for good, or only switched off because it has history. */
+  public record DeleteResult(boolean deleted, boolean deactivated, String reason) {}
+
+  /** Which variants of a product group a picture upload applies to. */
+  public enum ImageScope {
+    /** Only the addressed pack (the default). */
+    ONE,
+    /** The addressed pack and every other variant of the group that has no picture yet. */
+    MISSING,
+    /** Every variant of the group, replacing pictures already there. */
+    ALL;
+
+    /** Parses the {@code variants} request value (case-insensitive); null or blank means {@link #ONE}. */
+    public static ImageScope parse(String text) {
+      if (text == null || text.isBlank()) return ONE;
+      try {
+        return valueOf(text.trim().toUpperCase(Locale.ROOT));
+      } catch (IllegalArgumentException e) {
+        throw ApiException.validation("variants", "must be one, missing or all");
+      }
+    }
+  }
 
   /**
    * One sellable variant of a product (for example "Mango, 500 g"). id is what the cart, the order and the review use.
@@ -207,15 +242,15 @@ public class CatalogService {
   void setCaches(AppCaches caches) { this.caches = caches; }
 
   /**
-   * Remembers the result of a product search for a few seconds (the {@code product-list} cache; an admin edit clears it). Only
-   * which products match, in what order and how many is kept: stock numbers and flash offers are read fresh for every answer.
+   * Remembers the result of a product search (the {@code product-list} cache). What is kept is only which products match, in what
+   * order and how many: stock numbers and flash offers are read fresh for every answer. The remembered result is emptied the
+   * moment something that changes it commits: any catalog edit, and a product selling out or coming back in stock (see
+   * {@code InventoryService}); a 5-minute life is only a backstop, not what keeps it correct.
    */
-  private <T> T searched(String key, java.util.function.Supplier<T> search) {
+  private <T> T searched(String key, Supplier<T> search) {
     return caches == null ? search.get() : caches.get(AppCaches.Name.PRODUCT_LIST, key, search);
   }
 
-  /** The part of a search cache key that changes with time: the hot-sale window, checked against the clock in 10-second steps. */
-  private long hotBucket(boolean hot, Instant now) { return hot ? now.getEpochSecond() / 10 : 0; }
 
   /**
    * The active categories in display order. Served from a cache when one is available because every screen reads it.
@@ -244,10 +279,11 @@ public class CatalogService {
     Instant now = clock.instant();
     int pg = Math.max(0, page);
     int sz = Page.clampSize(size);
-    String key = "list|" + q + "|" + categoryId + "|" + hot + "|" + includeOutOfStock + "|" + pg + "|" + sz + "|" + hotBucket(hot, now);
-    Page<AdminProduct> p = withStock(searched(key, () -> includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
-        : products.searchInStock(q, categoryId, hot, now, pg, sz)));
-    return new Page<>(flashed(p.items().stream().map(a -> a.toCustomer(now)).toList()), p.page(), p.size(), p.total());
+    String key = "list|" + q + "|" + categoryId + "|" + includeOutOfStock + "|" + pg + "|" + sz;
+    Supplier<Page<ProductData>> search = () -> includeOutOfStock ? products.search(q, categoryId, hot, true, now, pg, sz)
+        : products.searchInStock(q, categoryId, hot, now, pg, sz);
+    Page<AdminProduct> p = withStock(hot ? search.get() : searched(key, search)); // "on hot sale now" depends on the clock: never remembered
+    return p.withItems(flashed(p.items().stream().map(a -> a.toCustomer(now)).toList()));
   }
 
   /**
@@ -261,17 +297,27 @@ public class CatalogService {
   }
 
   /**
-   * Builds the hot-sale screen: up to 20 in-stock hot products and the banners whose active flag and time window are open now.
+   * Builds the hot-sale screen: one page (default 20) of in-stock hot products and the banners whose active flag and time window are open now.
    * The full banner list is cached; which banners are live is decided against the clock on every call.
    */
-  public HotSale hotSale() {
+  public HotSale hotSale() { return hotSale(0, 20); }
+
+  /**
+   * The hot-sale screen with paging for the products part (banners are always returned whole).
+   * <p>Products are the in-stock ones on hot sale now, the soonest ending window first (no end date last), then by name.
+   * @param page zero-based page number (negative counts as 0)
+   * @param size page size, 1 to 50 (default 20 on the endpoint)
+   */
+  public HotSale hotSale(int page, int size) {
     Instant now = clock.instant();
-    List<Product> list = flashed(withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
-        .map(a -> a.toCustomer(now)).toList());
+    int pg = Math.max(0, page);
+    int sz = Page.clampSize(size);
+    Page<AdminProduct> found = withStock(products.searchHotInStock(now, pg, sz));
+    List<Product> list = flashed(found.items().stream().map(a -> a.toCustomer(now)).toList());
     // all banners are cached (they change rarely); which ones are on right now depends on the clock, so that is decided here
     List<HotBanner> all = caches == null ? banners.all() : caches.get(AppCaches.Name.BANNERS, "all", banners::all);
     return new HotSale(all.stream().filter(b -> b.active() && (b.startAt() == null || !b.startAt().isAfter(now))
-        && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list);
+        && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list, found.page(), found.size(), found.total());
   }
 
   /** Products with their variants, one entry per product. A product matches when any of its variants does. */
@@ -285,8 +331,9 @@ public class CatalogService {
     Instant now = clock.instant();
     int pg = Math.max(0, page);
     int sz = Page.clampSize(size);
-    String key = "groups|" + q + "|" + categoryId + "|" + hot + "|" + includeOutOfStock + "|" + pg + "|" + sz + "|" + hotBucket(hot, now);
-    Page<UUID> ids = searched(key, () -> products.searchGroups(q, categoryId, hot, !includeOutOfStock, now, pg, sz));
+    String key = "groups|" + q + "|" + categoryId + "|" + includeOutOfStock + "|" + pg + "|" + sz;
+    Supplier<Page<UUID>> search = () -> products.searchGroups(q, categoryId, hot, !includeOutOfStock, now, pg, sz);
+    Page<UUID> ids = hot ? search.get() : searched(key, search);
     List<ProductData> rows = products.visibleMembers(ids.items());
     var stocks = inventory.stocks(rows.stream().map(ProductData::id).toList());
     if (!includeOutOfStock) {
@@ -298,7 +345,7 @@ public class CatalogService {
         .collect(Collectors.groupingBy(ProductData::productGroupId, LinkedHashMap::new, Collectors.toList()));
     List<ProductGroup> items = ids.items().stream().filter(byGroup::containsKey)
         .map(g -> flashed(toGroup(byGroup.get(g), stocks, info, now))).toList();
-    return new Page<>(items, ids.page(), ids.size(), ids.total());
+    return ids.withItems(items);
   }
 
   /** One product with its variants. The id may be the group id or the id of any of its variants. */
@@ -333,12 +380,17 @@ public class CatalogService {
           p.unitLabel(), p.mrpPaise(), p.pricePaise(), p.imageUrl(), qty > 0, Math.min(qty, 99));
     }).toList();
     Variant def = variants.stream().filter(Variant::inStock).findFirst().orElse(variants.get(0));
+    String image = def.imageUrl() != null ? def.imageUrl()
+        : variants.stream().map(Variant::imageUrl).filter(u -> u != null).findFirst().orElse(null);
+    // a pack without its own picture shows the product's picture
+    if (image != null) {
+      variants = variants.stream().map(v -> v.imageUrl() != null ? v : new Variant(v.id(), v.variantName(), v.packSize(), v.unit(),
+          v.label(), v.mrpPaise(), v.pricePaise(), image, v.inStock(), v.qtyAvailable())).toList();
+    }
     ProductData shared = sorted.get(0);
     int reviews = sorted.stream().mapToInt(ProductData::reviewCount).sum();
     double weighted = sorted.stream().mapToDouble(p -> p.rating() * p.reviewCount()).sum();
     double rating = reviews == 0 ? 0 : Math.round(weighted / reviews * 100.0) / 100.0;
-    String image = def.imageUrl() != null ? def.imageUrl()
-        : variants.stream().map(Variant::imageUrl).filter(u -> u != null).findFirst().orElse(null);
     boolean hot = sorted.stream().anyMatch(p -> p.hotSale() && (p.hotStart() == null || !now.isBefore(p.hotStart()))
         && (p.hotEnd() == null || !now.isAfter(p.hotEnd())));
     return new ProductGroup(shared.productGroupId(), def.id(), shared.categoryId(), shared.nameEn(), shared.nameGu(),
@@ -397,6 +449,22 @@ public class CatalogService {
     return products.search(q, null, false, true, true, clock.instant(), Math.max(0, page), Page.clampSize(size));
   }
 
+  /**
+   * Counter search by name that also returns the products in {@code exactIds} (exact barcode or item code matches) first, and
+   * can keep only products changed at or after {@code since} (or whose id is in {@code alsoChanged}).
+   */
+  public Page<ProductData> posSearch(String q, Collection<UUID> exactIds, Instant since, Collection<UUID> alsoChanged, int page,
+                                     int size) {
+    return products.searchForCounter(q, exactIds, since, alsoChanged, Math.max(0, page), Page.clampSize(size));
+  }
+
+  /** The variant name of each of these products (empty text when it has none), for the counter. */
+  public Map<UUID, String> posVariantNames(Collection<UUID> ids) {
+    Map<UUID, String> out = new HashMap<>();
+    products.variantInfo(ids).forEach((id, v) -> out.put(id, v.name()));
+    return out;
+  }
+
   /** Stored product data for the counter (POS) for these ids, including inactive and counter-only items. */
   public List<ProductData> posProducts(Collection<UUID> ids) { return products.findAll(List.copyOf(ids)); }
 
@@ -435,7 +503,7 @@ public class CatalogService {
       return new StockMovementView(m.id(), m.productId(), p == null ? "?" : p.nameEn(), p == null ? "" : p.unitLabel(),
           m.delta(), m.reason(), m.at(), m.actorId(), m.refId(), m.refId() == null ? null : numbers.get(m.refId()));
     }).toList();
-    return new Page<>(items, rows.page(), rows.size(), rows.total());
+    return rows.withItems(items);
   }
 
   private AdminProduct one(UUID id) {
@@ -449,7 +517,7 @@ public class CatalogService {
     var stocks = inventory.stocks(page.items().stream().map(ProductData::id).toList());
     List<AdminProduct> items = page.items().stream()
         .map(d -> d.withStock(stocks.get(d.id()).qty(), stocks.get(d.id()).low())).toList();
-    return new Page<>(items, page.page(), page.size(), page.total());
+    return page.withItems(items);
   }
 
   /** The unit to store: checked against the admin's unit list when there is one, else the text as given. */
@@ -520,6 +588,82 @@ public class CatalogService {
     products.setImage(id, url, clock.instant());
     changed();
     return adminGet(id);
+  }
+
+  /**
+   * Stores the already-uploaded picture on the addressed pack and, depending on the scope, on its siblings.
+   * @param scope ONE keeps today's behaviour; MISSING also fills the variants of the group with no picture; ALL overwrites all
+   */
+  @Transactional
+  public AdminProduct setImage(UUID id, String url, ImageScope scope) {
+    adminGet(id);
+    if (scope == ImageScope.ONE) return setImage(id, url);
+    Instant now = clock.instant();
+    products.allMembersOf(id).stream()
+        .filter(m -> m.id().equals(id) || scope == ImageScope.ALL || m.imageUrl() == null || m.imageUrl().isBlank())
+        .forEach(m -> products.setImage(m.id(), url, now));
+    changed();
+    return adminGet(id);
+  }
+
+  /**
+   * Deletes a product for good when nothing refers to it, otherwise only switches it off.
+   * <p>Never sold, received, reviewed or put on a flash sale means the product, its stock row and movements, barcodes, wish-list
+   * and cart rows go together. Anything else keeps the row (history must stay readable) and sets active to false; deleting a
+   * product that is already inactive answers deactivated again.
+   * @throws ApiException {@code NOT_FOUND} for an unknown id
+   */
+  @Transactional
+  public DeleteResult deleteProduct(UUID id, UUID actor) {
+    AdminProduct p = adminGet(id);
+    String used = products.usedBy(id);
+    if (used == null) {
+      products.purge(id);
+      audit.log(actor, "PRODUCT_DELETE", "product", id, p.nameEn());
+      changed();
+      return new DeleteResult(true, false, "Never sold, received or reviewed: removed completely");
+    }
+    String why = "Has " + used + ": kept for history and switched off instead";
+    if (p.active()) {
+      products.setActive(id, false, clock.instant());
+      audit.log(actor, "PRODUCT_DEACTIVATE", "product", id, p.nameEn());
+      changed();
+    }
+    return new DeleteResult(false, true, why);
+  }
+
+  /** Changes only the fields present in the patch (stock never changes here); same validation as a full update. */
+  @Transactional
+  public AdminProduct patch(UUID id, ProductPatch patch, UUID actor) {
+    AdminProduct before = adminGet(id);
+    AdminProduct updated = update(id, patch.applyTo(before), actor);
+    return patch.touchesVariant() ? setVariant(id, patch.variantName(), patch.variantOrder(), actor) : updated;
+  }
+
+  /** Every category including hidden ones, with the active flag and picture, in the same order as the shop list. */
+  public List<AdminCategory> adminCategories() { return categories.listAll(); }
+
+  /**
+   * Deletes a category nothing refers to.
+   * @throws ApiException {@code NOT_FOUND} for an unknown id; {@code 409 CATEGORY_IN_USE} when a product or coupon uses it
+   */
+  @Transactional
+  public void deleteCategory(UUID id) {
+    categories.find(id).orElseThrow(() -> ApiException.notFound("Category"));
+    if (categories.inUse(id)) {
+      throw ApiException.conflict("CATEGORY_IN_USE", "Products or coupons still use this category; move them or hide it instead", Map.of());
+    }
+    categories.delete(id);
+    changed();
+  }
+
+  /** Stores the already-uploaded picture on a category; {@code NOT_FOUND} when it does not exist. */
+  @Transactional
+  public AdminCategory setCategoryImage(UUID id, String url) {
+    categories.find(id).orElseThrow(() -> ApiException.notFound("Category"));
+    categories.setImage(id, url);
+    changed();
+    return categories.findAdmin(id).orElseThrow();
   }
 
   /** Creates a category and returns it. */
@@ -608,7 +752,7 @@ public class CatalogService {
     return adminGet(id);
   }
 
-  /** Edits what every variant of a product shares, in one go. */
+  /** Edits what every variant of a product shares, in one go. An omitted {@code active} keeps each variant's current value. */
   @Transactional
   public List<AdminProduct> updateGroup(UUID idOrGroupId, GroupInput in, UUID actor) {
     List<ProductData> rows = products.allMembersOf(idOrGroupId);

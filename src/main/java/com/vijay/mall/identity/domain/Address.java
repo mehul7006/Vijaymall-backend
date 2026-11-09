@@ -10,5 +10,11 @@ import java.util.UUID;
  * @param area locality or area
  * @param pincode postal code
  * @param isDefault true for the customer's default address (at most one per customer)
+ * @param phone contact number for the delivery (10 digits), or null when none was given; old order snapshots have none
  */
-public record Address(UUID id, String label, String line1, String area, String pincode, boolean isDefault) {}
+public record Address(UUID id, String label, String line1, String area, String pincode, boolean isDefault, String phone) {
+  /** An address without a contact phone. */
+  public Address(UUID id, String label, String line1, String area, String pincode, boolean isDefault) {
+    this(id, label, line1, area, pincode, isDefault, null);
+  }
+}

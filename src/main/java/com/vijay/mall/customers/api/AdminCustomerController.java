@@ -5,6 +5,8 @@ import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.customers.app.CustomerAdminService.CustomerView;
 import com.vijay.mall.customers.app.CustomerAdminService;
+import com.vijay.mall.order.domain.OrderViews;
+import com.vijay.mall.wallet.infra.WalletRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
@@ -60,11 +62,28 @@ public class AdminCustomerController {
   @GetMapping("/{id}")
   public CustomerView get(@PathVariable UUID id) { return customers.get(id); }
 
+  /** The customer's coin history (kind, coins, orderId, createdAt, expiresAt), newest first; size is clamped to 1..50. */
+  @GetMapping("/{id}/wallet-ledger")
+  public Page<WalletRepository.LedgerRow> walletLedger(@PathVariable UUID id, @RequestParam(defaultValue = "0") int page,
+                                                       @RequestParam(defaultValue = "20") int size) {
+    return customers.walletLedger(id, page, size);
+  }
+
+  /** The customer's orders, newest first, as the admin order list rows; size is clamped to 1..50. */
+  @GetMapping("/{id}/orders")
+  public Page<OrderViews.AdminSummary> orders(@PathVariable UUID id, @RequestParam(defaultValue = "0") int page,
+                                              @RequestParam(defaultValue = "20") int size) {
+    return customers.orders(id, page, size);
+  }
+
   /** Switch the account off (also signs them out everywhere) or back on. */
   @PatchMapping("/{id}")
   public CustomerView setActive(@PathVariable UUID id, @Valid @RequestBody ActiveBody b) { return customers.setActive(id, b.active(), CurrentUser.id()); }
 
-  /** delta above 0 gives coins, below 0 takes them back; a reason is required. */
+  /**
+   * delta above 0 gives coins, below 0 takes them back; a reason is required. A coin validation error is reported under both
+   * {@code details.fields.delta} and (for old clients) {@code details.fields.coins}.
+   */
   @PostMapping("/{id}/coins")
   public CustomerView coins(@PathVariable UUID id, @Valid @RequestBody CoinsBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     return AdminOps.run(ops, key, "coins-adjust:" + id, CurrentUser.id(), AdminOps.fingerprint(id, b),

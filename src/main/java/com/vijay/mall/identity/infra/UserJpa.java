@@ -35,6 +35,23 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
   Page<UserEntity> searchCustomers(@Param("q") String q, @Param("pat") String pattern,
                                                                     Pageable page);
 
+  /** The same customers as {@link #searchCustomers} as one list page without a count (the page asks for one extra row). */
+  @Query("select u from UserEntity u where u.role = 'CUSTOMER' and coalesce(u.email, '') not like 'deleted-%@deleted.invalid' "
+      + "and (:q = '' or lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat or coalesce(u.mobile, '') like :pat) "
+      + "order by u.createdAt desc")
+  List<UserEntity> listCustomers(@Param("q") String q, @Param("pat") String pattern, Pageable page);
+
+  /** Counts those customers but stops at {@code limit}: exact below it, and the cost has a ceiling however many customers there are. */
+  @Query(value = "select count(*) from (select 1 from users u where u.role = 'CUSTOMER' and coalesce(u.email, '') not like 'deleted-%@deleted.invalid' "
+      + "and (:q = '' or lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat or coalesce(u.mobile, '') like :pat) "
+      + "limit :limit) c", nativeQuery = true)
+  long countCustomersUpTo(@Param("q") String q, @Param("pat") String pattern, @Param("limit") int limit);
+
+  /** Ids of users whose name, e-mail or mobile contains the (lower-case, %-wrapped) pattern; newest accounts first. */
+  @Query("select u.id from UserEntity u where lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat "
+      + "or coalesce(u.mobile, '') like :pat order by u.createdAt desc")
+  List<UUID> idsMatching(@Param("pat") String pattern, Pageable page);
+
   @Query("select u.id from UserEntity u where u.role = 'ADMIN' and u.status = 'ACTIVE'")
   List<UUID> activeAdminIds();
 

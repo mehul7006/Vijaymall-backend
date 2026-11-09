@@ -62,4 +62,22 @@ class BootstrapStatusTest {
     env.setActiveProfiles("prod");
     assertThat(find(new BootstrapStatus(env, new ConfigCrypto(SettingsFixture.KEY), "x").items(), "SPRING_PROFILES_ACTIVE").detail()).isEqualTo("prod");
   }
+
+  @Test
+  void loginCodesInTheLogAreFlaggedOutsideDevelopment() {
+    var prod = goodInProd().withProperty("app.otp.channel", "console");
+    assertThat(find(new BootstrapStatus(prod, new ConfigCrypto(SettingsFixture.KEY), "/data/images").items(), "OTP_CHANNEL, SMS_CHANNEL").state())
+        .isEqualTo(State.UNSAFE);
+    var sms = goodInProd().withProperty("app.otp.sms-channel", "console");
+    assertThat(find(new BootstrapStatus(sms, new ConfigCrypto(SettingsFixture.KEY), "/data/images").items(), "OTP_CHANNEL, SMS_CHANNEL").state())
+        .isEqualTo(State.UNSAFE);
+    var dev = good().withProperty("app.otp.channel", "console");
+    dev.setActiveProfiles("dev");
+    var item = find(new BootstrapStatus(dev, new ConfigCrypto(SettingsFixture.KEY), "/data/images").items(), "OTP_CHANNEL, SMS_CHANNEL");
+    assertThat(item.state()).isEqualTo(State.OK);
+    assertThat(item.detail()).contains("dev server");
+    var email = goodInProd().withProperty("app.otp.channel", "email");
+    assertThat(find(new BootstrapStatus(email, new ConfigCrypto(SettingsFixture.KEY), "/data/images").items(), "OTP_CHANNEL, SMS_CHANNEL").detail())
+        .startsWith("off");
+  }
 }

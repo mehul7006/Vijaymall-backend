@@ -82,15 +82,16 @@ class CatalogSearchCacheTest {
   }
 
   @Test
-  void outOfStockListsAndHotListsAreSeparateKeys() {
+  void outOfStockListsAreSeparateKeysAndHotListsAreNeverRemembered() {
     when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(product()), 0, 20, 1));
     when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(product()), 0, 20, 1));
     service.list(null, null, false, true, 0, 20);
+    service.list(null, null, false, true, 0, 20); // remembered
     service.list(null, null, false, false, 0, 20);
     service.list(null, null, true, false, 0, 20);
-    service.list(null, null, true, false, 0, 20); // the same hot list in the same 10 seconds is remembered
+    service.list(null, null, true, false, 0, 20); // "on hot sale now" depends on the clock: asked every time
     verify(products, times(1)).search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt());
-    verify(products, times(2)).searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt());
+    verify(products, times(3)).searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt());
   }
 
   @Test

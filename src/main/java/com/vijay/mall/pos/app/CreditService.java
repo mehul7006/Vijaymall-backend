@@ -11,12 +11,16 @@ import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.domain.CreditMath;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.pos.domain.Money;
-import com.vijay.mall.pos.domain.PaymentRules;
+import com.vijay.mall.pos.domain.ReceiptData;
+import com.vijay.mall.pos.domain.ReceiptText;
+import com.vijay.mall.pos.domain.RepaymentData;
+import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.infra.CreditRepository;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +39,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class CreditService {
   /** Longest note accepted on a repayment or adjustment, in characters. */
   static final int MAX_NOTE = 200;
+
+  private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
 
   /** limitPaise 0 means credit is not enabled for this customer. */
   public record AccountView(UUID customerId, String name, String mobile, long balancePaise, long limitPaise,
@@ -170,8 +176,7 @@ public class CreditService {
   private UUID doCollect(UUID cashierId, String idemKey, String rawMobile, List<Pay> payments, String note) {
     User u = users.findByMobile(mobileOf(rawMobile)).orElseThrow(() -> ApiException.notFound("Customer"));
     if (payments == null || payments.isEmpty()) throw ApiException.validation("payments", "enter how the customer is paying");
-    List<CreditRepository.Line> parts = payments.stream().map(p -> {
-      if (!PaymentRules.MODES.contains(p.mode())) throw ApiException.validation("payments", "payment mode must be CASH, UPI or CARD");
+    List<CreditRepository.Line> parts = PayModes.normalize(payments, false, "payments").stream().map(p -> {
       if (p.amountPaise() <= 0) throw ApiException.validation("payments", "payment amounts must be positive");
       return new CreditRepository.Line(p.mode(), p.amountPaise(), p.reference());
     }).toList();
@@ -191,6 +196,32 @@ public class CreditService {
     changed(u.id(), "PAYMENT", -total);
     audit.log(cashierId, "CREDIT_PAYMENT", "credit_payment", id, receiptNo + " amount=" + total);
     return id;
+  }
+
+  /**
+   * The receipt of a repayment as plain text for a thermal printer: customer, amount, payment modes, the balance before and
+   * after and the receipt number.
+   *
+   * @param id the repayment
+   * @param width characters per line, 32 or 48
+   * @throws ApiException 404 for an unknown repayment, 400 for a bad width
+   */
+  public String receiptText(UUID id, int width) {
+    CreditRepository.Repayment r = credit.findRepayment(id).orElseThrow(() -> ApiException.notFound("Payment"));
+    User customer = users.findById(r.userId()).orElseThrow(() -> ApiException.notFound("Customer"));
+    String cashier = users.findById(r.cashierId()).map(u -> u.name() != null && !u.name().isBlank() ? u.name() : u.email()).orElse("");
+    // the ledger line holds the balance right after this payment; without it fall back to today's balance
+    long after = credit.entryOfPayment(id).map(CreditRepository.Entry::balanceAfterPaise).orElseGet(() -> credit.find(r.userId()).balancePaise());
+    ShopSetting s = shop.get();
+    List<ReceiptData.PaymentLine> lines = r.lines().stream().map(l -> new ReceiptData.PaymentLine(l.mode(), l.amountPaise())).toList();
+    RepaymentData data = new RepaymentData(s.shopName(), s.address(), s.phone(), s.gstin(), r.receiptNo(),
+        STAMP.format(r.at().atZone(InvoiceNumbers.SHOP_ZONE)), cashier, customer.mobile(), r.amountPaise(), lines,
+        after + r.amountPaise(), after, r.note(), s.receiptFooter());
+    try {
+      return ReceiptText.renderRepayment(data, width);
+    } catch (IllegalArgumentException e) {
+      throw ApiException.validation("width", e.getMessage());
+    }
   }
 
   private Receipt receipt(CreditRepository.Repayment r) {

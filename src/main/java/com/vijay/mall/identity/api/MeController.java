@@ -47,10 +47,19 @@ public class MeController {
    * @param area locality or area
    * @param pincode postal code
    * @param isDefault true to make this the default address; null or false leaves the default unchanged
+   * @param phone optional contact phone for the delivery: blank, or exactly 10 digits
    */
   public record AddressInput(@NotBlank String label, @NotBlank String line1, @NotBlank String area,
-                             @NotBlank String pincode, Boolean isDefault) {
-    Address toAddress() { return new Address(null, label, line1, area, pincode, Boolean.TRUE.equals(isDefault)); }
+                             @NotBlank String pincode, Boolean isDefault,
+                             @Pattern(regexp = "^$|\\d{10}", message = "must be 10 digits") String phone) {
+    /** An address input without a phone. */
+    public AddressInput(String label, String line1, String area, String pincode, Boolean isDefault) {
+      this(label, line1, area, pincode, isDefault, null);
+    }
+
+    Address toAddress() {
+      return new Address(null, label, line1, area, pincode, Boolean.TRUE.equals(isDefault), phone == null || phone.isBlank() ? null : phone);
+    }
   }
   /**
    * Request body to register a phone for push notifications.
@@ -109,6 +118,14 @@ public class MeController {
   @DeleteMapping("/addresses/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete(@PathVariable UUID id) { profile.deleteAddress(CurrentUser.id(), id); }
+
+  /**
+   * Forgets this phone's push token when the customer signs out (204). Safe to repeat: an unknown token, or one registered to
+   * someone else, also answers 204 and changes nothing. The token goes in the path, URL-encoded.
+   */
+  @DeleteMapping("/devices/{fcmToken}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void unregisterDevice(@PathVariable String fcmToken) { profile.unregisterDevice(CurrentUser.id(), fcmToken); }
 
   /** Registers or re-assigns the device's push token to the signed-in customer so notifications reach this phone. */
   @PostMapping("/devices")
