@@ -172,6 +172,12 @@ public final class Settings {
       + "nearest rupee and prints the round-off on the receipt. Your GSTIN, state code, invoice prefix and receipt footer are in Shop settings.",
       "app.gst.round-off", "NONE", "NONE", "NEAREST_RUPEE");
 
+  /** How GST on supplier purchases is treated when the admin does not choose at purchase time. */
+  public static final Def PURCHASE_GST_MODE = choice("purchase.gstMode", Group.GST, "GST on purchases",
+      "REGULAR: GST paid to suppliers is claimed back as input credit and left out of the product cost. COMPOSITION: no credit, all GST is part of "
+          + "the cost. NONE: purchases carry no GST. The admin can still pick another mode on each purchase.",
+      "app.purchase.gst-mode", "REGULAR", "REGULAR", "COMPOSITION", "NONE");
+
   // ---- security
   /** Name of the proxy header that carries the real client address, used by the rate limiter. */
   public static final Def CLIENT_IP_HEADER = text("security.clientIpHeader", Group.SECURITY, "Real client address header",
@@ -199,7 +205,7 @@ public final class Settings {
       FCM_SERVICE_ACCOUNT, SMS_CHANNEL, SMS_HTTP_URL, SMS_HTTP_METHOD, SMS_HTTP_HEADERS, SMS_HTTP_BODY, SMS_SENDER_ID, SMS_DLT_TEMPLATE_ID,
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,
-      GST_ROUND_OFF, CLIENT_IP_HEADER, CACHE_ENABLED);
+      GST_ROUND_OFF, PURCHASE_GST_MODE, CLIENT_IP_HEADER, CACHE_ENABLED);
 
   /** Every setting: the fixed ones followed by one cache lifetime per cache. */
   public static final List<Def> ALL = Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();

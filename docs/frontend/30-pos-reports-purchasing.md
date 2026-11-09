@@ -731,6 +731,8 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 
 ## Purchasing and stock
 
+> **Superseded by `70-purchases.md`.** Purchases now carry GST, discounts, freight, payments, suppliers and returns; the old body below still works, but `totalCostPaise` now includes GST and the answer has many more fields. Read file 70 for the current contract.
+
 ### POST /api/v1/admin/purchases
 - **Who**: admin only. **Purpose**: receive a supplier delivery (GRN): records the document and adds stock to each product (reason `PURCHASE`, linked to the document) in one transaction.
 - **Request**: header `Idempotency-Key` **mandatory**; replay returns the first document (201) and adds no stock. Body:
