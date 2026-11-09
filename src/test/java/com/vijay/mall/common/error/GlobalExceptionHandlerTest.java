@@ -131,4 +131,21 @@ class GlobalExceptionHandlerTest {
     Assertions.assertThat(handler.integrity(dup).getStatusCode().value()).isEqualTo(409);
     Assertions.assertThat(handler.integrity(other).getStatusCode().value()).isEqualTo(500);
   }
+
+  @Test
+  void aFullConnectionPoolAnswersBusyNotBroken() {
+    var timeout = new java.sql.SQLTransientConnectionException("mall-db - Connection is not available, request timed out after 5000ms");
+    var wrapped = new org.springframework.transaction.CannotCreateTransactionException("Could not open JPA EntityManager", timeout);
+    var r = handler.other(wrapped);
+    Assertions.assertThat(r.getStatusCode().value()).isEqualTo(503);
+    Assertions.assertThat(r.getHeaders().getFirst("Retry-After")).isEqualTo("2");
+    Assertions.assertThat(r.getBody().code()).isEqualTo("SERVICE_BUSY");
+    Assertions.assertThat(r.getBody().details()).containsEntry("retryAfterSeconds", 2);
+    var viaJdbc = handler.other(new RuntimeException("x", new org.springframework.jdbc.CannotGetJdbcConnectionException("pool", timeout)));
+    Assertions.assertThat(viaJdbc.getStatusCode().value()).isEqualTo(503);
+    var sse = new org.springframework.mock.web.MockHttpServletResponse();
+    sse.setContentType("text/event-stream");
+    Assertions.assertThat(handler.other(wrapped, sse)).as("nothing can be written to a stream").isNull();
+    Assertions.assertThat(handler.other(new RuntimeException("plain")).getStatusCode().value()).isEqualTo(500);
+  }
 }
