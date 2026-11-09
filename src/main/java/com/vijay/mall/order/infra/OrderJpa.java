@@ -17,8 +17,6 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
 
   Page<OrderEntity> findByUserId(UUID userId, Pageable page);
 
-  Page<OrderEntity> findByStatus(String status, Pageable page);
-
   /** One page of orders without counting them (the total comes from a cached count, see OrderRepository.adminList). */
   List<OrderEntity> findPageBy(Pageable page);
 
@@ -26,33 +24,22 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
   List<OrderEntity> findPageByStatus(String status, Pageable page);
 
 
-  /** Same as {@link #searchByNumber} but one page without the count. */
-  @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern")
-  List<OrderEntity> listByNumber(@Param("pattern") String pattern, Pageable page);
+  /**
+   * One page, without a count, of the orders whose number contains the text or that belong to a customer whose name, e-mail or
+   * mobile number contains it. Every matching customer counts (no cap): the customer match is a sub-select the database evaluates
+   * with its trigram indexes. The two halves are a UNION so each uses its own index; one OR would scan every order.
+   * {@code pattern} is lower-case with {@code %} around it.
+   */
+  @Query("select o from OrderEntity o where o.id in (select a.id from OrderEntity a where lower(a.orderNo) like :pattern "
+      + "union select b.id from OrderEntity b where b.userId in (select u.id from UserEntity u where lower(coalesce(u.name, '')) like :pattern "
+      + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))")
+  List<OrderEntity> listByNumberOrCustomer(@Param("pattern") String pattern, Pageable page);
 
-
-  /** Same as {@link #searchByStatusAndNumber} but one page without the count. */
-  @Query("select o from OrderEntity o where o.status = :status and lower(o.orderNo) like :pattern")
-  List<OrderEntity> listByStatusAndNumber(@Param("status") String status, @Param("pattern") String pattern, Pageable page);
-
-
-  /** pattern is already lower-case with % around it. Written out (not derived) so it uses the lower(order_no) search index. */
-  @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern")
-  Page<OrderEntity> searchByNumber(@Param("pattern") String pattern, Pageable page);
-
-  @Query("select o from OrderEntity o where o.status = :status and lower(o.orderNo) like :pattern")
-  Page<OrderEntity> searchByStatusAndNumber(@Param("status") String status, @Param("pattern") String pattern, Pageable page);
-
-  /** A page of orders whose number matches the pattern or that belong to one of the users (no count). */
-  @Query("select o from OrderEntity o where lower(o.orderNo) like :pattern or o.userId in :users")
-  List<OrderEntity> listByNumberOrUsers(@Param("pattern") String pattern, @Param("users") Collection<UUID> users, Pageable page);
-
-
-  /** Same as {@link #listByNumberOrUsers} for one status. */
-  @Query("select o from OrderEntity o where o.status = :status and (lower(o.orderNo) like :pattern or o.userId in :users)")
-  List<OrderEntity> listByStatusAndNumberOrUsers(@Param("status") String status, @Param("pattern") String pattern,
-                                                 @Param("users") Collection<UUID> users, Pageable page);
-
+  /** Same as {@link #listByNumberOrCustomer} for one status. */
+  @Query("select o from OrderEntity o where o.status = :status and o.id in (select a.id from OrderEntity a where lower(a.orderNo) like :pattern "
+      + "union select b.id from OrderEntity b where b.userId in (select u.id from UserEntity u where lower(coalesce(u.name, '')) like :pattern "
+      + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))")
+  List<OrderEntity> listByStatusAndNumberOrCustomer(@Param("status") String status, @Param("pattern") String pattern, Pageable page);
 
   long countByUserIdAndStatusNot(UUID userId, String status);
 

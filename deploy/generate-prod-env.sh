@@ -32,6 +32,7 @@ if [ -e "$OUT" ] && [ "${FORCE:-}" != "1" ]; then echo "$OUT already exists. Run
 
 ask ADMIN_EMAIL    "E-mail of the shop owner (becomes the first admin on first login)" ""
 [ -n "$ADMIN_EMAIL" ] || { echo "ADMIN_EMAIL is required"; exit 1; }
+if [ "$MODE" = dev ]; then POOL_MIN_IDLE=2; else POOL_MIN_IDLE=10; fi
 if [ "$MODE" = dev ]; then CORS_DEFAULT="http://localhost:*,http://127.0.0.1:*"; else CORS_DEFAULT=""; fi
 ask CORS_ORIGINS   "Web app origin(s), comma separated (for a dev server the default allows any local port)" "$CORS_DEFAULT"
 
@@ -100,11 +101,13 @@ LOG_LEVEL_ROOT=INFO
 LOG_LEVEL_APP=INFO
 # 7, 15 or 30 days of rotated log files (changeable on the admin config screen)
 LOG_RETENTION_DAYS=30
+# Tells docker compose which file to hand to the api container (docker-compose.prod.yml reads ENV_FILE; this file is also its --env-file)
+ENV_FILE=${OUT}
 # Pools (defaults are fine for one backend + one PostgreSQL with max_connections=100; instances x DB_POOL_MAX must stay under it)
 DB_POOL_MAX=20
-DB_POOL_MIN_IDLE=5
+DB_POOL_MIN_IDLE=${POOL_MIN_IDLE}
 DB_POOL_WAIT_MS=5000
-SCHEDULER_THREADS=4
+# (background jobs need no setting: each scheduled run gets its own virtual thread)
 TOMCAT_MAX_CONNECTIONS=8192
 TOMCAT_ACCEPT_COUNT=200
 
@@ -115,6 +118,6 @@ RAZORPAY_WEBHOOK_SECRET=
 ENV
 case "$OUT" in /*) FULL="$OUT" ;; *) FULL="$(pwd)/$OUT" ;; esac
 echo "Wrote $FULL (permissions 600), profile ${PROFILE}."
-echo "Next:  docker compose -f docker-compose.prod.yml --env-file $OUT up -d --build"
+echo "Next:  docker compose -f docker-compose.prod.yml --env-file $OUT up -d --build   (run it from the deploy folder; $OUT names the file the api container reads)"
 [ "$MODE" = dev ] && echo "Dev server: request a login code in the app, then read it with: docker compose -f docker-compose.prod.yml logs api | grep \"OTP for\""
 exit 0

@@ -38,7 +38,7 @@ public class SegmentService {
    * Who a segment would reach.
    * @param recipients matching customers, at most 10,000
    * @param totalExact false when more than 10,000 match (recipients then shows the cap)
-   * @param withDevices how many of those have a push device
+   * @param withDevices how many of those {@code recipients} have a push device (never more than recipients)
    * @param sample up to five matching customers
    */
   public record PreviewResult(long recipients, boolean totalExact, long withDevices, List<SampleView> sample) {}
@@ -133,13 +133,17 @@ public class SegmentService {
     return new Resolved(null, SegmentValidator.validate(inline));
   }
 
-  /** Shows who the conditions would reach: exact count up to 10,000, how many have a push device, and up to five examples. */
+  /**
+   * Shows who the conditions would reach: exact count up to 10,000, how many of those have a push device, and up to five examples.
+   *
+   * @throws ApiException 429 {@code PREVIEW_BUSY} when other previews are running, 422 {@code SEGMENT_TOO_HEAVY} when counting takes too long
+   */
   public PreviewResult preview(UUID segmentId, Segment inline) {
     Segment s = resolve(segmentId, inline).segment();
     Instant now = clock.instant();
-    SegmentQueryRepository.Count c = query.count(s, now, PREVIEW_CAP);
-    List<SampleView> sample = query.sample(s, now, SAMPLE).stream().map(x -> new SampleView(x.id(), x.name(), mask(x.mobile()))).toList();
-    return new PreviewResult(c.recipients(), c.exact(), c.withDevices(), sample);
+    SegmentQueryRepository.Preview p = query.preview(s, now, PREVIEW_CAP, SAMPLE);
+    List<SampleView> sample = p.sample().stream().map(x -> new SampleView(x.id(), x.name(), mask(x.mobile()))).toList();
+    return new PreviewResult(p.count().recipients(), p.count().exact(), p.count().withDevices(), sample);
   }
 
   /** The catalog of condition types the segment builder renders from. */

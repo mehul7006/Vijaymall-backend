@@ -63,11 +63,12 @@ public class ProductRepository {
 
   /**
    * Counter search: active products (counter-only ones included) whose name matches {@code q} or whose id is in
-   * {@code exactIds}, those exact matches first. With {@code since} only products updated at or after it, or whose id is in
-   * {@code alsoChanged}, are kept.
+   * {@code exactIds}, those exact matches first, in name order with the id as the tie-breaker (so paging is stable). With
+   * {@code since} only products updated at or after it are kept, plus those whose counter attributes were saved, or a barcode
+   * added, at or after it. That is decided inside the query by sub-selects: no list of changed ids is ever sent to the database,
+   * however many products changed.
    */
-  public Page<ProductData> searchForCounter(String q, Collection<UUID> exactIds, Instant since, Collection<UUID> alsoChanged,
-                                            int page, int size) {
+  public Page<ProductData> searchForCounter(String q, Collection<UUID> exactIds, Instant since, int page, int size) {
     Map<String, Object> params = new HashMap<>();
     StringBuilder where = conditions(null, null, false, true, true, false, null, params);
     boolean hasText = q != null && !q.isBlank();
@@ -84,13 +85,11 @@ public class ProductRepository {
     if (since != null) {
       where.append("and (p.updatedAt >= :since");
       params.put("since", since);
-      if (!alsoChanged.isEmpty()) {
-        where.append(" or p.id in :changed");
-        params.put("changed", alsoChanged);
-      }
+      where.append(" or p.id in (select pp.productId from ProductPosEntity pp where pp.updatedAt >= :since)");
+      where.append(" or p.id in (select b.productId from ProductBarcodeEntity b where b.createdAt >= :since)");
       where.append(") ");
     }
-    String order = hasExact ? "order by case when p.id in :exact then 0 else 1 end, p.nameEn" : "order by p.nameEn";
+    String order = hasExact ? "order by case when p.id in :exact then 0 else 1 end, p.nameEn, p.id" : "order by p.nameEn, p.id";
     TypedQuery<ProductEntity> list = em.createQuery("select p from ProductEntity p " + where + order, ProductEntity.class);
     params.forEach(list::setParameter);
     list.setFirstResult((int) ((long) page * size)).setMaxResults(size + 1); // one extra row tells whether another page follows

@@ -3,6 +3,7 @@ package com.vijay.mall.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -72,7 +73,7 @@ class BroadcastServiceTest {
   }
 
   private static BroadcastRepository.Row row(UUID id) {
-    return new BroadcastRepository.Row(id, "ALL", "Hello", "World", null, "QUEUED", 3, 0, 0, UUID.randomUUID(), NOW, null, null, List.of(), null, null);
+    return new BroadcastRepository.Row(id, "ALL", "Hello", "World", null, "QUEUED", 3, 0, 0, 0, true, UUID.randomUUID(), NOW, null, null, List.of(), null, null);
   }
 
   @Test
@@ -83,7 +84,7 @@ class BroadcastServiceTest {
     var view = service.enqueue(admin, simple(Audience.STAFF));
 
     assertThat(view.status()).isEqualTo("QUEUED");
-    verify(store).insert(any(), eq("STAFF"), eq("Hello"), eq("World"), eq(null), eq(3L), eq(null), eq(null), eq(null), eq(List.of()), eq(admin), eq(NOW));
+    verify(store).insert(any(), eq("STAFF"), eq("Hello"), eq("World"), eq(null), eq(3L), eq(true), eq(null), eq(null), eq(null), eq(List.of()), eq(admin), eq(NOW));
     verify(audit).log(eq(admin), eq("NOTIFICATION_BROADCAST"), eq("notification_broadcast"), any(), eq("audience=STAFF recipients=3 title=Hello"));
   }
 
@@ -91,14 +92,14 @@ class BroadcastServiceTest {
   void validationReportsEveryProblemAtOnce() {
     assertThat(fields(req(null, null, null, "  ", "x".repeat(501), "r".repeat(101)))).containsKeys("audience", "title", "body", "ref");
     assertThat(fields(req(Audience.ALL, null, null, "t".repeat(81), null, null))).containsKeys("title", "body");
-    verify(store, never()).insert(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any(), any(), any());
+    verify(store, never()).insert(any(), any(), any(), any(), any(), anyLong(), anyBoolean(), any(), any(), any(), any(), any(), any());
   }
 
   @Test
   void blankRefMeansNoRef() {
     storedAsAny();
     service.enqueue(admin, req(Audience.ALL, null, null, "t", "b", "   "));
-    verify(store).insert(any(), eq("ALL"), eq("t"), eq("b"), eq(null), anyLong(), any(), any(), any(), any(), any(), any());
+    verify(store).insert(any(), eq("ALL"), eq("t"), eq("b"), eq(null), anyLong(), anyBoolean(), any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -130,7 +131,7 @@ class BroadcastServiceTest {
 
     service.enqueue(admin, req(Audience.USERS, List.of(a), List.of(" 9876543210 "), "t", "b", null));
 
-    verify(store).insert(any(), eq("USERS"), any(), any(), any(), eq(1L), eq(List.of(a)), eq(null), eq(null), eq(List.of("0000000000")), eq(admin), eq(NOW));
+    verify(store).insert(any(), eq("USERS"), any(), any(), any(), eq(1L), eq(true), eq(List.of(a)), eq(null), eq(null), eq(List.of("0000000000")), eq(admin), eq(NOW));
   }
 
   @Test
@@ -144,7 +145,7 @@ class BroadcastServiceTest {
   }
 
   @Test
-  void aSegmentIsSnapshottedAndCountedExactly() {
+  void aSegmentIsSnapshottedAndItsRecipientCountIsMarkedExactWhenUnderTheCap() {
     storedAsAny();
     UUID segmentId = UUID.randomUUID();
     Segment snapshot = new Segment("ALL", List.of());
@@ -153,7 +154,7 @@ class BroadcastServiceTest {
 
     service.enqueue(admin, new BroadcastService.Request(Audience.SEGMENT, null, null, segmentId, null, "t", "b", null));
 
-    verify(store).insert(any(), eq("SEGMENT"), any(), any(), any(), eq(42L), eq(null), eq(segmentId), eq(snapshot), eq(List.of()), eq(admin), eq(NOW));
+    verify(store).insert(any(), eq("SEGMENT"), any(), any(), any(), eq(42L), eq(true), eq(null), eq(segmentId), eq(snapshot), eq(List.of()), eq(admin), eq(NOW));
   }
 
   @Test
@@ -168,6 +169,75 @@ class BroadcastServiceTest {
       assertThat(e.details()).containsKey("retryAfterSeconds");
     });
     service.enqueue(UUID.randomUUID(), simple(Audience.ALL));
+  }
+
+  @Test
+  void aBigSegmentIsOnlyEstimatedAndSaysSo() {
+    storedAsAny();
+    Segment snapshot = new Segment("ALL", List.of());
+    when(segments.resolve(null, snapshot)).thenReturn(new SegmentService.Resolved(null, snapshot));
+    when(query.count(eq(snapshot), eq(NOW), eq(BroadcastService.ESTIMATE_CAP))).thenReturn(new SegmentQueryRepository.Count(10_000, 4_000, false));
+
+    service.enqueue(admin, new BroadcastService.Request(Audience.SEGMENT, null, null, null, snapshot, "t", "b", null));
+
+    verify(store).insert(any(), eq("SEGMENT"), any(), any(), any(), eq(10_000L), eq(false), eq(null), eq(null), eq(snapshot), eq(List.of()), eq(admin), eq(NOW));
+    verify(audit).log(eq(admin), any(), any(), any(), eq("audience=SEGMENT recipients=10000+ (estimate) title=t"));
+  }
+
+  @Test
+  void nullIdsInAnExplicitListAreRefusedWithAFieldMessage() {
+    assertThat(fields(req(Audience.USERS, Arrays.asList(UUID.randomUUID(), null), null, "t", "b", null)))
+        .containsEntry("userIds", "must not contain empty values");
+    verify(profiles, never()).resolveRecipients(any(), any());
+  }
+
+  @Test
+  void aRequestThatFailsAfterValidationDoesNotUseUpTheHourlyQuota() {
+    storedAsAny();
+    service.setLimiter(new RateLimiter(clock));
+    when(profiles.resolveRecipients(any(), any())).thenReturn(new ProfileService.Recipients(List.of(), List.of("x")));
+    UUID unknownSegment = UUID.randomUUID();
+    when(segments.resolve(eq(unknownSegment), any())).thenThrow(ApiException.notFound("Segment"));
+    for (int i = 0; i < 5; i++) {
+      assertThatThrownBy(() -> service.enqueue(admin, req(Audience.USERS, List.of(UUID.randomUUID()), null, "t", "b", null))).isInstanceOf(ApiException.class);
+      assertThatThrownBy(() -> service.enqueue(admin, new BroadcastService.Request(Audience.SEGMENT, null, null, unknownSegment, null, "t", "b", null)))
+          .isInstanceOf(ApiException.class);
+      assertThatThrownBy(() -> service.enqueue(admin, req(null, null, null, "", "", null))).isInstanceOf(ApiException.class);
+    }
+    service.enqueue(admin, simple(Audience.ALL));
+    service.enqueue(admin, simple(Audience.ALL));
+    assertThatThrownBy(() -> service.enqueue(admin, simple(Audience.ALL))).isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("RATE_LIMITED"));
+  }
+
+  @Test
+  void theViewNeverShowsFewerRecipientsThanAlreadyDeliveredAndSaysWhetherPushIsConfigured() {
+    UUID id = UUID.randomUUID();
+    var estimate = new BroadcastRepository.Row(id, "SEGMENT", "t", "b", null, "SENDING", 10_000, 25_000, 12, 3, false, UUID.randomUUID(), NOW, NOW, null,
+        List.of(), null, null);
+    when(store.find(id)).thenReturn(Optional.of(estimate));
+    var unknownPush = service.get(id);
+    assertThat(unknownPush.recipients()).isEqualTo(25_000);
+    assertThat(unknownPush.recipientsExact()).isFalse();
+    assertThat(unknownPush.pushConfigured()).isFalse();
+    assertThat(unknownPush.pushFailedBatches()).isEqualTo(3);
+    var sender = mock(com.vijay.mall.notification.app.PushSender.class);
+    when(sender.isConfigured()).thenReturn(true);
+    service.setPush(sender);
+    assertThat(service.get(id).pushConfigured()).isTrue();
+    var exact = new BroadcastRepository.Row(id, "ALL", "t", "b", null, "DONE", 7, 7, 0, 0, true, UUID.randomUUID(), NOW, NOW, NOW, List.of(), null, null);
+    when(store.find(id)).thenReturn(Optional.of(exact));
+    assertThat(service.get(id).recipients()).isEqualTo(7);
+  }
+
+  @Test
+  void recordingAndAuditingRunInOneTransactionWhenOneIsAvailable() {
+    storedAsAny();
+    var tx = mock(org.springframework.transaction.support.TransactionOperations.class);
+    when(tx.execute(any())).thenAnswer(i -> ((org.springframework.transaction.support.TransactionCallback<?>) i.getArgument(0)).doInTransaction(null));
+    service.setTransactions(tx);
+    service.enqueue(admin, simple(Audience.ALL));
+    verify(tx).execute(any());
+    verify(store).insert(any(), eq("ALL"), any(), any(), any(), anyLong(), anyBoolean(), any(), any(), any(), any(), any(), any());
   }
 
   @Test

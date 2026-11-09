@@ -1127,7 +1127,7 @@ For a category coupon the minimum counts only what is spent in its categories. I
 
 ### POST /api/v1/cart/coupons
 - **Who**: any signed-in customer. **Purpose**: the coupon picker on the cart screen: every coupon on offer tried on this exact cart, so you can show "Save Rs 50" or "Add Rs 669 more" for each.
-- **Request**: the same body as `POST /cart/quote` (`items`, optional `coinMode`, `percent`, `fulfilment`; any `couponCode` is ignored). Empty `items` is `400`.
+- **Request**: the same body as `POST /cart/quote` (`items`, optional `coinMode`, `percent`, `fulfilment`; any `couponCode` is ignored). Empty `items` is `400`. At most **20** coupons are tried per call (each one is a full quote); the ones open to every category and with the lowest minimum order are chosen first. A coupon that fails for any business reason is listed as not applicable with its message and never hides the others.
 - **Response**: `200`, a list, usable coupons first (biggest saving first), then the others:
 
 ```json
@@ -1189,7 +1189,7 @@ Each line in `items[]` of `GET /orders/{id}`, `POST /orders` (placed order), `PO
 | `status` | one of the status names; blank = all; not validated (unknown value = empty page). Combines with `q` (both must hold) |
 | `page`, `size` | `page` 0-based; `size` default 20, clamped to 1..50 |
 
-- Customer matching uses at most the **200 newest matching customers**: with a very short text (one or two letters) on a big customer base, orders of older matching customers may not appear. Ask the user to type more of the name, mobile or e-mail.
+- Customer matching covers **every** customer whose name, mobile or e-mail contains the text (it is decided in the database, no cap), together with orders whose number contains it. A very short text simply matches more; the total is still bounded (`totalExact`, `hasMore`) like every list.
 - No error for "no match": `items` is `[]`. Only the common errors.
 - **Row fields**: all `AdminSummary` fields as before plus `cancelledBy`, `cancelCode` (see above), and the paging fields below:
 

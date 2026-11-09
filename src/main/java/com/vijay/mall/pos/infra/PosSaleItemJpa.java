@@ -14,8 +14,6 @@ import org.springframework.data.repository.query.Param;
 
 /** Spring Data access to {@code pos_sale_item}, the lines of counter bills. */
 interface PosSaleItemJpa extends JpaRepository<PosSaleItemEntity, UUID> {
-  List<PosSaleItemEntity> findBySaleId(UUID saleId);
-
   List<PosSaleItemEntity> findBySaleIdIn(Collection<UUID> saleIds);
 
   /** Atomic: counts returned units only while they do not exceed what was sold. */

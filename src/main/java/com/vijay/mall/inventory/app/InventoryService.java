@@ -60,8 +60,14 @@ public class InventoryService {
    */
   private void alertIfLow(Map<UUID, Integer> taken) {
     if (outbox == null || taken.isEmpty()) return;
+    alertIfLow(taken, stocks(taken.keySet()));
+  }
+
+  /** Same, from stock rows the caller has already read (after the change), so a sale reads them once. */
+  private void alertIfLow(Map<UUID, Integer> taken, Map<UUID, InventoryRepository.Stock> after) {
+    if (outbox == null || taken.isEmpty()) return;
     List<Map<String, Object>> crossed = new ArrayList<>();
-    stocks(taken.keySet()).forEach((id, s) -> {
+    after.forEach((id, s) -> {
       int before = s.qty() + taken.get(id);
       boolean empty = s.qty() <= 0 && before > 0;
       boolean low = s.qty() <= s.low() && before > s.low();
@@ -92,13 +98,26 @@ public class InventoryService {
    * @param reason why stock moved
    */
   private void changed(Map<UUID, Integer> deltas, String reason) {
+    changed(deltas, reason, events == null ? Map.of() : stocks(deltas.keySet()));
+  }
+
+  /**
+   * Same, from the stock rows after the change that the caller already read: ONE query for all the products of a sale, whatever
+   * the number of lines.
+   */
+  private void changed(Map<UUID, Integer> deltas, String reason, Map<UUID, InventoryRepository.Stock> after) {
     changed(List.copyOf(deltas.keySet()), reason);
     if (events == null) return;
     boolean availabilityChanged = deltas.entrySet().stream().anyMatch(e -> {
-      int now = repo.quantity(e.getKey());
+      int now = after.get(e.getKey()).qty();
       return (now - e.getValue() > 0) != (now > 0);
     });
     if (availabilityChanged) events.publishEvent(new CatalogChanged(CatalogChanged.CATALOG, clock.instant()));
+  }
+
+  /** The stock rows after a change, read only when someone will use them (live events or low-stock alerts). */
+  private Map<UUID, InventoryRepository.Stock> stocksAfter(Map<UUID, Integer> deltas) {
+    return events == null && outbox == null || deltas.isEmpty() ? Map.of() : stocks(deltas.keySet());
   }
 
   private static Map<UUID, Integer> deltasOf(List<Item> items, int sign) {
@@ -130,10 +149,12 @@ public class InventoryService {
       log.info("Out of stock order={} items={}", orderId, failures);
       throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
     }
-    changed(deltasOf(items, -1), reason);
+    Map<UUID, Integer> deltas = deltasOf(items, -1);
+    Map<UUID, InventoryRepository.Stock> after = stocksAfter(deltas);
+    changed(deltas, reason, after);
     Map<UUID, Integer> taken = new LinkedHashMap<>();
     items.forEach(it -> taken.merge(it.productId(), it.qty(), Integer::sum));
-    alertIfLow(taken);
+    alertIfLow(taken, after);
   }
 
   /**
@@ -166,8 +187,9 @@ public class InventoryService {
     if (!taken.isEmpty()) {
       Map<UUID, Integer> deltas = new LinkedHashMap<>();
       taken.forEach((id, n) -> deltas.put(id, -n));
-      changed(deltas, reason);
-      alertIfLow(taken);
+      Map<UUID, InventoryRepository.Stock> after = stocksAfter(deltas);
+      changed(deltas, reason, after);
+      alertIfLow(taken, after);
     }
     return shortfalls;
   }

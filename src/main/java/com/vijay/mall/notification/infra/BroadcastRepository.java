@@ -31,9 +31,11 @@ public class BroadcastRepository {
    * @param body message text
    * @param ref optional free text for the app (for example a screen to open), may be null
    * @param status {@code QUEUED}, {@code SENDING}, {@code DONE} or {@code FAILED}
-   * @param recipients people it was addressed to when it was created
+   * @param recipients people it was addressed to when it was created; for a big segment only an estimate (see recipientsExact) until it finishes
    * @param delivered inbox rows written so far
-   * @param pushed devices a push was handed to so far
+   * @param pushed devices a push was handed to so far (only counted when a push provider is configured)
+   * @param pushFailedBatches batches in which at least one push call failed (their inbox rows were still written)
+   * @param recipientsExact false while recipients is only an estimate; when the broadcast ends it is replaced by the number really delivered
    * @param createdBy the admin who sent it
    * @param createdAt when it was created
    * @param startedAt when sending began, null while queued
@@ -43,8 +45,8 @@ public class BroadcastRepository {
    * @param segment the snapshot of the conditions used, null unless the audience is {@code SEGMENT}
    */
   public record Row(UUID id, String audience, String title, String body, String ref, String status, long recipients, long delivered,
-                    long pushed, UUID createdBy, Instant createdAt, Instant startedAt, Instant finishedAt, List<String> skipped,
-                    UUID segmentId, Segment segment) {}
+                    long pushed, int pushFailedBatches, boolean recipientsExact, UUID createdBy, Instant createdAt, Instant startedAt,
+                    Instant finishedAt, List<String> skipped, UUID segmentId, Segment segment) {}
 
   /**
    * A broadcast picked up for sending.
@@ -55,13 +57,21 @@ public class BroadcastRepository {
    * @param ref optional free text, may be null
    * @param recipientIds the sorted list for an explicit audience, null otherwise
    * @param lastUserId the last user already handled, null at the start
+   * @param pushedThrough the last user whose batch was also pushed, null at the start; behind lastUserId when a worker stopped between the two
+   * @param attempt which claim this is; every write of the worker is fenced on it, so a worker that was replaced can no longer write
    * @param segment the conditions for a segment audience, null otherwise
    * @param startedAt when sending first began; segment conditions are measured from this moment on every attempt
    */
   public record Job(UUID id, String audience, String title, String body, String ref, List<UUID> recipientIds, UUID lastUserId,
-                    Segment segment, Instant startedAt) {}
+                    UUID pushedThrough, int attempt, Segment segment, Instant startedAt) {}
 
-  private static final String COLUMNS = "id, audience, title, body, ref, status, recipients, delivered, pushed, created_by, created_at, "
+  /** Thrown when a worker's claim was taken over by another (or the broadcast ended): the worker must stop without writing anything. */
+  public static class Superseded extends RuntimeException {
+    /** Creates the signal for this broadcast. */
+    public Superseded(UUID id) { super("broadcast " + id + " is now owned by another worker"); }
+  }
+
+  private static final String COLUMNS = "id, audience, title, body, ref, status, recipients, delivered, pushed, push_failed_batches, recipients_exact, created_by, created_at, "
       + "started_at, finished_at, skipped::text as skipped, segment_id, segment_rules::text as segment_rules";
 
   private final JdbcClient jdbc;
@@ -80,7 +90,8 @@ public class BroadcastRepository {
   private Row row(ResultSet rs, int i) throws SQLException {
     String rules = rs.getString("segment_rules");
     return new Row(rs.getObject("id", UUID.class), rs.getString("audience"), rs.getString("title"), rs.getString("body"), rs.getString("ref"),
-        rs.getString("status"), rs.getLong("recipients"), rs.getLong("delivered"), rs.getLong("pushed"), rs.getObject("created_by", UUID.class),
+        rs.getString("status"), rs.getLong("recipients"), rs.getLong("delivered"), rs.getLong("pushed"), rs.getInt("push_failed_batches"), rs.getBoolean("recipients_exact"),
+        rs.getObject("created_by", UUID.class),
         instant(rs, "created_at"), instant(rs, "started_at"), instant(rs, "finished_at"),
         List.of(json.readValue(rs.getString("skipped"), String[].class)), rs.getObject("segment_id", UUID.class),
         rules == null ? null : json.readValue(rules, Segment.class));
@@ -88,12 +99,12 @@ public class BroadcastRepository {
 
   /** Saves a new queued broadcast. {@code recipientIds}, {@code segmentId} and {@code segment} may be null. */
   @Transactional
-  public void insert(UUID id, String audience, String title, String body, String ref, long recipients, List<UUID> recipientIds,
-                     UUID segmentId, Segment segment, List<String> skipped, UUID by, Instant now) {
-    jdbc.sql("insert into notification_broadcast (id, audience, title, body, ref, status, recipients, recipient_ids, segment_id, segment_rules, "
-        + "skipped, created_by, created_at, updated_at) values (:id, :audience, :title, :body, :ref, 'QUEUED', :n, cast(:ids as jsonb), "
+  public void insert(UUID id, String audience, String title, String body, String ref, long recipients, boolean recipientsExact,
+                     List<UUID> recipientIds, UUID segmentId, Segment segment, List<String> skipped, UUID by, Instant now) {
+    jdbc.sql("insert into notification_broadcast (id, audience, title, body, ref, status, recipients, recipients_exact, recipient_ids, segment_id, "
+        + "segment_rules, skipped, created_by, created_at, updated_at) values (:id, :audience, :title, :body, :ref, 'QUEUED', :n, :exact, cast(:ids as jsonb), "
         + ":sid, cast(:rules as jsonb), cast(:skipped as jsonb), :by, :now, :now)")
-        .param("id", id).param("audience", audience).param("title", title).param("body", body).param("ref", ref).param("n", recipients)
+        .param("id", id).param("audience", audience).param("title", title).param("body", body).param("ref", ref).param("n", recipients).param("exact", recipientsExact)
         .param("ids", recipientIds == null ? null : json.writeValueAsString(recipientIds)).param("sid", segmentId)
         .param("rules", segment == null ? null : json.writeValueAsString(segment)).param("skipped", json.writeValueAsString(skipped))
         .param("by", by).param("now", Timestamp.from(now)).update();
@@ -113,9 +124,10 @@ public class BroadcastRepository {
   }
 
   /**
-   * Picks the oldest broadcast that is queued, or was left sending by a process that stopped (no progress since {@code staleBefore}),
+   * Picks the oldest broadcast that is queued, or was left sending by a process that stopped (no sign of life since {@code staleBefore}),
    * and marks it sending. Broadcasts that already used {@code maxAttempts} attempts are marked failed instead. Safe with several
-   * instances: a broadcast another instance is claiming is skipped.
+   * instances: a broadcast another instance is claiming is skipped. The returned job carries this claim's {@code attempt} number, which
+   * fences every later write (see {@link #heartbeat}).
    */
   @Transactional
   public Optional<Job> claim(Instant now, Instant staleBefore, int maxAttempts) {
@@ -128,26 +140,47 @@ public class BroadcastRepository {
         + "order by created_at limit 1 for update skip locked").param("stale", stale).query(UUID.class).optional().map(id -> {
           jdbc.sql("update notification_broadcast set status = 'SENDING', attempts = attempts + 1, started_at = coalesce(started_at, :now), "
               + "updated_at = :now where id = :id").param("now", at).param("id", id).update();
-          return jdbc.sql("select id, audience, title, body, ref, recipient_ids::text as ids, last_user_id, segment_rules::text as rules, started_at "
-              + "from notification_broadcast where id = :id").param("id", id).query((rs, i) -> {
+          return jdbc.sql("select id, audience, title, body, ref, recipient_ids::text as ids, last_user_id, pushed_through, attempts, "
+              + "segment_rules::text as rules, started_at from notification_broadcast where id = :id").param("id", id).query((rs, i) -> {
                 String ids = rs.getString("ids");
                 String rules = rs.getString("rules");
                 return new Job(id, rs.getString("audience"), rs.getString("title"), rs.getString("body"), rs.getString("ref"),
                     ids == null ? null : List.of(json.readValue(ids, UUID[].class)), rs.getObject("last_user_id", UUID.class),
+                    rs.getObject("pushed_through", UUID.class), rs.getInt("attempts"),
                     rules == null ? null : json.readValue(rules, Segment.class), instant(rs, "started_at"));
               }).single();
         });
   }
 
   /**
-   * Writes one batch of inbox rows (one per user, skipping blocked users and users who already have this broadcast) and moves the
-   * progress marker, in one transaction.
+   * Shows the claim is alive (moves {@code updated_at}); another instance only takes a broadcast over when this stays still for a long
+   * time. Every write below is conditioned on the claim's attempt number, so a worker that was replaced finds out here.
    *
-   * @return the ids of the users who got a new inbox row now (the ones to push to)
+   * @throws Superseded when the broadcast is no longer being sent under this attempt
    */
   @Transactional
-  public List<UUID> deliverBatch(UUID broadcastId, UUID lastUserId, List<UUID> userIds, String title, String body, String ref, Instant now) {
+  public void heartbeat(UUID id, int attempt, Instant now) {
+    fence(id, attempt, now);
+  }
+
+  private void fence(UUID id, int attempt, Instant now) {
+    int rows = jdbc.sql("update notification_broadcast set updated_at = :now where id = :id and status = 'SENDING' and attempts = :attempt")
+        .param("now", Timestamp.from(now)).param("id", id).param("attempt", attempt).update();
+    if (rows == 0) throw new Superseded(id);
+  }
+
+  /**
+   * Writes one batch of inbox rows (one per user, skipping blocked users and users who already have this broadcast) and moves the
+   * progress marker, in one transaction. The fence is taken first: a superseded worker writes nothing.
+   *
+   * @return the ids of the users who got a new inbox row now (the ones to push to)
+   * @throws Superseded when the broadcast is no longer being sent under this attempt
+   */
+  @Transactional
+  public List<UUID> deliverBatch(UUID broadcastId, int attempt, UUID lastUserId, List<UUID> userIds, String title, String body, String ref,
+                                 Instant now) {
     Timestamp at = Timestamp.from(now);
+    fence(broadcastId, attempt, now);
     List<UUID> fresh = jdbc.sql("insert into notification (id, user_id, title, body, kind, ref, created_at, broadcast_id) "
         + "select gen_random_uuid(), u.id, :title, :body, :kind, :ref, :now, :b from users u where u.id in (:ids) and u.status = 'ACTIVE' "
         + "on conflict (broadcast_id, user_id) where broadcast_id is not null do nothing returning user_id")
@@ -158,17 +191,38 @@ public class BroadcastRepository {
     return fresh;
   }
 
-  /** Adds to the count of devices a push was handed to. */
-  @Transactional
-  public void addPushed(UUID id, int devices, Instant now) {
-    jdbc.sql("update notification_broadcast set pushed = pushed + :n, updated_at = :now where id = :id")
-        .param("n", devices).param("now", Timestamp.from(now)).param("id", id).update();
+  /** The people whose inbox row for this broadcast sits after {@code after} (exclusive, null = from the start) up to {@code upTo} (inclusive): one batch. */
+  public List<UUID> inboxUsersBetween(UUID broadcastId, UUID after, UUID upTo) {
+    return jdbc.sql("select user_id from notification where broadcast_id = :b and user_id > :after and user_id <= :upTo order by user_id")
+        .param("b", broadcastId).param("after", after == null ? new UUID(0, 0) : after).param("upTo", upTo).query(UUID.class).list();
   }
 
-  /** Marks the broadcast done. */
+  /**
+   * Records that the batch ending at {@code through} was pushed: adds the devices a push was handed to and, when a push call failed,
+   * counts the batch as failed.
+   *
+   * @throws Superseded when the broadcast is no longer being sent under this attempt
+   */
   @Transactional
-  public void finish(UUID id, Instant now) {
-    jdbc.sql("update notification_broadcast set status = 'DONE', finished_at = :now, updated_at = :now where id = :id")
-        .param("now", Timestamp.from(now)).param("id", id).update();
+  public void markPushed(UUID id, int attempt, UUID through, int devices, boolean failed, Instant now) {
+    int rows = jdbc.sql("update notification_broadcast set pushed_through = :through, pushed = pushed + :n, "
+        + "push_failed_batches = push_failed_batches + :f, updated_at = :now where id = :id and status = 'SENDING' and attempts = :attempt")
+        .param("through", through).param("n", devices).param("f", failed ? 1 : 0).param("now", Timestamp.from(now)).param("id", id)
+        .param("attempt", attempt).update();
+    if (rows == 0) throw new Superseded(id);
+  }
+
+  /**
+   * Marks the broadcast done. When the recipient count was only an estimate it becomes the number really delivered.
+   *
+   * @throws Superseded when the broadcast is no longer being sent under this attempt
+   */
+  @Transactional
+  public void finish(UUID id, int attempt, Instant now) {
+    int rows = jdbc.sql("update notification_broadcast set status = 'DONE', finished_at = :now, updated_at = :now, "
+        + "recipients = case when recipients_exact then recipients else delivered end, recipients_exact = true "
+        + "where id = :id and status = 'SENDING' and attempts = :attempt")
+        .param("now", Timestamp.from(now)).param("id", id).param("attempt", attempt).update();
+    if (rows == 0) throw new Superseded(id);
   }
 }

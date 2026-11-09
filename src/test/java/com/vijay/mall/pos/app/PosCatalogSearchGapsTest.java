@@ -65,12 +65,12 @@ class PosCatalogSearchGapsTest {
     when(catalog.posSearch("ri", 0, 20)).thenReturn(page(product(rice, "Basmati Rice", "kg", "1 kg")));
     var r = service.search("ri", 0, 20);
     assertThat(r.items()).hasSize(1);
-    verify(catalog, never()).posSearch(any(), any(), any(), any(), anyInt(), anyInt());
+    verify(catalog, never()).posSearch(any(), any(), any(), anyInt(), anyInt());
   }
 
   @Test void aBarcodeTypedInTheSearchBoxFindsItsProductFirst() {
     when(repo.productByBarcode("8901234567890")).thenReturn(Optional.of(rice));
-    when(catalog.posSearch(eq(" 8901234567890 "), eq(Set.of(rice)), isNull(), eq(Set.of()), eq(0), eq(20)))
+    when(catalog.posSearch(eq(" 8901234567890 "), eq(Set.of(rice)), isNull(), eq(0), eq(20)))
         .thenReturn(page(product(rice, "Basmati Rice", "kg", "1 kg")));
     var r = service.search(" 8901234567890 ", 0, 20);
     assertThat(r.items().get(0).productId()).isEqualTo(rice);
@@ -80,14 +80,14 @@ class PosCatalogSearchGapsTest {
   @Test void anItemCodeIsMatchedWithoutLeadingZeros() {
     when(repo.productByBarcode("000101")).thenReturn(Optional.empty());
     when(repo.findByPlu("101")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.WEIGHT, "101", 5, "")));
-    when(catalog.posSearch(eq("000101"), eq(Set.of(dal)), isNull(), eq(Set.of()), eq(0), eq(20))).thenReturn(page(product(dal, "Toor Dal", "kg", "")));
+    when(catalog.posSearch(eq("000101"), eq(Set.of(dal)), isNull(), eq(0), eq(20))).thenReturn(page(product(dal, "Toor Dal", "kg", "")));
     assertThat(service.search("000101", 0, 20).items().get(0).productId()).isEqualTo(dal);
   }
 
   @Test void barcodeAndItemCodeOfTwoProductsBothComeBeforeNameMatches() {
     when(repo.productByBarcode("1234")).thenReturn(Optional.of(rice));
     when(repo.findByPlu("1234")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.UNIT, "1234", 5, "")));
-    when(catalog.posSearch(eq("1234"), eq(Set.of(rice, dal)), isNull(), any(), eq(0), eq(20))).thenReturn(page(product(rice, "A", "pc", ""), product(dal, "B", "pc", "")));
+    when(catalog.posSearch(eq("1234"), eq(Set.of(rice, dal)), isNull(), eq(0), eq(20))).thenReturn(page(product(rice, "A", "pc", ""), product(dal, "B", "pc", "")));
     assertThat(service.search("1234", 0, 20).total()).isEqualTo(2);
   }
 
@@ -101,8 +101,7 @@ class PosCatalogSearchGapsTest {
 
   @Test void updatedSinceAsksForProductsChangedInTheCounterTablesToo() {
     Instant since = Instant.parse("2026-10-01T00:00:00Z");
-    when(repo.changedSince(since)).thenReturn(Set.of(dal));
-    when(catalog.posSearch(isNull(), eq(Set.of()), eq(since), eq(Set.of(dal)), eq(0), eq(20))).thenReturn(page(product(dal, "Toor Dal", "kg", "")));
+    when(catalog.posSearch(isNull(), eq(Set.of()), eq(since), eq(0), eq(20))).thenReturn(page(product(dal, "Toor Dal", "kg", "")));
     var r = service.search(null, 0, 20, since);
     assertThat(r.items()).extracting(p -> p.productId()).containsExactly(dal);
   }
@@ -110,8 +109,7 @@ class PosCatalogSearchGapsTest {
   @Test void updatedSinceCombinesWithAnExactMatch() {
     Instant since = Instant.parse("2026-10-01T00:00:00Z");
     when(repo.productByBarcode("8901")).thenReturn(Optional.of(rice));
-    when(repo.changedSince(since)).thenReturn(Set.of());
-    when(catalog.posSearch(eq("8901"), eq(Set.of(rice)), eq(since), eq(Set.of()), eq(0), eq(20))).thenReturn(page(product(rice, "Rice", "kg", "")));
+    when(catalog.posSearch(eq("8901"), eq(Set.of(rice)), eq(since), eq(0), eq(20))).thenReturn(page(product(rice, "Rice", "kg", "")));
     assertThat(service.search("8901", 0, 20, since).items()).hasSize(1);
   }
 

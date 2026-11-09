@@ -158,11 +158,13 @@ public class ProfileService {
 
   /**
    * Resolves an explicit list of ids and 10-digit mobile numbers to accounts that can receive an announcement (customers and staff
-   * that are active). A mobile number can belong to more than one account; all of them are included.
+   * that are active). A mobile number can belong to more than one account; all of them are included. Null ids and null or blank numbers are ignored.
    */
   public Recipients resolveRecipients(Collection<UUID> userIds, Collection<String> mobiles) {
     Set<UUID> wanted = new LinkedHashSet<>(userIds);
+    wanted.remove(null);
     Set<String> numbers = new LinkedHashSet<>(mobiles);
+    numbers.removeIf(m -> m == null || m.isBlank());
     Set<UUID> eligible = wanted.isEmpty() ? Set.of() : new HashSet<>(users.eligibleIds(wanted, LOGIN_ROLES));
     Map<String, List<UUID>> byMobile = numbers.isEmpty() ? Map.of() : users.eligibleIdsByMobile(numbers, LOGIN_ROLES);
     Set<UUID> found = new HashSet<>();

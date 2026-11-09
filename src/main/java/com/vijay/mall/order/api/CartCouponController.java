@@ -24,7 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/cart")
 public class CartCouponController {
-  private static final String INVALID = "COUPON_INVALID";
+  /** Coupons tried per call: every one is a full quote, so the picker shows at most this many (the likeliest to apply come first). */
+  static final int MAX_TRIED = 20;
 
   /**
    * One coupon tried on the cart.
@@ -61,7 +62,9 @@ public class CartCouponController {
   /**
    * Tries every coupon on offer on the posted cart (the same body as the quote; any {@code couponCode} in it is ignored).
    * Usable coupons come first, the biggest saving first; the others follow with the reason and, for a minimum order, how much
-   * more to add.
+   * more to add. At most {@value #MAX_TRIED} coupons are tried (each is a full quote): those open to every category and with the
+   * lowest minimum order are chosen first. A coupon that fails for any business reason is listed as not applicable with the plain
+   * message; it never hides the others.
    *
    * @param body the cart
    * @return the coupons on offer, each with what it would save or why it cannot be used
@@ -69,7 +72,9 @@ public class CartCouponController {
   @PostMapping("/coupons")
   public List<CouponOption> options(@Valid @RequestBody QuoteBody body) {
     QuoteRequest base = body.toRequest();
-    return promotions.listOffered().stream().map(c -> tryCoupon(c, base))
+    return promotions.listOffered().stream()
+        .sorted(Comparator.comparing((PublicCoupon c) -> !c.categoryIds().isEmpty()).thenComparingLong(PublicCoupon::minOrderPaise))
+        .limit(MAX_TRIED).map(c -> tryCoupon(c, base))
         .sorted(Comparator.comparing(CouponOption::applicable).reversed().thenComparing(Comparator.comparingLong(CouponOption::discountPaise).reversed()))
         .toList();
   }
@@ -80,7 +85,6 @@ public class CartCouponController {
       long saved = quotes.quote(CurrentUser.id(), withCoupon).couponDiscountPaise();
       return new CouponOption(c.code(), c.kind(), c.value(), c.minOrderPaise(), c.maxDiscountPaise(), true, saved, null, null, 0, c.worksWithCoins());
     } catch (ApiException e) {
-      if (!INVALID.equals(e.code())) throw e;
       Map<String, Object> d = e.details();
       Object reason = d.get("reason");
       Object shortfall = d.get("shortfallPaise");

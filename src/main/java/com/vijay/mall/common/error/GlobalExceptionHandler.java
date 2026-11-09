@@ -175,11 +175,11 @@ public class GlobalExceptionHandler {
   ResponseEntity<ErrorBody> other(Exception e, HttpServletResponse response) {
     String type = response == null ? null : response.getContentType();
     boolean cannotAnswer = response != null && (response.isCommitted() || (type != null && type.startsWith("text/event-stream")));
-    if (waitedForDatabaseConnection(e)) {
+    if (DatabaseBusy.causes(e)) {
       log.warn("Database connection pool exhausted: {}", e.getMessage());
       if (cannotAnswer) return null;
-      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, "2")
-          .body(new ErrorBody("SERVICE_BUSY", "The shop is very busy right now. Please try again in a moment.", trace(), Map.of("retryAfterSeconds", 2)));
+      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, String.valueOf(DatabaseBusy.RETRY_AFTER_SECONDS))
+          .body(DatabaseBusy.body(trace()));
     }
     log.error("Unhandled error", e);
     if (cannotAnswer) return null;
@@ -188,14 +188,4 @@ public class GlobalExceptionHandler {
 
   /** Overload kept for callers that have no response at hand. */
   ResponseEntity<ErrorBody> other(Exception e) { return other(e, null); }
-
-  /** True when the request failed only because no database connection became free in time (the pool is full): a busy signal, not a bug. */
-  private static boolean waitedForDatabaseConnection(Throwable e) {
-    for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
-      if (t instanceof java.sql.SQLTransientConnectionException
-          || t instanceof org.springframework.jdbc.CannotGetJdbcConnectionException
-          || t instanceof org.springframework.transaction.CannotCreateTransactionException) return true;
-    }
-    return false;
-  }
 }

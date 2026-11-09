@@ -1,7 +1,6 @@
 package com.vijay.mall.pos.infra;
 
 import jakarta.persistence.LockModeType;
-import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -15,10 +14,6 @@ import org.springframework.data.repository.query.Param;
 /** Spring Data access to {@code product_barcode}, where each barcode belongs to one product. */
 interface PosBarcodeJpa extends JpaRepository<ProductBarcodeEntity, String> {
   List<ProductBarcodeEntity> findByProductIdOrderByCode(UUID productId);
-
-  /** Products that got a barcode at or after the instant (barcodes are rewritten as a whole, so this is when they last changed). */
-  @Query("select distinct b.productId from ProductBarcodeEntity b where b.createdAt >= :since")
-  List<UUID> changedSince(@Param("since") Instant since);
 
   /** Deletes all barcodes of a product, used before the new list is saved. */
   @Modifying(clearAutomatically = true, flushAutomatically = true)

@@ -30,13 +30,7 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
   @Query("select u from UserEntity u where u.role = 'ADMIN' and u.status = 'ACTIVE' and u.approvalPinHash is not null")
   List<UserEntity> adminsWithPin();
 
-  @Query("select u from UserEntity u where u.role = 'CUSTOMER' and coalesce(u.email, '') not like 'deleted-%@deleted.invalid' "
-      + "and (:q = '' or lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat or coalesce(u.mobile, '') like :pat) "
-      + "order by u.createdAt desc")
-  Page<UserEntity> searchCustomers(@Param("q") String q, @Param("pat") String pattern,
-                                                                    Pageable page);
-
-  /** The same customers as {@link #searchCustomers} as one list page without a count (the page asks for one extra row). */
+  /** Customers (not staff, not deleted accounts) matching the text, newest first, as one list page without a count (the page asks for one extra row). */
   @Query("select u from UserEntity u where u.role = 'CUSTOMER' and coalesce(u.email, '') not like 'deleted-%@deleted.invalid' "
       + "and (:q = '' or lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat or coalesce(u.mobile, '') like :pat) "
       + "order by u.createdAt desc")
@@ -47,11 +41,6 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
       + "and (:q = '' or lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat or coalesce(u.mobile, '') like :pat) "
       + "limit :limit) c", nativeQuery = true)
   long countCustomersUpTo(@Param("q") String q, @Param("pat") String pattern, @Param("limit") int limit);
-
-  /** Ids of users whose name, e-mail or mobile contains the (lower-case, %-wrapped) pattern; newest accounts first. */
-  @Query("select u.id from UserEntity u where lower(coalesce(u.name, '')) like :pat or lower(coalesce(u.email, '')) like :pat "
-      + "or coalesce(u.mobile, '') like :pat order by u.createdAt desc")
-  List<UUID> idsMatching(@Param("pat") String pattern, Pageable page);
 
   @Query("select u.id from UserEntity u where u.role = 'ADMIN' and u.status = 'ACTIVE'")
   List<UUID> activeAdminIds();

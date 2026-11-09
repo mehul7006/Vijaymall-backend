@@ -33,9 +33,9 @@ class CatalogServicePosGapsTest {
     UUID id = UUID.randomUUID();
     Instant since = Instant.parse("2026-10-01T00:00:00Z");
     Page<ProductData> page = new Page<>(List.of(), 0, 20, 0);
-    when(products.searchForCounter("q", Set.of(id), since, Set.of(), 0, 20)).thenReturn(page);
-    assertThat(service.posSearch("q", Set.of(id), since, Set.of(), -3, 20)).isSameAs(page);
-    verify(products).searchForCounter("q", Set.of(id), since, Set.of(), 0, 20);
+    when(products.searchForCounter("q", Set.of(id), since, 0, 20)).thenReturn(page);
+    assertThat(service.posSearch("q", Set.of(id), since, -3, 20)).isSameAs(page);
+    verify(products).searchForCounter("q", Set.of(id), since, 0, 20);
   }
 
   @Test void variantNamesComeFromTheVariantInfo() {

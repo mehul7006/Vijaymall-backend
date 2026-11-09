@@ -1470,3 +1470,6 @@ The body is still a free JSON object read key by key (so "key absent = keep" and
 
 ### Swagger schema names are now unique
 Several response/request records used to share a simple name (`View`, `Row`, `Report`, `ReviewBody`, ...), so Swagger merged them into one wrong schema. Each now has its own name. The ones you are most likely to look for: the customer order view `OrderViews.View` is the schema **`OrderView`**; the product review body `{rating, comment}` is **`ProductReviewBody`**; the defective-stock review body `{decision, note}` is **`DefectiveReviewBody`**; the offline-exception review `{note}` is **`OfflineExceptionReviewBody`**; the counter-controls report is **`CounterControlsReport`** (rows `CounterControlsRow`) and the credit report **`CreditReport`**; POS and cart quote bodies are **`PosQuoteBody`** and **`CartQuoteBody`**; the two return bodies are **`PosReturnBody`** and **`OrderReturnBody`**. The JSON on the wire did not change; only generated code and docs names do. A unit test fails the build if two API models ever share a schema name again.
+
+### Plain dates in range-end fields
+- A plain date (for example `2026-12-31`) sent for a range-**end** instant field such as `hotEnd` means the **start** of that day in India time, so to say "through the end of that day" send a full timestamp (`2026-12-31T23:59:59+05:30`).

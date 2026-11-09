@@ -613,6 +613,14 @@ class CatalogServiceTest {
   }
 
   @Test
+  void aNewRatingAnnouncesACatalogChangeSoRememberedListsAreEmptied() {
+    var live = org.mockito.Mockito.mock(com.vijay.mall.common.live.LiveEvents.class);
+    service.setLive(live);
+    service.updateRating(pid, 4.5, 12);
+    verify(live).catalog();
+  }
+
+  @Test
   void stockMovementsShowProductNameAndPackLabel() {
     UUID gone = UUID.randomUUID();
     var moves = List.of(

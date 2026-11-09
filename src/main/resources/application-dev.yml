@@ -7,10 +7,6 @@ spring:
       connection-timeout: ${DB_POOL_WAIT_MS:10000}
       # Leaks show up while developing: logs the stack of code holding a connection longer than 20 s.
       leak-detection-threshold: ${DB_POOL_LEAK_MS:20000}
-  task:
-    scheduling:
-      pool:
-        size: ${SCHEDULER_THREADS:2}
 server:
   tomcat:
     max-connections: ${TOMCAT_MAX_CONNECTIONS:1024}

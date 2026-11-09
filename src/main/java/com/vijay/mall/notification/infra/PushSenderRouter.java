@@ -23,7 +23,10 @@ public class PushSenderRouter implements PushSender {
   }
 
   @Override
+  public boolean isConfigured() { return settings.isSet(Settings.FCM_SERVICE_ACCOUNT); }
+
+  @Override
   public void send(List<String> deviceTokens, String title, String body) {
-    (settings.isSet(Settings.FCM_SERVICE_ACCOUNT) ? fcm : logging).send(deviceTokens, title, body);
+    (isConfigured() ? fcm : logging).send(deviceTokens, title, body);
   }
 }

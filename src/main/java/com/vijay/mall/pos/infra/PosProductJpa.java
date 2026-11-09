@@ -22,10 +22,6 @@ interface PosProductJpa extends JpaRepository<ProductPosEntity, UUID> {
   @Query("select max(p.updatedAt) from ProductPosEntity p")
   Instant lastChange();
 
-  /** Products whose counter attributes were saved at or after the instant. */
-  @Query("select p.productId from ProductPosEntity p where p.updatedAt >= :since")
-  List<UUID> changedSince(@Param("since") Instant since);
-
   @Query("select p from ProductPosEntity p where p.productId in :ids")
   List<ProductPosEntity> byIds(@Param("ids") Collection<UUID> ids);
 }

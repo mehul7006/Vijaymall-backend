@@ -47,11 +47,10 @@ spring:
     virtual:
       enabled: true
   task:
-    # @Scheduled jobs (outbox relay, flash lifecycle, cleanups). Spring's default is ONE thread, so a slow job would delay all others.
+    # @Scheduled jobs (outbox relay, flash lifecycle, cleanups). Virtual threads are on, so Spring builds a SimpleAsyncTaskScheduler: every task run
+    # gets its own virtual thread and there is no pool size to set. The shutdown settings below do apply (they become its termination timeout).
     scheduling:
       thread-name-prefix: mall-sched-
-      pool:
-        size: ${SCHEDULER_THREADS:4}
       shutdown:
         await-termination: true
         await-termination-period: 20s

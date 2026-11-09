@@ -42,6 +42,16 @@ class ProfileRecipientsTest {
   }
 
   @Test
+  void nullIdsAndBlankMobilesAreIgnoredNotDereferenced() {
+    UUID a = new UUID(0, 2);
+    when(users.eligibleIds(any(), any())).thenReturn(List.of(a));
+    var r = profiles.resolveRecipients(java.util.Arrays.asList(a, null), java.util.Arrays.asList(null, " "));
+    assertThat(r.ids()).containsExactly(a);
+    assertThat(r.skipped()).isEmpty();
+    verify(users).eligibleIds(Set.of(a), roles);
+  }
+
+  @Test
   void emptyInputsDoNotTouchTheDatabase() {
     var r = profiles.resolveRecipients(List.of(), List.of());
     assertThat(r.ids()).isEmpty();
