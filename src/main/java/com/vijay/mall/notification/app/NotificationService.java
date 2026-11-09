@@ -1,17 +1,23 @@
 package com.vijay.mall.notification.app;
 
+import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.outbox.OutboxMessage;
 import com.vijay.mall.identity.app.ProfileService;
+import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.notification.infra.NotificationRepository;
 import java.time.Clock;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -22,7 +28,7 @@ public class NotificationService {
   private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
   /** One page of the person's notifications, plus how many are still unread. */
-  public record Inbox(java.util.List<NotificationRepository.Row> items, int page, int size, long total, long unread) {}
+  public record Inbox(List<NotificationRepository.Row> items, int page, int size, long total, long unread) {}
 
   private final NotificationRepository repo;
   private final PushSender push;
@@ -30,12 +36,12 @@ public class NotificationService {
   private final JsonMapper json;
   private final Clock clock;
 
-  private com.vijay.mall.catalog.app.CatalogService catalog;
-  private com.vijay.mall.inventory.app.InventoryService inventory;
+  private CatalogService catalog;
+  private InventoryService inventory;
 
   /** Optional (plain unit tests run without them): product names and the stock list for stock alerts. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  public void setStockSources(com.vijay.mall.catalog.app.CatalogService catalog, com.vijay.mall.inventory.app.InventoryService inventory) {
+  @Autowired(required = false)
+  public void setStockSources(CatalogService catalog, InventoryService inventory) {
     this.catalog = catalog;
     this.inventory = inventory;
   }
@@ -135,14 +141,14 @@ public class NotificationService {
   /** "Rice: 0 left, Dal: 3 left, Oil: 2 left (+4 more)". */
   private static String stockLine(List<Map.Entry<String, Integer>> items) {
     String head = items.stream().limit(NAMES_SHOWN).map(e -> e.getKey() + ": " + e.getValue() + " left")
-        .collect(java.util.stream.Collectors.joining(", "));
+        .collect(Collectors.joining(", "));
     return items.size() > NAMES_SHOWN ? head + " (+" + (items.size() - NAMES_SHOWN) + " more)" : head;
   }
 
   /** Staff are told when products fall to their alert level or run out (one event per stock change). */
   private void lowStock(JsonNode items) {
     if (catalog == null) return;
-    Map<UUID, Integer> qty = new java.util.LinkedHashMap<>();
+    Map<UUID, Integer> qty = new LinkedHashMap<>();
     items.forEach(i -> qty.put(UUID.fromString(i.path("productId").asString()), i.path("qty").asInt()));
     Map<UUID, String> names = catalog.activeNames(qty.keySet());
     List<Map.Entry<String, Integer>> lines = qty.entrySet().stream().filter(e -> names.containsKey(e.getKey()))
@@ -155,7 +161,7 @@ public class NotificationService {
   }
 
   /** Every morning (shop time) staff get one list of everything still at or below its alert level. */
-  @org.springframework.scheduling.annotation.Scheduled(cron = "0 0 8 * * *", zone = "Asia/Kolkata")
+  @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Kolkata")
   public void lowStockDigest() {
     if (catalog == null || inventory == null) return;
     var low = inventory.lowStock(200);

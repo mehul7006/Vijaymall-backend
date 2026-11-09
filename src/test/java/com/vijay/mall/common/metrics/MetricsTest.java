@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vijay.mall.common.error.ApiException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class MetricsTest {
@@ -18,7 +19,7 @@ class MetricsTest {
 
   @Test
   void aRefusedCallIsTimedWithTheErrorCodeAndStillThrows() {
-    assertThatThrownBy(() -> Metrics.timed(registry, "mall.test", "d", () -> { throw ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of()); }))
+    assertThatThrownBy(() -> Metrics.timed(registry, "mall.test", "d", () -> { throw ApiException.conflict("OUT_OF_STOCK", "x", Map.of()); }))
         .isInstanceOf(ApiException.class);
     assertThat(registry.get("mall.test").tag("outcome", "OUT_OF_STOCK").timer().count()).isEqualTo(1);
   }

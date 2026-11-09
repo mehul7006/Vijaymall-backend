@@ -1,6 +1,7 @@
 package com.vijay.mall.order.infra;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -71,12 +73,12 @@ public class OrderRepository {
   private final OrderItemJpa items;
   private final OrderHistoryJpa history;
 
-  private final com.vijay.mall.common.ShopIdentity shop;
+  private final ShopIdentity shop;
 
   @PersistenceContext
   private EntityManager em;
 
-  OrderRepository(OrderJpa orders, OrderItemJpa items, OrderHistoryJpa history, com.vijay.mall.common.ShopIdentity shop) {
+  OrderRepository(OrderJpa orders, OrderItemJpa items, OrderHistoryJpa history, ShopIdentity shop) {
     this.orders = orders;
     this.items = items;
     this.history = history;
@@ -222,7 +224,7 @@ public class OrderRepository {
   /** How many orders are in each status right now. */
   public Map<String, Long> countByStatus() {
     return em.createQuery("select o.status, count(o) from OrderEntity o group by o.status", Object[].class).getResultList().stream()
-        .collect(java.util.stream.Collectors.toMap(r -> (String) r[0], r -> ((Number) r[1]).longValue()));
+        .collect(Collectors.toMap(r -> (String) r[0], r -> ((Number) r[1]).longValue()));
   }
 
   /** Orders that are still being handled (not delivered, picked up or cancelled). */
@@ -240,13 +242,13 @@ public class OrderRepository {
 
   public Map<UUID, String> numbers(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
-    return orders.numbers(ids).stream().collect(java.util.stream.Collectors.toMap(r -> (UUID) r[0], r -> (String) r[1]));
+    return orders.numbers(ids).stream().collect(Collectors.toMap(r -> (UUID) r[0], r -> (String) r[1]));
   }
 
   private Page<SummaryRow> summaries(org.springframework.data.domain.Page<OrderEntity> page, int pageNo, int size) {
     List<UUID> ids = page.getContent().stream().map(e -> e.id).toList();
     Map<UUID, Integer> counts = ids.isEmpty() ? Map.of() : items.countsFor(ids).stream()
-        .collect(java.util.stream.Collectors.toMap(r -> (UUID) r[0], r -> ((Number) r[1]).intValue()));
+        .collect(Collectors.toMap(r -> (UUID) r[0], r -> ((Number) r[1]).intValue()));
     List<SummaryRow> rows = page.getContent().stream()
         .map(e -> new SummaryRow(e.id, e.userId, e.orderNo, e.status, e.fulfilment, e.totalPaise,
             counts.getOrDefault(e.id, 0), e.placedAt, e.subtotalPaise, e.couponCode, e.couponDiscountPaise, e.coinsUsed,

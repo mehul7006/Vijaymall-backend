@@ -7,6 +7,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import jakarta.servlet.FilterChain;
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +42,7 @@ class WebFiltersTest {
 
   @Test
   void traceIdIsRemovedEvenWhenTheChainThrows() {
-    FilterChain boom = (rq, rs) -> { throw new java.io.IOException("x"); };
+    FilterChain boom = (rq, rs) -> { throw new IOException("x"); };
     try {
       new TraceIdFilter().doFilter(new MockHttpServletRequest("GET", "/a"), new MockHttpServletResponse(), boom);
     } catch (Exception ignored) {
@@ -88,7 +89,7 @@ class WebFiltersTest {
   void aThrowingChainStillProducesALogLine() {
     try {
       new RequestLogFilter().doFilter(new MockHttpServletRequest("GET", "/api/v1/x"), new MockHttpServletResponse(),
-          (rq, rs) -> { throw new java.io.IOException("x"); });
+          (rq, rs) -> { throw new IOException("x"); });
     } catch (Exception ignored) {
       // expected
     }

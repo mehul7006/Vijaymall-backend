@@ -11,6 +11,9 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 
 /** Refund bookkeeping of PaymentRepository: retry counting, the give-up point, error truncation, claiming. */
@@ -159,25 +162,25 @@ class PaymentRepositoryCoverageTest {
 
   @Test
   void insertRefundRemembersTheProviderPaymentOnlyWhenGiven() {
-    org.mockito.ArgumentCaptor<RefundEntity> saved = org.mockito.ArgumentCaptor.forClass(RefundEntity.class);
+    ArgumentCaptor<RefundEntity> saved = ArgumentCaptor.forClass(RefundEntity.class);
     UUID pay = UUID.randomUUID();
     repo.insertRefund(pay, 100, "PENDING", null, "cancel", T0);
     repo.insertRefund(pay, 200, "PENDING", null, "amount mismatch", "pay_x", T0);
-    org.mockito.Mockito.verify(refunds, org.mockito.Mockito.times(2)).save(saved.capture());
+    Mockito.verify(refunds, Mockito.times(2)).save(saved.capture());
     assertThat(saved.getAllValues()).extracting(r -> r.providerPaymentRef).containsExactly(null, "pay_x");
   }
 
   @Test
   void anomaliesAreSavedAndListedNewestFirst() {
-    org.mockito.ArgumentCaptor<PaymentAnomalyEntity> saved = org.mockito.ArgumentCaptor.forClass(PaymentAnomalyEntity.class);
+    ArgumentCaptor<PaymentAnomalyEntity> saved = ArgumentCaptor.forClass(PaymentAnomalyEntity.class);
     PaymentAnomalyJpa jpa = mock(PaymentAnomalyJpa.class);
     PaymentRepository r = new PaymentRepository(payments, mock(PaymentEventJpa.class), refunds, mock(PaymentSettingJpa.class), jpa);
     UUID pay = UUID.randomUUID();
     UUID order = UUID.randomUUID();
     r.insertAnomaly(pay, order, "MISMATCH", 5000, 4000, "pay_w", T0);
-    org.mockito.Mockito.verify(jpa).save(saved.capture());
+    Mockito.verify(jpa).save(saved.capture());
     PaymentAnomalyEntity e = saved.getValue();
-    when(jpa.findAllByOrderByCreatedAtDesc(any(Pageable.class))).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(e)));
+    when(jpa.findAllByOrderByCreatedAtDesc(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(e)));
     var page = r.anomalyPage(0, 20);
     assertThat(page.total()).isEqualTo(1);
     assertThat(page.items()).containsExactly(new PaymentRepository.AnomalyRow(e.id, pay, order, "MISMATCH", 5000, 4000, "pay_w", T0));

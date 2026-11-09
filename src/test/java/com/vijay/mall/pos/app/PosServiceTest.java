@@ -29,7 +29,9 @@ import com.vijay.mall.pos.app.PosViews.SaleInput;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
+import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.SoldBy;
+import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
 import com.vijay.mall.pos.infra.PosHoldRepository;
 import com.vijay.mall.pos.infra.PosSaleRepository;
@@ -37,6 +39,7 @@ import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.wallet.app.WalletService;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -46,6 +49,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -274,14 +278,14 @@ class PosServiceTest {
     SaleRecord winner = mock(SaleRecord.class);
     when(sales.findByIdem("race")).thenReturn(Optional.empty(), Optional.of(winner));
     when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
-    org.mockito.Mockito.doThrow(new DataIntegrityViolationException("dup")).when(sales).insert(any(), eq("race"));
+    Mockito.doThrow(new DataIntegrityViolationException("dup")).when(sales).insert(any(), eq("race"));
     var in = new SaleInput(cart(null, null, null, new Item(rice, 1)), List.of(new Pay("CASH", 5900, null)), null);
     assertThat(service.sale(cashier, "race", in)).isSameAs(winner);
   }
 
   @Test void sale_raceWithoutWinner_rethrows() {
     when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
-    org.mockito.Mockito.doThrow(new DataIntegrityViolationException("dup")).when(sales).insert(any(), eq("lost"));
+    Mockito.doThrow(new DataIntegrityViolationException("dup")).when(sales).insert(any(), eq("lost"));
     var in = new SaleInput(cart(null, null, null, new Item(rice, 1)), List.of(new Pay("CASH", 5900, null)), null);
     assertThatThrownBy(() -> service.sale(cashier, "lost", in)).isInstanceOf(DataIntegrityViolationException.class);
   }
@@ -303,16 +307,16 @@ class PosServiceTest {
     when(sales.between(any(), any())).thenReturn(List.of(s, s));
     assertThat(service.search(" ", " ", LocalDate.of(2026, 10, 27))).hasSize(2);
     assertThat(service.search(null, null, null)).hasSize(2); // today
-    ArgumentCaptor<java.time.Instant> from = ArgumentCaptor.forClass(java.time.Instant.class);
-    verify(sales, org.mockito.Mockito.times(2)).between(from.capture(), any());
-    assertThat(from.getAllValues().get(0)).isEqualTo(java.time.Instant.parse("2026-10-26T18:30:00Z")); // midnight IST
+    ArgumentCaptor<Instant> from = ArgumentCaptor.forClass(Instant.class);
+    verify(sales, Mockito.times(2)).between(from.capture(), any());
+    assertThat(from.getAllValues().get(0)).isEqualTo(Instant.parse("2026-10-26T18:30:00Z")); // midnight IST
   }
 
   @Test void upiLink_built_orRefused() {
     assertThat(service.upiLink(12345, "bill 1")).startsWith("upi://pay?pa=shop%40upi").contains("am=123.45");
     assertThatThrownBy(() -> service.upiLink(0, null)).isInstanceOf(ApiException.class);
-    when(shop.get()).thenReturn(new com.vijay.mall.pos.domain.PosRecords.ShopSetting("S", "", "", "", "24", "", "VSM", "", "2",
-        com.vijay.mall.pos.domain.WeighedMode.WEIGHT_GRAMS));
+    when(shop.get()).thenReturn(new PosRecords.ShopSetting("S", "", "", "", "24", "", "VSM", "", "2",
+        WeighedMode.WEIGHT_GRAMS));
     assertThatThrownBy(() -> service.upiLink(100, null)).hasMessageContaining("UPI");
   }
 
@@ -415,7 +419,7 @@ class PosServiceTest {
   @Test void sale_creditRefusedByTheAccount_failsTheBill() {
     UUID cust = creditCustomer("9000000007");
     when(quotes.quoteLines(eq(cust), anyList(), any(), any(), any())).thenReturn(quote(5900, null, 0, 0, 0, 0));
-    org.mockito.Mockito.doThrow(ApiException.unprocessable("CREDIT_LIMIT_EXCEEDED", "over", java.util.Map.of()))
+    Mockito.doThrow(ApiException.unprocessable("CREDIT_LIMIT_EXCEEDED", "over", Map.of()))
         .when(credit).chargeSale(any(), anyLong(), any(), anyString(), any(), any());
     var in = new SaleInput(cart("9000000007", null, null, new Item(rice, 1)), List.of(new Pay("CREDIT", 5900, null)), null);
     assertThatThrownBy(() -> service.sale(cashier, "c4", in)).isInstanceOfSatisfying(ApiException.class,

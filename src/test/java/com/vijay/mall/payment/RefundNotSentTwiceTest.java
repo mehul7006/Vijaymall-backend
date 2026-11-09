@@ -12,9 +12,12 @@ import static org.mockito.Mockito.when;
 import com.sun.net.httpserver.HttpServer;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.payment.app.PaymentGatewayRegistry;
 import com.vijay.mall.payment.app.PaymentService;
+import com.vijay.mall.payment.domain.PaymentEvent;
 import com.vijay.mall.payment.domain.PaymentGateway;
+import com.vijay.mall.payment.domain.PaymentSession;
 import com.vijay.mall.payment.infra.PaymentRepository;
 import com.vijay.mall.payment.infra.RazorpayGateway;
 import java.net.InetSocketAddress;
@@ -23,9 +26,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.IntFunction;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -82,10 +88,10 @@ class RefundNotSentTwiceTest {
     PaymentGateway plain = new PaymentGateway() {
       @Override public String provider() { return "plain"; }
       @Override public Created create(CreateRequest r) { return null; }
-      @Override public com.vijay.mall.payment.domain.PaymentSession session(String id, long amount) { return null; }
-      @Override public com.vijay.mall.payment.domain.PaymentEvent parseWebhook(String b, java.util.Map<String, String> h) { return null; }
+      @Override public PaymentSession session(String id, long amount) { return null; }
+      @Override public PaymentEvent parseWebhook(String b, Map<String, String> h) { return null; }
       @Override public String refund(String ref, long amount, String reason) { return "plain_" + ref; }
-      @Override public Optional<com.vijay.mall.payment.domain.PaymentEvent> fetchStatus(String id) { return Optional.empty(); }
+      @Override public Optional<PaymentEvent> fetchStatus(String id) { return Optional.empty(); }
     };
     assertThat(plain.refund("pay_1", 5, "r", "our-id")).isEqualTo("plain_pay_1");
     assertThat(plain.findRefund("pay_1", "our-id")).isEmpty();
@@ -138,15 +144,15 @@ class RefundNotSentTwiceTest {
       assertThat(g.findRefund("pay_1", "x")).isEmpty();
       assertThat(g.refund("pay_1", 1, "r", "x")).isNull();
       var noKeys = new RazorpayGateway(new AppProps(null, null, null, null, new AppProps.Payment("razorpay", 15, "", "", "w", base), null), JsonMapper.builder().build());
-      org.assertj.core.api.Assertions.assertThatThrownBy(() -> noKeys.findRefund("pay_1", "x")).isInstanceOf(com.vijay.mall.common.error.ApiException.class);
-      org.assertj.core.api.Assertions.assertThatThrownBy(() -> noKeys.refund("pay_1", 1, "r", "x")).isInstanceOf(com.vijay.mall.common.error.ApiException.class);
+      Assertions.assertThatThrownBy(() -> noKeys.findRefund("pay_1", "x")).isInstanceOf(ApiException.class);
+      Assertions.assertThatThrownBy(() -> noKeys.refund("pay_1", 1, "r", "x")).isInstanceOf(ApiException.class);
     } finally {
       server.stop(0);
     }
   }
 
   /** Starts a fake Razorpay whose refund list for pay_1 is served by {@code pages} (query "skip" picks the page). */
-  private HttpServer pagedServer(List<String> queries, java.util.function.IntFunction<String> pageBySkip) throws Exception {
+  private HttpServer pagedServer(List<String> queries, IntFunction<String> pageBySkip) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/", ex -> {
       queries.add(ex.getRequestURI().getRawQuery());

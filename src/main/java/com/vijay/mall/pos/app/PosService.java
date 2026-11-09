@@ -2,9 +2,13 @@ package com.vijay.mall.pos.app;
 
 import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.catalog.domain.ProductData;
+import com.vijay.mall.common.FlashPricing;
+import com.vijay.mall.common.ReferenceLookup;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.metrics.Metrics;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.inventory.app.InventoryService;
@@ -43,12 +47,15 @@ import com.vijay.mall.pos.infra.PosSaleRepository;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.wallet.app.WalletService;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -62,6 +69,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,7 +79,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Counter billing: price a basket, take payment, keep bills, hold baskets, print receipts. */
 @Service
-public class PosService implements com.vijay.mall.common.ReferenceLookup {
+public class PosService implements ReferenceLookup {
   private static final Logger log = LoggerFactory.getLogger(PosService.class);
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm");
   private static final int MAX_UNITS = 9_999;
@@ -134,7 +142,7 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
 
   /** Invoice numbers of counter bills and credit note numbers of returns, for screens that only hold the id. */
   @Override
-  public Map<UUID, String> numbers(java.util.Collection<UUID> ids) { return sales.documentNumbers(ids); }
+  public Map<UUID, String> numbers(Collection<UUID> ids) { return sales.documentNumbers(ids); }
 
   /**
    * The GST bill for a quote. The coupon discount goes only on the lines the coupon covers (the quote says which);
@@ -145,7 +153,7 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
   /** {@code manual} is the discount typed in at the till; like coins it is spread over what every line still costs. */
   private static BillCalculator.Bill bill(List<BillCalculator.Draft> drafts, Quote q, long manual) {
     long[] share = q.lines().stream().mapToLong(Quote.Line::couponDiscountPaise).toArray();
-    boolean split = share.length == drafts.size() && java.util.Arrays.stream(share).sum() == q.couponDiscountPaise();
+    boolean split = share.length == drafts.size() && Arrays.stream(share).sum() == q.couponDiscountPaise();
     return split ? BillCalculator.build(drafts, share, q.coinDiscountPaise() + manual)
         : BillCalculator.build(drafts, q.couponDiscountPaise() + q.coinDiscountPaise() + manual);
   }
@@ -155,7 +163,7 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
    * added (or taken off, when negative) to reach a whole rupee, half a rupee rounding up. Zero when rounding is off.
    */
   private long roundOff(long totalPaise) {
-    if (settings == null || !"NEAREST_RUPEE".equals(settings.get(com.vijay.mall.config.Settings.GST_ROUND_OFF))) return 0;
+    if (settings == null || !"NEAREST_RUPEE".equals(settings.get(Settings.GST_ROUND_OFF))) return 0;
     return Math.floorDiv(totalPaise + 50, 100) * 100 - totalPaise;
   }
 
@@ -190,11 +198,11 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
     return new Priced(lines, drafts);
   }
 
-  private com.vijay.mall.common.FlashPricing flash;
+  private FlashPricing flash;
 
   /** Optional (plain unit tests run without it): flash sale prices at the counter (items sold by the piece only; returns do not give units back). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setFlash(com.vijay.mall.common.FlashPricing flash) { this.flash = flash; }
+  @Autowired(required = false)
+  void setFlash(FlashPricing flash) { this.flash = flash; }
 
   /** Splits lines that a running flash sale covers: the units that fit go at the sale price, the rest at the normal price. */
   private Priced flashed(Priced p, UUID userId) {
@@ -205,7 +213,7 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
       PricedLine l = p.lines().get(i);
       BillCalculator.Draft d = p.drafts().get(i);
       var applied = d.soldBy() == SoldBy.UNIT
-          ? flash.apply(l.productId(), com.vijay.mall.common.FlashPricing.Channel.POS, l.unitPricePaise(), userId, l.qty()) : Optional.<com.vijay.mall.common.FlashPricing.Applied>empty();
+          ? flash.apply(l.productId(), FlashPricing.Channel.POS, l.unitPricePaise(), userId, l.qty()) : Optional.<FlashPricing.Applied>empty();
       if (applied.isEmpty()) {
         lines.add(l);
         drafts.add(d);
@@ -240,33 +248,33 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
   private boolean requireShift;
 
   /** Optional: when the shop switches app.pos.require-open-shift on, billing needs an open shift. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   void setShiftRule(ShiftService shifts,
-                    @org.springframework.beans.factory.annotation.Value("${app.pos.require-open-shift:false}") boolean require) {
+                    @Value("${app.pos.require-open-shift:false}") boolean require) {
     this.shifts = shifts;
     this.requireShift = require;
   }
 
   private ApprovalService approvals;
   private int cashierDiscountPercent;
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
 
   /** Optional (plain unit tests run without it): the admin can change the counter rules from the config screen. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
 
   private int cashierDiscountPercent() {
-    return settings != null ? settings.getInt(com.vijay.mall.config.Settings.POS_CASHIER_DISCOUNT_PERCENT) : cashierDiscountPercent;
+    return settings != null ? settings.getInt(Settings.POS_CASHIER_DISCOUNT_PERCENT) : cashierDiscountPercent;
   }
 
   private boolean requireShift() {
-    return settings != null ? settings.getBool(com.vijay.mall.config.Settings.POS_REQUIRE_OPEN_SHIFT) : requireShift;
+    return settings != null ? settings.getBool(Settings.POS_REQUIRE_OPEN_SHIFT) : requireShift;
   }
 
   /** Optional (plain unit tests run without it): who may approve a manual discount, and how much a cashier may give alone. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   void setDiscountRule(ApprovalService approvals,
-                       @org.springframework.beans.factory.annotation.Value("${app.pos.cashier-discount-percent:0}") int percent) {
+                       @Value("${app.pos.cashier-discount-percent:0}") int percent) {
     this.approvals = approvals;
     this.cashierDiscountPercent = percent;
   }
@@ -307,15 +315,15 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
 
   /** {@code admin} says whether the person ringing the bill is a manager, who needs no PIN for a manual discount. */
   public SaleRecord sale(UUID cashierId, boolean admin, String idemKey, SaleInput in) {
-    return com.vijay.mall.common.metrics.Metrics.timed(metrics, "mall.pos.sale", "Time to ring up a counter bill",
+    return Metrics.timed(metrics, "mall.pos.sale", "Time to ring up a counter bill",
         () -> saleOnce(cashierId, admin, idemKey, in));
   }
 
-  private io.micrometer.core.instrument.MeterRegistry metrics;
+  private MeterRegistry metrics;
 
   /** Optional (plain unit tests run without it): timers and counters for counter bills. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setMetrics(io.micrometer.core.instrument.MeterRegistry metrics) { this.metrics = metrics; }
+  @Autowired(required = false)
+  void setMetrics(MeterRegistry metrics) { this.metrics = metrics; }
 
   private SaleRecord saleOnce(UUID cashierId, boolean admin, String idemKey, SaleInput in) {
     if (idemKey == null || idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
@@ -379,11 +387,11 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
       wallet.credit(customerId, earned, saleId);
     }
     if (flash != null) {
-      List<com.vijay.mall.common.FlashPricing.Claim> claims = priced.lines().stream().filter(l -> l.flashSaleId() != null)
-          .map(l -> new com.vijay.mall.common.FlashPricing.Claim(l.flashSaleId(), l.productId(), l.qty(), l.unitPricePaise(), l.listUnitPricePaise())).toList();
+      List<FlashPricing.Claim> claims = priced.lines().stream().filter(l -> l.flashSaleId() != null)
+          .map(l -> new FlashPricing.Claim(l.flashSaleId(), l.productId(), l.qty(), l.unitPricePaise(), l.listUnitPricePaise())).toList();
       // an offline bill has already happened at the shelf: it is recorded even if the sale ran out meanwhile
-      if (in.offline()) flash.consumeLenient(com.vijay.mall.common.FlashPricing.Channel.POS, saleId, customerId, claims);
-      else flash.consume(com.vijay.mall.common.FlashPricing.Channel.POS, saleId, customerId, claims);
+      if (in.offline()) flash.consumeLenient(FlashPricing.Channel.POS, saleId, customerId, claims);
+      else flash.consume(FlashPricing.Channel.POS, saleId, customerId, claims);
     }
 
     ShopSetting shopInfo = shop.get();
@@ -405,8 +413,8 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
     if (onCredit > 0) credit.chargeSale(customerId, onCredit, saleId, invoiceNo, cashierId, now);
     audit.log(cashierId, "SALE", "pos_sale", saleId, invoiceNo + " total=" + payable);
     String type = PaymentRules.classify(payLines);
-    com.vijay.mall.common.metrics.Metrics.count(metrics, "mall.pos.sales", "Counter bills", "type", type, 1);
-    com.vijay.mall.common.metrics.Metrics.count(metrics, "mall.pos.sales.value.paise", "Value of counter bills, in paise", "type", type,
+    Metrics.count(metrics, "mall.pos.sales", "Counter bills", "type", type, 1);
+    Metrics.count(metrics, "mall.pos.sales.value.paise", "Value of counter bills, in paise", "type", type,
         payable);
     log.info("POS sale invoice={} cashier={} total={} lines={} payments={} onCredit={} coinsUsed={} coinsEarned={}", invoiceNo,
         cashierId, payable, items.size(), payments.size(), onCredit, q.coinsUsed(), earned);
@@ -577,7 +585,7 @@ public class PosService implements com.vijay.mall.common.ReferenceLookup {
 
   static Instant soldAt(Instant claimed, Instant now) {
     if (claimed == null) return now;
-    if (claimed.isAfter(now.plusSeconds(300)) || claimed.isBefore(now.minus(MAX_OFFLINE_DAYS, java.time.temporal.ChronoUnit.DAYS))) {
+    if (claimed.isAfter(now.plusSeconds(300)) || claimed.isBefore(now.minus(MAX_OFFLINE_DAYS, ChronoUnit.DAYS))) {
       throw ApiException.validation("soldAt", "must be within the last " + MAX_OFFLINE_DAYS + " days and not in the future");
     }
     return claimed;

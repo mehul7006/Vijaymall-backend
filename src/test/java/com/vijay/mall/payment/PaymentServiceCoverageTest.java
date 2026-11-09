@@ -24,6 +24,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionException;
@@ -94,7 +96,7 @@ class PaymentServiceCoverageTest {
     webhook("c2", "captured", 5000);
     webhook("f2", "failed", 0);
     webhook("i1", "something-else", 0);
-    verify(repo, org.mockito.Mockito.times(3)).recordEvent(eq("fake"), any(), any(), any(), eq(NOW));
+    verify(repo, Mockito.times(3)).recordEvent(eq("fake"), any(), any(), any(), eq(NOW));
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
     verify(events, never()).publishEvent(any(Object.class));
   }
@@ -111,7 +113,7 @@ class PaymentServiceCoverageTest {
     assertThat(queued).isTrue();
     verify(repo).insertRefund(eq(paymentId), eq(7500L), eq("PENDING"), eq(null), eq("order cancelled"), eq(NOW));
     verify(repo).setStatus(paymentId, "REFUNDED", null, null, NOW);
-    verify(repo, never()).pendingRefunds(org.mockito.ArgumentMatchers.anyInt());
+    verify(repo, never()).pendingRefunds(ArgumentMatchers.anyInt());
   }
 
   @Test
@@ -130,6 +132,6 @@ class PaymentServiceCoverageTest {
     assertThat(service.refund(orderId, "x")).isFalse();
     when(repo.latestForOrder(orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     assertThat(service.refund(orderId, "x")).isFalse();
-    verify(repo, never()).insertRefund(any(), org.mockito.ArgumentMatchers.anyLong(), any(), any(), any(), any());
+    verify(repo, never()).insertRefund(any(), ArgumentMatchers.anyLong(), any(), any(), any(), any());
   }
 }

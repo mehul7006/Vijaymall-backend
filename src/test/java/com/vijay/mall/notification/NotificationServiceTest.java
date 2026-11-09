@@ -9,16 +9,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.outbox.OutboxMessage;
 import com.vijay.mall.identity.app.ProfileService;
+import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.inventory.infra.InventoryRepository;
 import com.vijay.mall.notification.app.NotificationService;
 import com.vijay.mall.notification.app.PushSender;
 import com.vijay.mall.notification.infra.NotificationRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -88,8 +95,8 @@ class NotificationServiceTest {
   }
 
   // ---------- stock alerts ----------
-  private final com.vijay.mall.catalog.app.CatalogService catalog = mock(com.vijay.mall.catalog.app.CatalogService.class);
-  private final com.vijay.mall.inventory.app.InventoryService inventory = mock(com.vijay.mall.inventory.app.InventoryService.class);
+  private final CatalogService catalog = mock(CatalogService.class);
+  private final InventoryService inventory = mock(InventoryService.class);
   private final UUID rice = UUID.randomUUID();
   private final UUID dal = UUID.randomUUID();
 
@@ -97,7 +104,7 @@ class NotificationServiceTest {
   void lowStockTellsEveryStaffMemberWhichProductsAreLow() {
     service.setStockSources(catalog, inventory);
     when(profiles.staffIds()).thenReturn(List.of(admin));
-    when(catalog.activeNames(any())).thenReturn(java.util.Map.of(rice, "Rice", dal, "Dal"));
+    when(catalog.activeNames(any())).thenReturn(Map.of(rice, "Rice", dal, "Dal"));
     service.on(msg("LOW_STOCK", "{\"items\":[{\"productId\":\"" + rice + "\",\"qty\":3,\"low\":5},{\"productId\":\""
         + dal + "\",\"qty\":4,\"low\":5}]}"));
     verify(repo).insert(admin, "Low stock", "Rice: 3 left, Dal: 4 left", "STOCK", rice.toString(), NOW);
@@ -107,12 +114,12 @@ class NotificationServiceTest {
   void runningOutIsCalledOutOfStockAndLongListsAreShortened() {
     service.setStockSources(catalog, inventory);
     when(profiles.staffIds()).thenReturn(List.of(admin));
-    var ids = java.util.stream.IntStream.range(0, 5).mapToObj(i -> UUID.randomUUID()).toList();
-    var names = new java.util.LinkedHashMap<UUID, String>();
+    var ids = IntStream.range(0, 5).mapToObj(i -> UUID.randomUUID()).toList();
+    var names = new LinkedHashMap<UUID, String>();
     ids.forEach(id -> names.put(id, "P" + names.size()));
     when(catalog.activeNames(any())).thenReturn(names);
     String items = ids.stream().map(id -> "{\"productId\":\"" + id + "\",\"qty\":" + (id.equals(ids.get(0)) ? 0 : 2) + ",\"low\":5}")
-        .collect(java.util.stream.Collectors.joining(","));
+        .collect(Collectors.joining(","));
     service.on(msg("LOW_STOCK", "{\"items\":[" + items + "]}"));
     verify(repo).insert(admin, "Out of stock", "P0: 0 left, P1: 2 left, P2: 2 left (+2 more)", "STOCK", ids.get(0).toString(), NOW);
   }
@@ -120,7 +127,7 @@ class NotificationServiceTest {
   @Test
   void retiredProductsDoNotRaiseAlerts() {
     service.setStockSources(catalog, inventory);
-    when(catalog.activeNames(any())).thenReturn(java.util.Map.of());
+    when(catalog.activeNames(any())).thenReturn(Map.of());
     service.on(msg("LOW_STOCK", "{\"items\":[{\"productId\":\"" + rice + "\",\"qty\":0,\"low\":5}]}"));
     verifyNoInteractions(repo, push);
   }
@@ -133,9 +140,9 @@ class NotificationServiceTest {
     service.lowStockDigest();
     verifyNoInteractions(repo);
 
-    when(inventory.lowStock(200)).thenReturn(List.of(new com.vijay.mall.inventory.infra.InventoryRepository.Stock(rice, 0, 5),
-        new com.vijay.mall.inventory.infra.InventoryRepository.Stock(dal, 2, 5)));
-    when(catalog.activeNames(any())).thenReturn(java.util.Map.of(rice, "Rice", dal, "Dal"));
+    when(inventory.lowStock(200)).thenReturn(List.of(new InventoryRepository.Stock(rice, 0, 5),
+        new InventoryRepository.Stock(dal, 2, 5)));
+    when(catalog.activeNames(any())).thenReturn(Map.of(rice, "Rice", dal, "Dal"));
     service.lowStockDigest();
     verify(repo).insert(admin, "2 products need restocking", "Rice: 0 left, Dal: 2 left", "STOCK", null, NOW);
   }

@@ -2,16 +2,25 @@ package com.vijay.mall.payment.infra;
 
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.ConnectionTester;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.payment.domain.InvalidSignatureException;
 import com.vijay.mall.payment.domain.PaymentEvent;
 import com.vijay.mall.payment.domain.PaymentGateway;
 import com.vijay.mall.payment.domain.PaymentSession;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.StreamSupport;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -28,35 +37,35 @@ public class RazorpayGateway implements PaymentGateway {
     this.json = json;
     String base = cfg.razorpayBaseUrl() == null || cfg.razorpayBaseUrl().isBlank() ? "https://api.razorpay.com" : cfg.razorpayBaseUrl();
     // A slow or hung provider must not hold a request thread for long.
-    var timeouts = new org.springframework.http.client.SimpleClientHttpRequestFactory();
-    timeouts.setConnectTimeout(java.time.Duration.ofSeconds(5));
-    timeouts.setReadTimeout(java.time.Duration.ofSeconds(15));
+    var timeouts = new SimpleClientHttpRequestFactory();
+    timeouts.setConnectTimeout(Duration.ofSeconds(5));
+    timeouts.setReadTimeout(Duration.ofSeconds(15));
     this.http = RestClient.builder().baseUrl(base).requestFactory(timeouts).build();
   }
 
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
 
   /**
    * Optional (plain unit tests run without it): the keys the admin saved in the config screen win over the ones the server was
    * started with, and take effect on the next call, no restart.
    */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
 
   private static String nz(String s) { return s == null ? "" : s; }
 
-  private String keyId() { return settings != null ? settings.get(com.vijay.mall.config.Settings.RAZORPAY_KEY_ID) : nz(cfg.razorpayKeyId()); }
+  private String keyId() { return settings != null ? settings.get(Settings.RAZORPAY_KEY_ID) : nz(cfg.razorpayKeyId()); }
 
   private String keySecret() {
-    return settings != null ? settings.get(com.vijay.mall.config.Settings.RAZORPAY_KEY_SECRET) : nz(cfg.razorpayKeySecret());
+    return settings != null ? settings.get(Settings.RAZORPAY_KEY_SECRET) : nz(cfg.razorpayKeySecret());
   }
 
   private String webhookSecret() {
-    return settings != null ? settings.get(com.vijay.mall.config.Settings.RAZORPAY_WEBHOOK_SECRET) : nz(cfg.razorpayWebhookSecret());
+    return settings != null ? settings.get(Settings.RAZORPAY_WEBHOOK_SECRET) : nz(cfg.razorpayWebhookSecret());
   }
 
   /** Signs the call with the current keys. A key id without a secret is left unauthenticated: configured() already says no. */
-  private void auth(org.springframework.http.HttpHeaders h) {
+  private void auth(HttpHeaders h) {
     if (!keyId().isBlank() && !keySecret().isBlank()) h.setBasicAuth(keyId(), keySecret());
   }
 
@@ -152,7 +161,7 @@ public class RazorpayGateway implements PaymentGateway {
     requireKeys();
     JsonNode res = http.get().uri("/v1/orders/{id}/payments", providerOrderId).headers(this::auth).retrieve().body(JsonNode.class);
     if (res == null) return Optional.empty();
-    return java.util.stream.StreamSupport.stream(res.path("items").spliterator(), false)
+    return StreamSupport.stream(res.path("items").spliterator(), false)
         .filter(p -> "captured".equals(p.path("status").asString()))
         .findFirst()
         .map(p -> (PaymentEvent) new PaymentEvent.Captured("recon:" + p.path("id").asString(), providerOrderId,
@@ -160,18 +169,18 @@ public class RazorpayGateway implements PaymentGateway {
   }
 
   /** Asks Razorpay for one payment with the saved keys: proves the key id and secret are right. */
-  public com.vijay.mall.config.ConnectionTester.Result checkKeys() {
-    if (!configured()) return new com.vijay.mall.config.ConnectionTester.Result(false, "Razorpay key id and key secret are not both saved yet.");
+  public ConnectionTester.Result checkKeys() {
+    if (!configured()) return new ConnectionTester.Result(false, "Razorpay key id and key secret are not both saved yet.");
     try {
       http.get().uri("/v1/payments?count=1").headers(this::auth).retrieve().body(JsonNode.class);
       boolean live = keyId().startsWith("rzp_live_");
-      return new com.vijay.mall.config.ConnectionTester.Result(true, "Razorpay accepted the keys (" + (live ? "LIVE" : "test") + " mode)."
+      return new ConnectionTester.Result(true, "Razorpay accepted the keys (" + (live ? "LIVE" : "test") + " mode)."
           + (webhookSecret().isBlank() ? " The webhook secret is still missing: payments will not be confirmed instantly." : ""));
-    } catch (org.springframework.web.client.HttpClientErrorException e) {
-      return new com.vijay.mall.config.ConnectionTester.Result(false, e.getStatusCode().value() == 401
+    } catch (HttpClientErrorException e) {
+      return new ConnectionTester.Result(false, e.getStatusCode().value() == 401
           ? "Razorpay refused the keys (wrong key id or secret)." : "Razorpay answered " + e.getStatusCode().value() + ".");
     } catch (RuntimeException e) {
-      return new com.vijay.mall.config.ConnectionTester.Result(false, "Could not reach Razorpay: " + e.getClass().getSimpleName());
+      return new ConnectionTester.Result(false, "Could not reach Razorpay: " + e.getClass().getSimpleName());
     }
   }
 

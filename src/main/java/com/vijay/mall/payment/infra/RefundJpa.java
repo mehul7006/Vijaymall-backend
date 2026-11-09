@@ -3,6 +3,7 @@ package com.vijay.mall.payment.infra;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -17,9 +18,9 @@ interface RefundJpa extends JpaRepository<RefundEntity, UUID> {
   /** True when this provider payment already has an automatic refund for this reason. */
   boolean existsByProviderPaymentRefAndReason(String providerPaymentRef, String reason);
 
-  org.springframework.data.domain.Page<RefundEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable page);
+  Page<RefundEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable page);
 
-  org.springframework.data.domain.Page<RefundEntity> findAllByOrderByCreatedAtDesc(Pageable page);
+  Page<RefundEntity> findAllByOrderByCreatedAtDesc(Pageable page);
 
   long countByStatus(String status);
 

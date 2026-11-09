@@ -1,10 +1,12 @@
 package com.vijay.mall.common.cache;
 
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -80,18 +83,18 @@ public class AppCaches implements MeterBinder {
 
   private final Clock clock;
   private final Map<Name, Store> stores = new EnumMap<>(Name.class);
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
   private volatile MeterRegistry registry;
 
   /** Optional (plain unit tests run without it): the admin can switch caching off or change how long each cache keeps its data. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
 
-  private boolean enabled() { return settings == null || settings.getBool(com.vijay.mall.config.Settings.CACHE_ENABLED); }
+  private boolean enabled() { return settings == null || settings.getBool(Settings.CACHE_ENABLED); }
 
   /** Seconds the cache keeps a value: the admin's setting, else the cache's own default. */
   int ttlSeconds(Name name) {
-    return settings == null ? name.ttlSeconds : settings.getInt(com.vijay.mall.config.Settings.ttlOf(name));
+    return settings == null ? name.ttlSeconds : settings.getInt(Settings.ttlOf(name));
   }
 
   public AppCaches(Clock clock) {

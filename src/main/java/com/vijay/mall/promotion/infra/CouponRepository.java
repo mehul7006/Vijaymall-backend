@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
@@ -111,7 +112,7 @@ public class CouponRepository {
    * Makes orders of the same customer and coupon wait for each other until their transaction ends, so the per-customer
    * limit cannot be beaten by two orders placed at once. Other customers and other coupons are not held up.
    */
-  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+  @Transactional(propagation = Propagation.MANDATORY)
   public void lockCustomerUse(UUID couponId, UUID userId) {
     em.createNativeQuery("select count(*) from (select pg_advisory_xact_lock(hashtextextended(:k, 0))) as locked")
         .setParameter("k", "coupon-use:" + couponId + ":" + userId).getSingleResult();

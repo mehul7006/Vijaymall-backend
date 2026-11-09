@@ -14,6 +14,7 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /** Coupons end to end: admin management, validation at quote time, usage counting and restore on cancel. */
 @SuppressWarnings({"rawtypes", "unchecked"})
@@ -35,18 +36,18 @@ class CouponApiIT extends IntegrationTestBase {
 
   private Object juice(String token) { return productByName(token, "Orange Juice").get("id"); }
 
-  private org.springframework.http.ResponseEntity<Map> quote(String token, Object pid, String code) {
+  private ResponseEntity<Map> quote(String token, Object pid, String code) {
     Map<String, Object> req = new HashMap<>(Map.of("items", List.of(Map.of("productId", pid, "qty", 1)),
         "coinMode", "NONE", "fulfilment", "PICKUP"));
     if (code != null) req.put("couponCode", code);
     return post("/api/v1/cart/quote", token, req);
   }
 
-  private String reason(org.springframework.http.ResponseEntity<Map> res) {
+  private String reason(ResponseEntity<Map> res) {
     return (String) ((Map<?, ?>) res.getBody().get("details")).get("reason");
   }
 
-  private org.springframework.http.ResponseEntity<Map> order(String token, Object pid, String code) {
+  private ResponseEntity<Map> order(String token, Object pid, String code) {
     long total = ((Number) quote(token, pid, code).getBody().get("totalPaise")).longValue();
     Map<String, Object> body = new HashMap<>(Map.of("items", List.of(Map.of("productId", pid, "qty", 1)), "coinMode", "NONE",
         "fulfilment", "PICKUP", "paymentMethod", "COD", "expectedTotalPaise", total));

@@ -20,9 +20,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -94,7 +96,7 @@ class PosSyncServiceTest {
 
   @Test
   void missingKeysAndMissingBillsAreRefusedWithoutTouchingTheTill() {
-    var results = service.upload(cashier, false, new ArrayList<>(java.util.Arrays.asList(bill(null), bill(" "), null)));
+    var results = service.upload(cashier, false, new ArrayList<>(Arrays.asList(bill(null), bill(" "), null)));
     assertThat(results).allSatisfy(r -> {
       assertThat(r.status()).isEqualTo("REJECTED");
       assertThat(r.errorCode()).isEqualTo("VALIDATION_FAILED");
@@ -106,7 +108,7 @@ class PosSyncServiceTest {
   void aBatchMustHaveBetweenOneAndFiftyBills() {
     assertThatThrownBy(() -> service.upload(cashier, false, null)).isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> service.upload(cashier, false, List.of())).isInstanceOf(ApiException.class);
-    var fiftyOne = java.util.stream.IntStream.range(0, 51).mapToObj(i -> bill("k" + i)).toList();
+    var fiftyOne = IntStream.range(0, 51).mapToObj(i -> bill("k" + i)).toList();
     assertThatThrownBy(() -> service.upload(cashier, false, fiftyOne)).isInstanceOf(ApiException.class);
   }
 

@@ -16,6 +16,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 
 /** Shop front and admin catalog over HTTP: browsing, search, hot sale, stock, images, categories, banners. */
@@ -162,7 +163,7 @@ class CatalogApiIT extends IntegrationTestBase {
     return out.toByteArray();
   }
 
-  private org.springframework.http.ResponseEntity<Map> upload(String id, ByteArrayResource file) {
+  private ResponseEntity<Map> upload(String id, ByteArrayResource file) {
     var parts = new LinkedMultiValueMap<String, Object>();
     parts.add("file", file);
     return client().post().uri("/api/v1/admin/products/" + id + "/image").headers(h -> h.setBearerAuth(adminToken()))

@@ -17,6 +17,7 @@ import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.PosCatalogRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -83,10 +84,10 @@ public class PosCatalogService {
    * A version stamp for the product list as the counter sees it: the time of the latest change to any product or its counter
    * details. An offline till keeps its own copy and downloads again when this is newer than the stamp it saved.
    */
-  public java.time.Instant catalogVersion() {
-    java.time.Instant a = catalog.lastChange();
-    java.time.Instant b = repo.lastChange();
-    if (a == null) return b == null ? java.time.Instant.EPOCH : b;
+  public Instant catalogVersion() {
+    Instant a = catalog.lastChange();
+    Instant b = repo.lastChange();
+    if (a == null) return b == null ? Instant.EPOCH : b;
     return b != null && b.isAfter(a) ? b : a;
   }
 

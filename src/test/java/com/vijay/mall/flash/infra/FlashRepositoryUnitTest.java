@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** The edges of FlashRepository that need no database: empty id lists never query, and an unknown status is refused. */
@@ -36,7 +37,7 @@ class FlashRepositoryUnitTest {
   @Test
   void soldOutIsReportedOnlyWhenARowChanged() {
     JdbcClient.StatementSpec spec = mock(JdbcClient.StatementSpec.class, RETURNS_SELF);
-    when(jdbc.sql(org.mockito.ArgumentMatchers.anyString())).thenReturn(spec);
+    when(jdbc.sql(ArgumentMatchers.anyString())).thenReturn(spec);
     when(spec.update()).thenReturn(0, 1);
     UUID item = UUID.randomUUID();
     assertThat(repo.markSoldOutNotified(item, Instant.now())).isFalse();

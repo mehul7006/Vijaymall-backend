@@ -3,6 +3,8 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,7 +32,7 @@ class AuditLogIT extends IntegrationTestBase {
     assertThat(rows.get(0).get("actorName")).as("shows who, not just an id").isNotNull();
 
     String actor = (String) rows.get(0).get("actorId");
-    var today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).toString();
+    var today = LocalDate.now(ZoneId.of("Asia/Kolkata")).toString();
     var mine = (List<Map>) get("/api/v1/admin/audit-log?actorId=" + actor + "&from=" + today + "&to=" + today + "&size=50", admin).getBody().get("items");
     assertThat(mine).anySatisfy(r -> assertThat(r.get("entityId")).isEqualTo(couponId));
     assertThat(((Number) get("/api/v1/admin/audit-log?entity=no-such-thing", admin).getBody().get("total")).longValue()).isZero();

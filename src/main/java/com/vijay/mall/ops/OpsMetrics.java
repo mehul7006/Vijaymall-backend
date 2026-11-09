@@ -1,6 +1,7 @@
 package com.vijay.mall.ops;
 
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.domain.OrderStatus;
 import com.vijay.mall.order.infra.OrderRepository;
@@ -10,8 +11,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.util.Map;
+import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -42,11 +45,11 @@ public class OpsMetrics implements MeterBinder {
     this.clock = clock;
   }
 
-  private volatile com.vijay.mall.inventory.app.DefectiveService defective;
+  private volatile DefectiveService defective;
 
   /** Optional (plain unit tests run without it): lets the gauge below count defective goods waiting for the owner's decision. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setDefective(com.vijay.mall.inventory.app.DefectiveService defective) { this.defective = defective; }
+  @Autowired(required = false)
+  void setDefective(DefectiveService defective) { this.defective = defective; }
 
   private volatile long defectiveHeldUnits;
   private volatile long defectivePendingUnits;
@@ -104,7 +107,7 @@ public class OpsMetrics implements MeterBinder {
     }
   }
 
-  private void gauge(MeterRegistry registry, String name, String description, java.util.function.LongSupplier value) {
+  private void gauge(MeterRegistry registry, String name, String description, LongSupplier value) {
     Gauge.builder(name, value, v -> v.getAsLong()).description(description).strongReference(true).register(registry);
   }
 }

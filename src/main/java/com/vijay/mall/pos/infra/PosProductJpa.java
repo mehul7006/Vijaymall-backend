@@ -16,7 +16,7 @@ interface PosProductJpa extends JpaRepository<ProductPosEntity, UUID> {
   Optional<ProductPosEntity> findByPlu(String plu);
 
   @Query("select max(p.updatedAt) from ProductPosEntity p")
-  java.time.Instant lastChange();
+  Instant lastChange();
 
   @Query("select p from ProductPosEntity p where p.productId in :ids")
   List<ProductPosEntity> byIds(@Param("ids") Collection<UUID> ids);

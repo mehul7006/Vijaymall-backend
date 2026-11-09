@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -16,7 +21,7 @@ import org.springframework.http.ResponseEntity;
 @SuppressWarnings({"rawtypes", "unchecked"})
 class OrderApiIT extends IntegrationTestBase {
 
-  @org.junit.jupiter.api.BeforeEach
+  @BeforeEach
   void stock() {
     restock("Basmati Rice", 50);
     restock("Orange Juice", 30);
@@ -129,10 +134,10 @@ class OrderApiIT extends IntegrationTestBase {
     String t = token(freshEmail());
     var body = placeBody(t, cart(product(t, "Potato Chips"), 1, Map.of()), "COD");
     String key = UUID.randomUUID().toString();
-    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var futures = java.util.stream.IntStream.range(0, 5)
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = IntStream.range(0, 5)
           .mapToObj(_ -> pool.submit(() -> call(HttpMethod.POST, "/api/v1/orders", t, body, key))).toList();
-      java.util.Set<Object> ids = new java.util.HashSet<>();
+      Set<Object> ids = new HashSet<>();
       for (var f : futures) {
         var r = f.get();
         assertThat(r.getStatusCode().value()).isIn(200, 201);

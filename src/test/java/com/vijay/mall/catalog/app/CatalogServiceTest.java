@@ -25,10 +25,12 @@ import com.vijay.mall.catalog.infra.BannerRepository;
 import com.vijay.mall.catalog.infra.CategoryRepository;
 import com.vijay.mall.catalog.infra.ProductRepository;
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.infra.InventoryRepository.Stock;
+import com.vijay.mall.inventory.infra.InventoryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -37,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 class CatalogServiceTest {
   private static final Instant NOW = Instant.parse("2026-11-01T10:00:00Z");
@@ -67,7 +71,7 @@ class CatalogServiceTest {
     inventory = mock(InventoryService.class);
     audit = mock(AuditService.class);
     service = new CatalogService(products, categories, banners, inventory, audit, Clock.fixed(NOW, ZoneOffset.UTC),
-        mock(com.vijay.mall.common.ReferenceNumbers.class));
+        mock(ReferenceNumbers.class));
     when(inventory.stocks(any())).thenAnswer(inv -> {
       Map<UUID, Stock> out = new HashMap<>();
       for (UUID id : (Collection<UUID>) inv.getArgument(0)) out.put(id, stock.getOrDefault(id, new Stock(id, 0, 5)));
@@ -546,7 +550,7 @@ class CatalogServiceTest {
     verify(products).setGroup(pid, group);
 
     service.update(pid, input(6000, 5000, null, null, 0, 5), actor);
-    verify(products, org.mockito.Mockito.times(1)).setGroup(any(), any());
+    verify(products, Mockito.times(1)).setGroup(any(), any());
   }
 
   @Test
@@ -580,12 +584,12 @@ class CatalogServiceTest {
     UUID missing = UUID.randomUUID();
     List<UUID> ids = List.of(counterOnly, y, missing, inactive, pid);
     when(products.findAll(ids)).thenReturn(List.of(data(pid), data(y), data(inactive, false, false, null, null), data(counterOnly)));
-    when(products.posOnlyAmong(ids)).thenReturn(java.util.Set.of(counterOnly));
+    when(products.posOnlyAmong(ids)).thenReturn(Set.of(counterOnly));
     stock.put(pid, new Stock(pid, 3, 5));
 
     var out = service.visible(ids);
 
-    assertThat(out).extracting(com.vijay.mall.catalog.domain.Product::id).containsExactly(y, pid);
+    assertThat(out).extracting(Product::id).containsExactly(y, pid);
     assertThat(out.get(1).inStock()).isTrue();
     assertThat(out.get(0).inStock()).isFalse();
   }
@@ -606,8 +610,8 @@ class CatalogServiceTest {
   void stockMovementsShowProductNameAndPackLabel() {
     UUID gone = UUID.randomUUID();
     var moves = List.of(
-        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), pid, -2, "ORDER", null, null, NOW),
-        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), gone, 5, "RESTOCK", null, actor, NOW));
+        new InventoryRepository.Movement(UUID.randomUUID(), pid, -2, "ORDER", null, null, NOW),
+        new InventoryRepository.Movement(UUID.randomUUID(), gone, 5, "RESTOCK", null, actor, NOW));
     when(inventory.movements(null, 0, 20)).thenReturn(new Page<>(moves, 0, 20, 2));
     when(products.findAll(any())).thenReturn(List.of(data(pid)));
 

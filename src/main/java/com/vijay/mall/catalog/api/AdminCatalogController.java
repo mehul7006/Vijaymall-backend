@@ -7,6 +7,7 @@ import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -32,11 +35,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminCatalogController {
-  private com.vijay.mall.common.idem.AdminOps ops;
+  private AdminOps ops;
 
   /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
-  @org.springframework.beans.factory.annotation.Autowired
-  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+  @Autowired
+  void setOps(AdminOps ops) { this.ops = ops; }
 
   public record ProductBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu,
                             String description, @Min(0) long mrpPaise, @Min(0) long pricePaise, String unit,
@@ -93,12 +96,12 @@ public class AdminCatalogController {
 
   @PostMapping("/products")
   @ResponseStatus(HttpStatus.CREATED)
-  public AdminProduct create(@Valid @RequestBody ProductBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
-    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "product-create", CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(b), () -> {
+  public AdminProduct create(@Valid @RequestBody ProductBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.run(ops, key, "product-create", CurrentUser.id(), AdminOps.fingerprint(b), () -> {
       AdminProduct created = catalog.create(b.toInput(), CurrentUser.id());
       return b.variantName() == null && b.variantOrder() == null ? created
           : catalog.setVariant(created.id(), b.variantName(), b.variantOrder(), CurrentUser.id());
-    }, p -> p.id().toString(), ref -> catalog.adminGet(java.util.UUID.fromString(ref)));
+    }, p -> p.id().toString(), ref -> catalog.adminGet(UUID.fromString(ref)));
   }
 
   @GetMapping("/products/{id}")
@@ -129,9 +132,9 @@ public class AdminCatalogController {
   }
 
   @PostMapping("/products/{id}/stock")
-  public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
+  public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     // a delta is relative, so a double tap on "+50" must not add 100: the same key applies it once
-    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "stock-adjust:" + id, CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(id, b),
+    return AdminOps.run(ops, key, "stock-adjust:" + id, CurrentUser.id(), AdminOps.fingerprint(id, b),
         () -> catalog.restock(id, b.delta(), b.reason(), CurrentUser.id()), p -> id.toString(), ref -> catalog.adminGet(id));
   }
 
@@ -151,8 +154,8 @@ public class AdminCatalogController {
 
   @PostMapping("/categories")
   @ResponseStatus(HttpStatus.CREATED)
-  public Category createCategory(@Valid @RequestBody CategoryBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
-    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "category-create", CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(b),
+  public Category createCategory(@Valid @RequestBody CategoryBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.run(ops, key, "category-create", CurrentUser.id(), AdminOps.fingerprint(b),
         () -> catalog.createCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active()),
         c -> c.id().toString(), ref -> catalog.categories().stream().filter(c -> c.id().toString().equals(ref)).findFirst().orElse(null));
   }

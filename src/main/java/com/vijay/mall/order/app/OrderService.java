@@ -1,15 +1,21 @@
 package com.vijay.mall.order.app;
 
+import com.vijay.mall.catalog.app.PurchaseLookup;
 import com.vijay.mall.common.AppProps;
+import com.vijay.mall.common.FlashPricing;
+import com.vijay.mall.common.OnlineOrdering;
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ReferenceLookup;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.metrics.Metrics;
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.identity.domain.Address;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.inventory.app.InventoryService;
-import com.vijay.mall.catalog.app.PurchaseLookup;
 import com.vijay.mall.order.domain.Fulfilment;
 import com.vijay.mall.order.domain.OrderChanged;
 import com.vijay.mall.order.domain.OrderStatus;
@@ -23,18 +29,21 @@ import com.vijay.mall.payment.domain.PaymentSession;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.wallet.app.OrderNumberLookup;
 import com.vijay.mall.wallet.app.WalletService;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,7 +53,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Order use cases: place, move through statuses, cancel, expire. Talks to other modules only through their services. */
 @Service
-public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vijay.mall.common.ReferenceLookup {
+public class OrderService implements OrderNumberLookup, PurchaseLookup, ReferenceLookup {
   private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
   /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
@@ -98,27 +107,27 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
   // ---------- place ----------
   /** Places an order once per idempotency key; a repeated key returns the first result. */
   public OrderViews.View place(UUID userId, String idemKey, PlaceCommand cmd) {
-    return com.vijay.mall.common.metrics.Metrics.timed(metrics, "mall.order.place", "Time to place an online order",
+    return Metrics.timed(metrics, "mall.order.place", "Time to place an online order",
         () -> placeOnce(userId, idemKey, cmd));
   }
 
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
 
   /** Optional (plain unit tests run without it): the admin can change the time allowed to pay an online order. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
 
-  private io.micrometer.core.instrument.MeterRegistry metrics;
+  private MeterRegistry metrics;
 
   /** Optional (plain unit tests run without it): timers and counters for placing orders. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setMetrics(io.micrometer.core.instrument.MeterRegistry metrics) { this.metrics = metrics; }
+  @Autowired(required = false)
+  void setMetrics(MeterRegistry metrics) { this.metrics = metrics; }
 
-  private com.vijay.mall.common.FlashPricing flash;
+  private FlashPricing flash;
 
   /** Optional (plain unit tests run without it): flash sale units are counted when an order is placed and given back when it is cancelled. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setFlash(com.vijay.mall.common.FlashPricing flash) { this.flash = flash; }
+  @Autowired(required = false)
+  void setFlash(FlashPricing flash) { this.flash = flash; }
 
   private OrderViews.View placeOnce(UUID userId, String idemKey, PlaceCommand cmd) {
     if (idemKey == null || idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
@@ -129,17 +138,17 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
       return view(repo.find(id).orElseThrow());
     } catch (DataIntegrityViolationException e) {
       return view(repo.findByIdem(userId, idemKey).orElseThrow(() -> e));
-    } catch (com.vijay.mall.common.FlashPricing.Refused e) {
+    } catch (FlashPricing.Refused e) {
       // someone else took the last sale units (or the sale ended) between the quote and now: send the fresh quote so the app re-shows it
       throw ApiException.conflict("PRICE_CHANGED", "Prices changed, please review", Map.of("quote", quotes.quote(userId, cmd.quote())));
     }
   }
 
-  private com.vijay.mall.common.OnlineOrdering ordering;
+  private OnlineOrdering ordering;
 
   /** Optional (plain unit tests run without it): the admin can pause online ordering. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setOrdering(com.vijay.mall.common.OnlineOrdering ordering) { this.ordering = ordering; }
+  @Autowired(required = false)
+  void setOrdering(OnlineOrdering ordering) { this.ordering = ordering; }
 
   private UUID doPlace(UUID userId, String idemKey, PlaceCommand cmd) {
     if (ordering != null) ordering.requireOpen();
@@ -166,7 +175,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
     Instant now = clock.instant();
     boolean needsPayment = "ONLINE".equals(method) && q.totalPaise() > 0;
     String status = needsPayment ? OrderStatus.PAYMENT_PENDING.name() : OrderStatus.PLACED.name();
-    long timeoutMinutes = settings != null ? settings.getInt(com.vijay.mall.config.Settings.ONLINE_TIMEOUT_MINUTES) : props.payment().onlineTimeoutMinutes();
+    long timeoutMinutes = settings != null ? settings.getInt(Settings.ONLINE_TIMEOUT_MINUTES) : props.payment().onlineTimeoutMinutes();
     Instant expires = needsPayment ? now.plus(timeoutMinutes, ChronoUnit.MINUTES) : null;
     String orderNo = repo.nextOrderNo();
 
@@ -185,14 +194,14 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
     inventory.checkAvailable(q.lines().stream().map(l -> new InventoryService.Item(l.productId(), l.qty())).toList());
     wallet.redeem(userId, q.coinsUsed(), orderId);
     promotions.consume(q.couponCode(), userId, orderId, q.couponDiscountPaise());
-    if (flash != null) flash.consume(com.vijay.mall.common.FlashPricing.Channel.ONLINE, orderId, userId, flashClaims(q));
+    if (flash != null) flash.consume(FlashPricing.Channel.ONLINE, orderId, userId, flashClaims(q));
     payments.start(orderId, orderNo, q.totalPaise(), method);
 
     log.info("Order placed orderNo={} user={} total={} method={} status={} coinsUsed={} coupon={} items={}", orderNo, userId,
         q.totalPaise(), method, status, q.coinsUsed(), q.couponCode(), q.lines().size());
     // counted here, where the order is really created, so a repeated request (same key) is not counted again
-    com.vijay.mall.common.metrics.Metrics.count(metrics, "mall.orders.placed", "Online orders placed", "method", method, 1);
-    com.vijay.mall.common.metrics.Metrics.count(metrics, "mall.orders.value.paise", "Value of online orders placed, in paise", "method",
+    Metrics.count(metrics, "mall.orders.placed", "Online orders placed", "method", method, 1);
+    Metrics.count(metrics, "mall.orders.value.paise", "Value of online orders placed, in paise", "method",
         method, q.totalPaise());
     outbox.add("ORDER_PLACED", Map.of("orderId", orderId, "orderNo", orderNo, "userId", userId, "totalPaise", q.totalPaise()));
     events.publishEvent(new OrderChanged(orderId, orderNo, userId, status, null, now));
@@ -200,9 +209,9 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
   }
 
   /** The quote lines that were priced by a flash sale, as claims on the sale's quantity. */
-  private static List<com.vijay.mall.common.FlashPricing.Claim> flashClaims(Quote q) {
+  private static List<FlashPricing.Claim> flashClaims(Quote q) {
     return q.lines().stream().filter(l -> l.flashSaleId() != null)
-        .map(l -> new com.vijay.mall.common.FlashPricing.Claim(l.flashSaleId(), l.productId(), l.qty(), l.unitPricePaise(), l.listPricePaise())).toList();
+        .map(l -> new FlashPricing.Claim(l.flashSaleId(), l.productId(), l.qty(), l.unitPricePaise(), l.listPricePaise())).toList();
   }
 
   // ---------- status changes ----------
@@ -403,11 +412,11 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, com.vija
   public long openOrderCount(UUID userId) { return repo.openOrderCount(userId); }
 
   @Override
-  public Map<UUID, String> orderNumbers(java.util.Collection<UUID> orderIds) { return repo.numbers(orderIds); }
+  public Map<UUID, String> orderNumbers(Collection<UUID> orderIds) { return repo.numbers(orderIds); }
 
   /** Order numbers, for screens that only hold the order id (stock history, coin ledger). */
   @Override
-  public Map<UUID, String> numbers(java.util.Collection<UUID> ids) { return repo.numbers(ids); }
+  public Map<UUID, String> numbers(Collection<UUID> ids) { return repo.numbers(ids); }
 
   @Transactional(readOnly = true)
   public OrderViews.AdminView adminGet(UUID orderId) {

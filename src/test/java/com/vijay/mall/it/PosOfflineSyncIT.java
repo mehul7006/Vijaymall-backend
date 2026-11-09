@@ -99,7 +99,7 @@ class PosOfflineSyncIT extends IntegrationTestBase {
     assertThat((List<Map>) results.get(0).get("exceptions")).extracting(e -> e.get("kind")).containsExactly("OVERSOLD");
     var audit = (List<Map>) get("/api/v1/admin/audit-log?action=OFFLINE_OVERSOLD&entity=pos_sale&size=5", adminToken()).getBody().get("items");
     assertThat(audit).anySatisfy(a -> assertThat(a.get("entityId")).isEqualTo(results.get(0).get("saleId")));
-    var online = call(org.springframework.http.HttpMethod.POST, "/api/v1/pos/sales", cashier,
+    var online = call(HttpMethod.POST, "/api/v1/pos/sales", cashier,
         Map.of("cart", cart, "payments", List.of(Map.of("mode", "CASH", "amountPaise", total))), UUID.randomUUID().toString());
     assertThat(online.getStatusCode()).as("a live bill is still refused when stock is short").isEqualTo(HttpStatus.CONFLICT);
     assertThat(online.getBody().get("code")).isEqualTo("OUT_OF_STOCK");

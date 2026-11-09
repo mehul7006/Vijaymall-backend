@@ -11,7 +11,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -136,7 +138,7 @@ public class ProductRepository {
   @Transactional(readOnly = true)
   public Map<UUID, VariantInfo> variantInfo(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
-    return jpa.findAllById(ids).stream().collect(java.util.stream.Collectors.toMap(e -> e.id,
+    return jpa.findAllById(ids).stream().collect(Collectors.toMap(e -> e.id,
         e -> new VariantInfo(e.variantName == null ? "" : e.variantName, e.variantOrder)));
   }
 
@@ -237,10 +239,10 @@ public class ProductRepository {
 
   /** Which of the given products are sold at the counter only. */
   @Transactional(readOnly = true)
-  public java.util.Set<UUID> posOnlyAmong(java.util.Collection<UUID> ids) {
-    if (ids.isEmpty()) return java.util.Set.of();
+  public Set<UUID> posOnlyAmong(Collection<UUID> ids) {
+    if (ids.isEmpty()) return Set.of();
     return jpa.findAllById(ids).stream().filter(e -> e.posOnly).map(e -> e.id)
-        .collect(java.util.stream.Collectors.toSet());
+        .collect(Collectors.toSet());
   }
 
   public boolean isPosOnly(UUID id) { return jpa.findById(id).map(e -> e.posOnly).orElse(false); }
@@ -250,13 +252,13 @@ public class ProductRepository {
 
   /** English names of the products that are still on sale, keyed by id (retired products are left out). */
   @Transactional(readOnly = true)
-  public Map<UUID, String> activeNames(java.util.Collection<UUID> ids) {
-    return jpa.findAllById(ids).stream().filter(e -> e.active).collect(java.util.stream.Collectors.toMap(e -> e.id, e -> e.nameEn));
+  public Map<UUID, String> activeNames(Collection<UUID> ids) {
+    return jpa.findAllById(ids).stream().filter(e -> e.active).collect(Collectors.toMap(e -> e.id, e -> e.nameEn));
   }
 
   /** English names for the given products, keyed by id. */
   @Transactional(readOnly = true)
-  public Map<UUID, String> names(java.util.Collection<UUID> ids) {
-    return jpa.findAllById(ids).stream().collect(java.util.stream.Collectors.toMap(e -> e.id, e -> e.nameEn));
+  public Map<UUID, String> names(Collection<UUID> ids) {
+    return jpa.findAllById(ids).stream().collect(Collectors.toMap(e -> e.id, e -> e.nameEn));
   }
 }

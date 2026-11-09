@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class WalletServiceCoverageTest {
 
   @Test void reverse_lotWithoutExpiry_goesBackToTheLot_andPublishesEvent() {
     UUID redeem = UUID.randomUUID(), lot = UUID.randomUUID();
-    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(java.util.Optional.of(redeem));
+    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(Optional.of(redeem));
     when(repo.lotUses(redeem)).thenReturn(List.of(new WalletRepository.LotUse(lot, 7, null)));
     service.reverse(user, order);
     verify(repo).changeLot(lot, 7);
@@ -58,7 +59,7 @@ class WalletServiceCoverageTest {
 
   @Test void reverse_redeemWithNoLotUses_changesNothing() {
     UUID redeem = UUID.randomUUID();
-    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(java.util.Optional.of(redeem));
+    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(Optional.of(redeem));
     when(repo.lotUses(redeem)).thenReturn(List.of());
     service.reverse(user, order);
     verify(repo, never()).insertLedger(any(), any(), eq("REVERSE"), anyInt(), any(), any(), any(), any(), anyString(), any());

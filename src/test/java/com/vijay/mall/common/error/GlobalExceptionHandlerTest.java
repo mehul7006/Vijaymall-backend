@@ -4,14 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.common.web.TraceIdFilter;
 import jakarta.validation.ConstraintViolationException;
+import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.core.MethodParameter;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,7 +35,7 @@ class GlobalExceptionHandlerTest {
   @AfterEach
   void clearMdc() { MDC.clear(); }
 
-  private static void check(org.springframework.http.ResponseEntity<ErrorBody> r, HttpStatus status, String code) {
+  private static void check(ResponseEntity<ErrorBody> r, HttpStatus status, String code) {
     assertThat(r.getStatusCode()).isEqualTo(status);
     assertThat(r.getBody()).isNotNull();
     assertThat(r.getBody().code()).isEqualTo(code);
@@ -93,7 +98,7 @@ class GlobalExceptionHandlerTest {
 
   @Test
   void wrongContentTypeIs415() {
-    check(handler.wrongMedia(new HttpMediaTypeNotSupportedException(MediaType.TEXT_PLAIN, java.util.List.of())),
+    check(handler.wrongMedia(new HttpMediaTypeNotSupportedException(MediaType.TEXT_PLAIN, List.of())),
         HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_MEDIA_TYPE");
   }
 
@@ -114,14 +119,14 @@ class GlobalExceptionHandlerTest {
     assertThat(r.getBody().message()).doesNotContain("secret");
   }
 
-  @org.junit.jupiter.api.Test
+  @Test
   void databaseConstraintMistakesAreTheCallersNotServerErrors() {
     var handler = new GlobalExceptionHandler();
-    var fk = new org.springframework.dao.DataIntegrityViolationException("x", new java.sql.SQLException("fk", "23503"));
-    var dup = new org.springframework.dao.DataIntegrityViolationException("x", new RuntimeException(new java.sql.SQLException("dup", "23505")));
-    var other = new org.springframework.dao.DataIntegrityViolationException("x", new java.sql.SQLException("check", "23514"));
-    org.assertj.core.api.Assertions.assertThat(handler.integrity(fk).getStatusCode().value()).isEqualTo(400);
-    org.assertj.core.api.Assertions.assertThat(handler.integrity(dup).getStatusCode().value()).isEqualTo(409);
-    org.assertj.core.api.Assertions.assertThat(handler.integrity(other).getStatusCode().value()).isEqualTo(500);
+    var fk = new DataIntegrityViolationException("x", new SQLException("fk", "23503"));
+    var dup = new DataIntegrityViolationException("x", new RuntimeException(new SQLException("dup", "23505")));
+    var other = new DataIntegrityViolationException("x", new SQLException("check", "23514"));
+    Assertions.assertThat(handler.integrity(fk).getStatusCode().value()).isEqualTo(400);
+    Assertions.assertThat(handler.integrity(dup).getStatusCode().value()).isEqualTo(409);
+    Assertions.assertThat(handler.integrity(other).getStatusCode().value()).isEqualTo(500);
   }
 }

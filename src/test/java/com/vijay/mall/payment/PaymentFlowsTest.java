@@ -16,6 +16,7 @@ import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.payment.app.PaymentGatewayRegistry;
 import com.vijay.mall.payment.app.PaymentService;
+import com.vijay.mall.payment.domain.InvalidSignatureException;
 import com.vijay.mall.payment.domain.PaymentEvent;
 import com.vijay.mall.payment.domain.PaymentEvents;
 import com.vijay.mall.payment.domain.PaymentGateway;
@@ -26,10 +27,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -104,7 +108,7 @@ class PaymentFlowsTest {
         new PaymentService.AdminMethod("ONLINE", true, false));
     assertThatThrownBy(() -> svc.saveMethods(List.of(new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID()))
         .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("PAYMENT_NOT_CONFIGURED"));
-    verify(repo, never()).setEnabled(anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+    verify(repo, never()).setEnabled(anyString(), ArgumentMatchers.anyBoolean());
   }
 
   @Test
@@ -112,7 +116,7 @@ class PaymentFlowsTest {
     when(repo.settings()).thenReturn(List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("ONLINE", false)));
     assertThatThrownBy(() -> service.saveMethods(List.of(new PaymentRepository.Setting("COD", false)), UUID.randomUUID()))
         .isInstanceOf(ApiException.class);
-    verify(repo, never()).setEnabled(anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+    verify(repo, never()).setEnabled(anyString(), ArgumentMatchers.anyBoolean());
   }
 
   // ---------- start / session ----------
@@ -151,22 +155,22 @@ class PaymentFlowsTest {
 
   @Test
   void ignoredEventTypesChangeNothing() {
-    service.handleWebhook("fake", body("e1", "refunded", "x", 0), java.util.Map.of("x-fake-signature", "ok"));
+    service.handleWebhook("fake", body("e1", "refunded", "x", 0), Map.of("x-fake-signature", "ok"));
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
-    org.mockito.Mockito.verifyNoInteractions(events);
+    Mockito.verifyNoInteractions(events);
   }
 
   @Test
   void eventForUnknownProviderOrderIsAcceptedAndDoesNothing() {
     when(repo.byProviderOrder("fake", "ghost")).thenReturn(Optional.empty());
-    service.handleWebhook("fake", body("e2", "captured", "ghost", 5000), java.util.Map.of("x-fake-signature", "ok"));
+    service.handleWebhook("fake", body("e2", "captured", "ghost", 5000), Map.of("x-fake-signature", "ok"));
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
   }
 
   @Test
   void failureAfterCaptureIsIgnored() {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CAPTURED")));
-    service.handleWebhook("fake", body("e3", "failed", "fake_" + orderId, 0), java.util.Map.of("x-fake-signature", "ok"));
+    service.handleWebhook("fake", body("e3", "failed", "fake_" + orderId, 0), Map.of("x-fake-signature", "ok"));
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
   }
 
@@ -201,7 +205,7 @@ class PaymentFlowsTest {
   void aFailingProviderLeavesTheRefundForANewTry() {
     var gw = mock(PaymentGateway.class);
     when(gw.provider()).thenReturn("fake");
-    when(gw.refund(anyString(), org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString())).thenThrow(new IllegalStateException("provider down"));
+    when(gw.refund(anyString(), ArgumentMatchers.anyLong(), anyString(), anyString())).thenThrow(new IllegalStateException("provider down"));
     var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(gw), props("fake")), events, audit,
         Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
     UUID refundId = UUID.randomUUID();
@@ -234,7 +238,7 @@ class PaymentFlowsTest {
     when(gw.fetchStatus(anyString())).thenReturn(Optional.of(new PaymentEvent.Captured("recon:p", "o", "pay_9", 5000)));
     var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(gw), props("fake")), events, audit,
         Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
-    when(repo.staleCreated(any(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED")));
+    when(repo.staleCreated(any(), ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED")));
     when(repo.recordEvent(any(), any(), any(), any(), any())).thenReturn(false);
     svc.reconcile();
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
@@ -242,7 +246,7 @@ class PaymentFlowsTest {
 
   @Test
   void reconcileNothingToSayLeavesPaymentAlone() {
-    when(repo.staleCreated(any(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED")));
+    when(repo.staleCreated(any(), ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED")));
     service.reconcile(); // FakeGateway.fetchStatus returns empty
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
   }
@@ -255,7 +259,7 @@ class PaymentFlowsTest {
     var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(gw), props("fake")), events, audit,
         Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
     var other = new PaymentRepository.Payment(UUID.randomUUID(), UUID.randomUUID(), "fake", 1, "CREATED", "o2", null);
-    when(repo.staleCreated(any(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED"), other));
+    when(repo.staleCreated(any(), ArgumentMatchers.anyInt())).thenReturn(List.of(payment("CREATED"), other));
     svc.reconcile();
     verify(gw).fetchStatus("fake_" + orderId);
     verify(gw).fetchStatus("o2");
@@ -278,7 +282,7 @@ class PaymentFlowsTest {
     assertThat(cod.session("x", 1)).isNull();
     assertThat(cod.refund("r", 1, "why")).isNull();
     assertThat(cod.fetchStatus("x")).isEmpty();
-    assertThatThrownBy(() -> cod.parseWebhook("{}", java.util.Map.of()))
-        .isInstanceOf(com.vijay.mall.payment.domain.InvalidSignatureException.class);
+    assertThatThrownBy(() -> cod.parseWebhook("{}", Map.of()))
+        .isInstanceOf(InvalidSignatureException.class);
   }
 }

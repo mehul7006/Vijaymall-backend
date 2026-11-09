@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /** Helpers for the flash sale integration tests: fresh products, sale set-up, orders and counter bills. */
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -74,7 +75,7 @@ public abstract class FlashTestBase extends IntegrationTestBase {
     return createSale(saleBody(List.of(item(productId, maxQty)), extra));
   }
 
-  protected org.springframework.http.ResponseEntity<Map> delete(String url) { return call(HttpMethod.DELETE, url, adminToken(), null, null); }
+  protected ResponseEntity<Map> delete(String url) { return call(HttpMethod.DELETE, url, adminToken(), null, null); }
 
   protected void cancelSale(Object saleId) { post("/api/v1/admin/flash-sales/" + saleId + "/cancel", adminToken(), null); }
 
@@ -92,7 +93,7 @@ public abstract class FlashTestBase extends IntegrationTestBase {
   }
 
   /** Places a COD pick-up order for the amount the quote shows. Returns the whole response. */
-  protected org.springframework.http.ResponseEntity<Map> placeOrder(String token, Object productId, int qty, long expectedTotal) {
+  protected ResponseEntity<Map> placeOrder(String token, Object productId, int qty, long expectedTotal) {
     return call(HttpMethod.POST, "/api/v1/orders", token, Map.of("items", List.of(Map.of("productId", productId, "qty", qty)), "coinMode", "NONE",
         "fulfilment", "PICKUP", "paymentMethod", "COD", "expectedTotalPaise", expectedTotal), UUID.randomUUID().toString());
   }
@@ -110,7 +111,7 @@ public abstract class FlashTestBase extends IntegrationTestBase {
     return res.getBody();
   }
 
-  protected org.springframework.http.ResponseEntity<Map> posSale(Object productId, int qty, long pay, String customerMobile) {
+  protected ResponseEntity<Map> posSale(Object productId, int qty, long pay, String customerMobile) {
     Map<String, Object> cart = new HashMap<>();
     cart.put("items", List.of(Map.of("productId", productId, "qty", qty)));
     if (customerMobile != null) cart.put("customerMobile", customerMobile);

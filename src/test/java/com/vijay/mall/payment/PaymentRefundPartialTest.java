@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -101,7 +102,7 @@ class PaymentRefundPartialTest {
   void refundListFilterIsOptionalTrimmedAndValidated() {
     service.refunds(null, -3, 10);
     service.refunds("   ", 0, 10);
-    verify(repo, org.mockito.Mockito.times(2)).refundPage(isNull(), eq(0), anyInt());
+    verify(repo, Mockito.times(2)).refundPage(isNull(), eq(0), anyInt());
     service.refunds(" failed ", 2, 10);
     verify(repo).refundPage(eq("FAILED"), eq(2), anyInt());
     assertThatThrownBy(() -> service.refunds("bogus", 0, 10)).isInstanceOf(ApiException.class);

@@ -2,18 +2,20 @@ package com.vijay.mall.it;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.support.IntegrationTestBase;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 
 /** A retry or double tap of an admin action with the same Idempotency-Key must not apply it twice. */
 @SuppressWarnings({"rawtypes", "unchecked"})
 class AdminRepeatSafetyIT extends IntegrationTestBase {
-  @org.springframework.beans.factory.annotation.Autowired com.vijay.mall.common.idem.AdminOps ops;
+  @Autowired AdminOps ops;
 
   @Test
   void oldKeysArePurgedAndRecentOnesKept() {

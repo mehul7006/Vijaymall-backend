@@ -1,5 +1,6 @@
 package com.vijay.mall.catalog.domain;
 
+import com.vijay.mall.common.FlashPricing;
 import java.util.UUID;
 
 /**
@@ -11,7 +12,7 @@ public record Product(UUID id, UUID categoryId, String nameEn, String nameGu, St
                       long mrpPaise, long pricePaise, String unit, String packSize, String imageUrl,
                       boolean inStock, int qtyAvailable, boolean hotSale, boolean earnsCoins,
                       boolean coinRedeemable, UUID productGroupId, double rating, int reviewCount,
-                      com.vijay.mall.common.FlashPricing.Offer flash) {
+                      FlashPricing.Offer flash) {
 
   /** A product not on a flash sale. */
   public Product(UUID id, UUID categoryId, String nameEn, String nameGu, String description,
@@ -22,7 +23,7 @@ public record Product(UUID id, UUID categoryId, String nameEn, String nameGu, St
         earnsCoins, coinRedeemable, productGroupId, rating, reviewCount, null);
   }
 
-  public Product withFlash(com.vijay.mall.common.FlashPricing.Offer offer) {
+  public Product withFlash(FlashPricing.Offer offer) {
     return new Product(id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl, inStock, qtyAvailable,
         hotSale, earnsCoins, coinRedeemable, productGroupId, rating, reviewCount, offer);
   }

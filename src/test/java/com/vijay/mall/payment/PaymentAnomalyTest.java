@@ -28,9 +28,10 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Wrong-amount and duplicate online payments: refunded in full, never paying (or unpaying) the order. */
@@ -95,7 +96,7 @@ class PaymentAnomalyTest {
     capture("w2", 5000);
     verify(repo).setStatus(paymentId, "CAPTURED", "pay_w2", null, NOW);
     verify(events).publishEvent(new PaymentEvents.PaymentCaptured(orderId, "pay_w2"));
-    verify(repo, org.mockito.Mockito.times(1)).insertAnomaly(any(), any(), any(), anyLong(), anyLong(), any(), any());
+    verify(repo, Mockito.times(1)).insertAnomaly(any(), any(), any(), anyLong(), anyLong(), any(), any());
   }
 
   @Test

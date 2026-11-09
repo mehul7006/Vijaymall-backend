@@ -6,9 +6,11 @@ import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
 import com.vijay.mall.pos.domain.PosRecords.ReturnedSoFar;
 import com.vijay.mall.pos.domain.PosRecords.SaleItemRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
+import com.vijay.mall.pos.domain.ReturnMath;
 import com.vijay.mall.pos.domain.SoldBy;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -157,8 +159,8 @@ public class PosSaleRepository {
   }
 
   /** Invoice numbers of counter bills and credit note numbers of returns, for the ids given. */
-  public java.util.Map<UUID, String> documentNumbers(java.util.Collection<UUID> ids) {
-    java.util.Map<UUID, String> out = new java.util.HashMap<>();
+  public Map<UUID, String> documentNumbers(Collection<UUID> ids) {
+    Map<UUID, String> out = new HashMap<>();
     if (ids.isEmpty()) return out;
     sales.invoiceNumbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
     returns.creditNoteNumbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
@@ -208,7 +210,7 @@ public class PosSaleRepository {
     List<ReturnRecord> prior = returnsOf(saleId);
     Map<UUID, SaleItemRecord> byId = saleItems.stream().collect(Collectors.toMap(SaleItemRecord::id, i -> i));
     long gross = prior.stream().flatMap(r -> r.items().stream())
-        .mapToLong(ri -> com.vijay.mall.pos.domain.ReturnMath.roundShare(byId.get(ri.saleItemId()).linePaise(), ri.qty(),
+        .mapToLong(ri -> ReturnMath.roundShare(byId.get(ri.saleItemId()).linePaise(), ri.qty(),
             byId.get(ri.saleItemId()).qty())).sum();
     return new ReturnedSoFar(gross, prior.stream().mapToInt(ReturnRecord::coinsClawedBack).sum(),
         prior.stream().mapToInt(ReturnRecord::coinsRestored).sum());

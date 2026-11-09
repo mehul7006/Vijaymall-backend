@@ -1,10 +1,12 @@
 package com.vijay.mall.pos.app;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Inputs and outputs of the counter use cases. */
@@ -29,10 +31,10 @@ public final class PosViews {
    * soldAt is when the bill was really rung up (set by an offline till on upload, otherwise the server's time). offline
    * says the goods have already left: stock that came up short is recorded as a shortfall instead of refusing the bill.
    */
-  public record SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount, java.time.Instant soldAt,
+  public record SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount, Instant soldAt,
                           boolean offline, Rung rung) {
     /** A bill that is priced by the server (every bill except an offline one with a rung snapshot). */
-    public SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount, java.time.Instant soldAt,
+    public SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount, Instant soldAt,
                      boolean offline) {
       this(cart, payments, cashTenderedPaise, manualDiscount, soldAt, offline, null);
     }
@@ -96,9 +98,9 @@ public final class PosViews {
   public record PosAttributes(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, boolean posOnly,
                               List<String> barcodes) {}
 
-  public record DayReport(java.time.LocalDate date, long bills, long salesPaise, long taxablePaise, long cgstPaise,
+  public record DayReport(LocalDate date, long bills, long salesPaise, long taxablePaise, long cgstPaise,
                           long sgstPaise, long coinsRedeemed, long creditNotes, long refundsPaise, long netPaise,
-                          java.util.Map<String, Long> paidByMode, java.util.Map<String, Long> refundedByMode,
+                          Map<String, Long> paidByMode, Map<String, Long> refundedByMode,
                           long cashExpectedPaise, long creditGivenPaise, long creditReturnedPaise,
-                          long creditRecoveredPaise, java.util.Map<String, Long> creditRecoveredByMode) {}
+                          long creditRecoveredPaise, Map<String, Long> creditRecoveredByMode) {}
 }

@@ -25,9 +25,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 class PromotionServiceCoverageTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -196,7 +198,7 @@ class PromotionServiceCoverageTest {
 
     assertThat(service.create(coupon(null, " new ", Coupon.FLAT, 100, 0, 0), actor)).isEqualTo(stored);
 
-    var cap = org.mockito.ArgumentCaptor.forClass(Coupon.class);
+    var cap = ArgumentCaptor.forClass(Coupon.class);
     verify(repo).insert(cap.capture());
     assertThat(cap.getValue().code()).isEqualTo("NEW");
     verify(audit).log(actor, "CREATE", "coupon", id, " new ");
@@ -288,7 +290,7 @@ class PromotionServiceCoverageTest {
   // ---- validation of admin input ----
 
   private String field(Coupon in) {
-    var e = org.junit.jupiter.api.Assertions.assertThrows(ApiException.class, () -> service.create(in, actor));
+    var e = Assertions.assertThrows(ApiException.class, () -> service.create(in, actor));
     return e.details().toString();
   }
 

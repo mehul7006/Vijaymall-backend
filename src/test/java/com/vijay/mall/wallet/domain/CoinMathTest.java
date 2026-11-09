@@ -3,10 +3,12 @@ package com.vijay.mall.wallet.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class CoinMathTest {
-  private static final long RUPEE = 100; // paise
+  /** paise */
+  private static final long RUPEE = 100;
 
   private static CoinRule proRata(long spendRupees, long coins) {
     return new CoinRule("standard", spendRupees * RUPEE, coins, CoinMode.PRO_RATA, 0);
@@ -32,7 +34,7 @@ class CoinMathTest {
   }
   @Test void no_rules_means_zero() { assertThat(CoinMath.best(5000 * RUPEE, List.of())).isZero(); }
   @Test void rule_rejects_nonsense() {
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new CoinRule("bad", 0, 10, CoinMode.PRO_RATA, 0))
+    Assertions.assertThatThrownBy(() -> new CoinRule("bad", 0, 10, CoinMode.PRO_RATA, 0))
         .isInstanceOf(IllegalArgumentException.class);
   }
 }

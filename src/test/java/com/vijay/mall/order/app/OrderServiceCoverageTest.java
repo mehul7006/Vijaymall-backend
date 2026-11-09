@@ -40,6 +40,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -288,5 +289,5 @@ class OrderServiceCoverageTest {
     verify(repo, never()).setStockReserved(any(), anyBoolean());
   }
 
-  private static int anyInt() { return org.mockito.ArgumentMatchers.anyInt(); }
+  private static int anyInt() { return ArgumentMatchers.anyInt(); }
 }

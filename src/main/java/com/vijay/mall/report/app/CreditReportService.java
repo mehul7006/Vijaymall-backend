@@ -1,7 +1,7 @@
 package com.vijay.mall.report.app;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.Page;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Clock;
@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,7 +137,7 @@ public class CreditReportService {
     if (o == null) return null;
     if (o instanceof Instant i) return i;
     if (o instanceof OffsetDateTime d) return d.toInstant();
-    if (o instanceof java.util.Date d) return d.toInstant();
+    if (o instanceof Date d) return d.toInstant();
     return Instant.parse(o.toString());
   }
 }

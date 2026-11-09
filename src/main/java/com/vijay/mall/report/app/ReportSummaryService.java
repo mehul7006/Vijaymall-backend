@@ -1,7 +1,8 @@
 package com.vijay.mall.report.app;
 
-import io.swagger.v3.oas.annotations.media.Schema;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Clock;
@@ -15,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,14 +77,14 @@ public class ReportSummaryService {
   @Transactional(readOnly = true)
   public Summary summary(String period, LocalDate from, LocalDate to) {
     Range r = range(period, from, to, clock.instant().atZone(SHOP).toLocalDate());
-    return caches == null ? compute(r) : caches.get(com.vijay.mall.common.cache.AppCaches.Name.REPORT_SUMMARY, r.from() + "/" + r.to(), () -> compute(r));
+    return caches == null ? compute(r) : caches.get(AppCaches.Name.REPORT_SUMMARY, r.from() + "/" + r.to(), () -> compute(r));
   }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): a date range report is heavy to add up, so it is kept for a minute. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   private Summary compute(Range r) {
     Instant f = r.from().atStartOfDay(SHOP).toInstant();
@@ -134,7 +137,7 @@ public class ReportSummaryService {
                 + "WHERE s.created_at >= :f AND s.created_at < :t GROUP BY i.product_id ORDER BY 4 DESC LIMIT 100")
         .setParameter("f", f).setParameter("t", t).getResultList();
     Map<UUID, TopProduct> merged = new LinkedHashMap<>();
-    for (Object[] row : java.util.stream.Stream.concat(online.stream(), counter.stream()).toList()) {
+    for (Object[] row : Stream.concat(online.stream(), counter.stream()).toList()) {
       UUID id = row[0] instanceof UUID u ? u : UUID.fromString(row[0].toString());
       TopProduct add = new TopProduct(id, (String) row[1], ((Number) row[2]).longValue(), ((Number) row[3]).longValue());
       merged.merge(id, add, (a, b) -> new TopProduct(a.productId(), a.name(), a.qty() + b.qty(), a.salesPaise() + b.salesPaise()));

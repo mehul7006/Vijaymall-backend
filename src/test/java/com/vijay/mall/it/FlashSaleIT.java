@@ -6,8 +6,11 @@ import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.flash.app.FlashLifecycle;
 import com.vijay.mall.support.FlashTestBase;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +35,7 @@ class FlashSaleIT extends FlashTestBase {
   @Autowired FlashLifecycle lifecycle;
   @Autowired FlashPricing pricing;
   @Autowired TransactionTemplate tx;
-  @Autowired io.micrometer.core.instrument.MeterRegistry meters;
+  @Autowired MeterRegistry meters;
 
   private static final String ADMIN_API = "/api/v1/admin/flash-sales";
 
@@ -700,7 +703,7 @@ class FlashSaleIT extends FlashTestBase {
     assertThat(byHour.get(0).get("hour").toString()).matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:00");
     assertThat(byHour.get(0).get("units")).isEqualTo(6);
 
-    String today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).toString();
+    String today = LocalDate.now(ZoneId.of("Asia/Kolkata")).toString();
     Map range = get(ADMIN_API + "/report?from=" + today + "&to=" + today, admin()).getBody();
     List<Map> bySale = (List<Map>) range.get("bySale");
     assertThat(bySale).anySatisfy(s -> {

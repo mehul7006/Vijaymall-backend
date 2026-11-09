@@ -1,15 +1,16 @@
 package com.vijay.mall.pos.api;
 
+import com.vijay.mall.pos.app.ShopProfileService;
 import com.vijay.mall.pos.app.ShopService;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.context.request.WebRequest;
-import com.vijay.mall.pos.app.ShopProfileService;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.WebRequest;
 
 /**
  * Everything the apps show about the shop: name, address, phone, tagline, about text (shop settings) plus logo, contact links, opening hours,
@@ -38,7 +39,7 @@ public class PublicShopController {
 
   public PublicShopController(ShopService shop) { this(shop, null); }
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public PublicShopController(ShopService shop, ShopProfileService profile) {
     this.shop = shop;
     this.profile = profile;

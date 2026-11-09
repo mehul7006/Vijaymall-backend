@@ -54,9 +54,12 @@ public class FcmPushSender implements PushSender {
   private final String baseUrl;
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-  private Account account;       // guarded by this
-  private String accessToken;    // guarded by this
-  private Instant refreshAt;     // guarded by this
+  /** guarded by this */
+  private Account account;
+  /** guarded by this */
+  private String accessToken;
+  /** guarded by this */
+  private Instant refreshAt;
 
   public FcmPushSender(RuntimeSettings settings, DeviceRepository devices, JsonMapper json, Clock clock,
                        @Value("${app.fcm.base-url:https://fcm.googleapis.com}") String baseUrl) {

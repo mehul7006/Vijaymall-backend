@@ -5,9 +5,10 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
-import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import com.vijay.mall.purchasing.infra.PurchaseRepository.Header;
+import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -31,11 +32,12 @@ public class PurchaseService {
   public record ItemView(UUID productId, String name, int qty, long unitCostPaise, long lineCostPaise) {}
 
   public record PurchaseView(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
-                             java.time.Instant createdAt, List<ItemView> items) {}
+                             Instant createdAt, List<ItemView> items) {}
 
   public static final int MAX_LINES = 200;
   public static final int MAX_QTY = 10_000_000;
-  public static final long MAX_UNIT_COST = 1_000_000_00L; // Rs 10 lakh per unit: anything above is a typing mistake
+  /** Rs 10 lakh per unit: anything above is a typing mistake */
+  public static final long MAX_UNIT_COST = 1_000_000_00L;
 
   private final PurchaseRepository repo;
   private final InventoryService inventory;

@@ -21,6 +21,7 @@ import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.app.QuoteService;
+import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.Item;
 import com.vijay.mall.pos.app.PosViews.ManualDiscount;
@@ -45,6 +46,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -368,7 +370,7 @@ class PosRungSaleTest {
   void aMalformedBillIsRefused() {
     refused(() -> ring(new Rung(null), 1), "no lines");
     refused(() -> ring(new Rung(List.of()), 1), "no lines");
-    refused(() -> ring(new Rung(java.util.Arrays.asList((RungLine) null)), 1), "productId");
+    refused(() -> ring(new Rung(Arrays.asList((RungLine) null)), 1), "productId");
     refused(() -> ring(line(null, 1, 100L, 5, null), 100), "productId");
     refused(() -> ring(line(rice, null, 100L, 5, null), 100), "quantity");
     refused(() -> ring(line(rice, 0, 100L, 5, null), 100), "quantity");
@@ -407,7 +409,7 @@ class PosRungSaleTest {
   void paymentsThatDoNotAddUpToTheRungTotalAreRefused() {
     refused(() -> ring(rung(rice(2, 5000)), 9999), "payments add up");
     refused(() -> ring(cart(), rung(rice(2, 5000)), null, null, null, null), "payments add up");
-    refused(() -> ring(cart(), rung(rice(2, 5000)), java.util.Arrays.asList((Pay) null), null, null, null), "empty");
+    refused(() -> ring(cart(), rung(rice(2, 5000)), Arrays.asList((Pay) null), null, null, null), "empty");
     refused(() -> ring(cart(), rung(rice(2, 5000)), List.of(new Pay("BITCOIN", 10000, null)), null, null, null), "payment mode");
   }
 
@@ -427,7 +429,7 @@ class PosRungSaleTest {
         mock(PosHoldRepository.class), counters, audit, JsonMapper.builder().build(), new TransactionTemplate(mock(PlatformTransactionManager.class)),
         Clock.fixed(NOW, ZoneOffset.UTC), mock(CreditService.class));
     legacy.setOfflineExceptions(exceptions);
-    when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(new com.vijay.mall.order.domain.Quote(List.of(), 5900, null, 0, 0, 0, 0, 5900, 0, List.of()));
+    when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(new Quote(List.of(), 5900, null, 0, 0, 0, 0, 5900, 0, List.of()));
     when(inventory.takeWhatIsLeft(anyList(), any(), anyString())).thenReturn(List.of(Map.of("productId", rice.toString(), "sold", 1, "taken", 0)));
     legacy.sale(cashier, false, "legacy-1", new SaleInput(new Cart(List.of(new Item(rice, 1)), null, null, null, null),
         List.of(new Pay("CASH", 5900, null)), null, null, null, true));

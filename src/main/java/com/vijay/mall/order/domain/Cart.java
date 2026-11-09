@@ -1,7 +1,8 @@
 package com.vijay.mall.order.domain;
 
-import io.swagger.v3.oas.annotations.media.Schema;
+import com.vijay.mall.common.OrderLimits;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,7 +13,7 @@ import java.util.UUID;
 public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coinMode, Integer percent, Instant updatedAt) {
   public static final int MAX_LINES = 100;
   /** The most units of one product in a basket; the same constant the quote and order calls use. */
-  public static final int MAX_QTY = com.vijay.mall.common.OrderLimits.MAX_LINE_QTY;
+  public static final int MAX_QTY = OrderLimits.MAX_LINE_QTY;
 
   @Schema(name = "BasketLine")
 

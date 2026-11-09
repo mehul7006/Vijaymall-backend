@@ -2,24 +2,27 @@ package com.vijay.mall.common.error;
 
 import com.vijay.mall.common.web.TraceIdFilter;
 import jakarta.validation.ConstraintViolationException;
+import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.MissingRequestHeaderException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -77,14 +80,14 @@ public class GlobalExceptionHandler {
     return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "File too large", null);
   }
 
-  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
-  ResponseEntity<ErrorBody> denied(org.springframework.security.access.AccessDeniedException e) {
+  @ExceptionHandler(AccessDeniedException.class)
+  ResponseEntity<ErrorBody> denied(AccessDeniedException e) {
     return body(HttpStatus.FORBIDDEN, "FORBIDDEN", "Not allowed", null);
   }
 
   /** Bad input that only the database can see: a missing referenced row is the caller's mistake (400), a duplicate is a conflict (409). */
-  @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
-  ResponseEntity<ErrorBody> integrity(org.springframework.dao.DataIntegrityViolationException e) {
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  ResponseEntity<ErrorBody> integrity(DataIntegrityViolationException e) {
     String state = sqlState(e);
     if ("23503".equals(state)) {
       log.info("Rejected: references something that does not exist: {}", e.getMostSpecificCause().getMessage());
@@ -99,7 +102,7 @@ public class GlobalExceptionHandler {
 
   private static String sqlState(Throwable t) {
     for (Throwable c = t; c != null; c = c.getCause()) {
-      if (c instanceof java.sql.SQLException s && s.getSQLState() != null) return s.getSQLState();
+      if (c instanceof SQLException s && s.getSQLState() != null) return s.getSQLState();
       if (c.getCause() == c) break;
     }
     return null;

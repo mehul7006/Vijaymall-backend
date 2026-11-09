@@ -27,18 +27,21 @@ import com.vijay.mall.flash.app.FlashSaleService.ItemInput;
 import com.vijay.mall.flash.app.FlashSaleService.UpdateInput;
 import com.vijay.mall.flash.app.FlashViews.SaleView;
 import com.vijay.mall.flash.app.FlashViews.ShopSales;
+import com.vijay.mall.flash.domain.FlashKind;
 import com.vijay.mall.flash.domain.FlashMath;
-import com.vijay.mall.flash.infra.FlashRepository;
 import com.vijay.mall.flash.infra.FlashRepository.Clash;
 import com.vijay.mall.flash.infra.FlashRepository.Item;
 import com.vijay.mall.flash.infra.FlashRepository.Sale;
 import com.vijay.mall.flash.infra.FlashRepository.SaleWithItems;
+import com.vijay.mall.flash.infra.FlashRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -48,6 +51,8 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 /** Every validation, status guard and view branch of FlashSaleService, with the repository and catalog mocked. */
 @SuppressWarnings("unchecked")
@@ -77,7 +82,7 @@ class FlashSaleServiceUnitTest {
     svc = new FlashSaleService(repo, catalog, audit, live, Clock.fixed(NOW, ZoneOffset.UTC), pricing);
     db.put(P1, product(P1, 10000, true));
     db.put(P2, product(P2, 20000, true));
-    when(catalog.posProducts(anyCollection())).thenAnswer(inv -> ((java.util.Collection<UUID>) inv.getArgument(0)).stream()
+    when(catalog.posProducts(anyCollection())).thenAnswer(inv -> ((Collection<UUID>) inv.getArgument(0)).stream()
         .map(db::get).filter(Objects::nonNull).toList());
     current = sale(PAST, LATER, null);
     when(repo.findSale(any())).thenAnswer(inv -> Optional.ofNullable(current));
@@ -153,7 +158,7 @@ class FlashSaleServiceUnitTest {
     svc.create(create("S", "PERCENT", 20L, 0, " ", List.of(in(P1))), ACTOR);
     svc.create(create("S", "percent", 20L, 999, "pos", List.of(in(P1))), ACTOR);
     ArgumentCaptor<Sale> s = ArgumentCaptor.forClass(Sale.class);
-    verify(repo, org.mockito.Mockito.times(3)).insertSale(s.capture());
+    verify(repo, Mockito.times(3)).insertSale(s.capture());
     assertThat(s.getAllValues()).extracting(Sale::channel).containsExactly("ONLINE", "BOTH", "POS");
   }
 
@@ -164,7 +169,7 @@ class FlashSaleServiceUnitTest {
     svc.create(create("S", null, null, null, null, List.of(new ItemInput(P1, "PERCENT", 10L, null, null))), ACTOR);
     svc.create(create("S", null, null, null, null, List.of(new ItemInput(P1, "FIXED_PRICE", 5000L, 7, 3))), ACTOR);
     ArgumentCaptor<Item> i = ArgumentCaptor.forClass(Item.class);
-    verify(repo, org.mockito.Mockito.times(2)).insertItem(i.capture(), eq(NOW));
+    verify(repo, Mockito.times(2)).insertItem(i.capture(), eq(NOW));
     assertThat(i.getAllValues().get(0).discountKind()).isEqualTo("PERCENT");
     assertThat(i.getAllValues().get(1).discountValue()).isEqualTo(5000);
     assertThat(i.getAllValues().get(1).maxQty()).isEqualTo(7);
@@ -194,7 +199,7 @@ class FlashSaleServiceUnitTest {
     svc.create(create("S", "PERCENT", 20L, null, null, List.of(new ItemInput(P1, "  ", 5L, FlashSaleService.MAX_QTY, 0))), ACTOR);
     svc.create(create("S", "PERCENT", 20L, null, null, List.of(new ItemInput(P2, "NONE", 5L, 1, 999))), ACTOR);
     ArgumentCaptor<Item> i = ArgumentCaptor.forClass(Item.class);
-    verify(repo, org.mockito.Mockito.times(2)).insertItem(i.capture(), eq(NOW));
+    verify(repo, Mockito.times(2)).insertItem(i.capture(), eq(NOW));
     assertThat(i.getAllValues()).allSatisfy(x -> assertThat(x.discountKind()).isNull());
   }
 
@@ -390,7 +395,7 @@ class FlashSaleServiceUnitTest {
     updateItem(item(5, 10), false, new ItemInput(null, null, null, null, null));
     updateItem(item(5, null), false, new ItemInput(null, null, null, null, null));
     updateItem(item(0, 10), true, new ItemInput(null, null, null, 11, null));
-    verify(repo, org.mockito.Mockito.times(5)).updateItem(any());
+    verify(repo, Mockito.times(5)).updateItem(any());
 
     itemLocked(item(5, 10), false, new ItemInput(null, null, null, 9, null), "can only be raised");
     itemLocked(item(5, null), false, new ItemInput(null, null, null, 9, null), "can only be raised");
@@ -443,7 +448,7 @@ class FlashSaleServiceUnitTest {
     svc.cancel(SALE, ACTOR);
     current = sale(PAST, LATER, null);
     svc.cancel(SALE, ACTOR);
-    verify(audit, org.mockito.Mockito.times(2)).log(eq(ACTOR), eq("FLASH_CANCEL"), anyString(), eq(SALE), anyString());
+    verify(audit, Mockito.times(2)).log(eq(ACTOR), eq("FLASH_CANCEL"), anyString(), eq(SALE), anyString());
   }
 
   // ---------- duplicate ----------
@@ -472,17 +477,17 @@ class FlashSaleServiceUnitTest {
     // exactly at the limit stays whole
     current = new Sale(SALE, "n".repeat(73), "", "", PAST, LATER, "BOTH", "PERCENT", 20, 0, null, ACTOR, PAST, PAST);
     svc.duplicate(SALE, new DuplicateInput(null, null, null), ACTOR);
-    verify(repo, org.mockito.Mockito.times(2)).insertSale(s.capture());
+    verify(repo, Mockito.times(2)).insertSale(s.capture());
     assertThat(s.getValue().name()).isEqualTo("n".repeat(73) + " (copy)");
 
     Instant start = NOW.plus(Duration.ofDays(1));
     svc.duplicate(SALE, new DuplicateInput(" Again ", start, start.plusSeconds(600)), ACTOR);
-    verify(repo, org.mockito.Mockito.times(3)).insertSale(s.capture());
+    verify(repo, Mockito.times(3)).insertSale(s.capture());
     assertThat(s.getValue().name()).isEqualTo("Again");
     assertThat(s.getValue().endsAt()).isEqualTo(start.plusSeconds(600));
 
     svc.duplicate(SALE, new DuplicateInput(null, start, null), ACTOR);
-    verify(repo, org.mockito.Mockito.times(4)).insertSale(s.capture());
+    verify(repo, Mockito.times(4)).insertSale(s.capture());
     assertThat(s.getValue().endsAt()).isEqualTo(start.plus(Duration.between(PAST, LATER)));
   }
 
@@ -534,7 +539,7 @@ class FlashSaleServiceUnitTest {
 
   @Test
   void listFiltersByStatus() {
-    when(repo.list(any(), any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(current));
+    when(repo.list(any(), any(), ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt())).thenReturn(List.of(current));
     when(repo.count(any(), any())).thenReturn(1L);
     currentItems = List.of(item(0, null));
     Page<FlashViews.SaleSummary> all = svc.list(null, -3, 1000);
@@ -554,7 +559,7 @@ class FlashSaleServiceUnitTest {
 
   // ---------- read (customers) ----------
   private FlashPricingService.ItemDef def(UUID sale, String channel, UUID itemId, UUID product, Integer max, long pct) {
-    return new FlashPricingService.ItemDef(sale, "n", "b", "d", itemId, product, new FlashMath.Rule(com.vijay.mall.flash.domain.FlashKind.PERCENT, pct),
+    return new FlashPricingService.ItemDef(sale, "n", "b", "d", itemId, product, new FlashMath.Rule(FlashKind.PERCENT, pct),
         max, 2, NOW, NOW, channel);
   }
 
@@ -577,7 +582,7 @@ class FlashSaleServiceUnitTest {
     Sale sEmpty = shopSale(empty, "BOTH", PAST, LATER);
     Sale sComing = shopSale(coming, "BOTH", soon, LATER);
     Sale sEnded = shopSale(ended, "BOTH", PAST.minus(Duration.ofHours(1)), PAST);
-    Map<UUID, List<FlashPricingService.ItemDef>> byProduct = new java.util.LinkedHashMap<>();
+    Map<UUID, List<FlashPricingService.ItemDef>> byProduct = new LinkedHashMap<>();
     byProduct.put(pa, List.of(def(running, "ONLINE", i1, pa, 10, 20)));
     byProduct.put(pb, List.of(def(running, "ONLINE", i2, pb, null, 20)));       // blank pack size -> unit
     byProduct.put(pc, List.of(def(running, "ONLINE", i3, pc, 4, 20)));          // null pack size -> unit, sold more than the cap

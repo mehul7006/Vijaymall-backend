@@ -6,7 +6,6 @@ import com.vijay.mall.pos.app.PosCatalogService;
 import com.vijay.mall.pos.app.PosReportService;
 import com.vijay.mall.pos.app.PosReturnService;
 import com.vijay.mall.pos.app.PosService;
-import com.vijay.mall.pos.app.PosViews;
 import com.vijay.mall.pos.app.PosViews.BillView;
 import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.DayReport;
@@ -15,12 +14,14 @@ import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.PosProduct;
 import com.vijay.mall.pos.app.PosViews.ReturnInput;
 import com.vijay.mall.pos.app.PosViews.ReturnLine;
-import com.vijay.mall.pos.app.PosViews.Scan;
 import com.vijay.mall.pos.app.PosViews.SaleInput;
+import com.vijay.mall.pos.app.PosViews.Scan;
+import com.vijay.mall.pos.app.PosViews;
 import com.vijay.mall.pos.app.ShopService;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
+import com.vijay.mall.wallet.domain.CoinRedemption;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -46,7 +47,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/pos")
 public class PosController {
   public record CartBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
-                         com.vijay.mall.wallet.domain.CoinRedemption.Mode coinMode, Integer percent) {
+                         CoinRedemption.Mode coinMode, Integer percent) {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
   }
 

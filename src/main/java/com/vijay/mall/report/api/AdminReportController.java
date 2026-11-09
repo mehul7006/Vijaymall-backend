@@ -1,13 +1,14 @@
 package com.vijay.mall.report.api;
 
+import com.vijay.mall.common.Page;
 import com.vijay.mall.report.app.CreditReportService;
 import com.vijay.mall.report.app.ReportService;
 import com.vijay.mall.report.app.ReportSummaryService;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -44,7 +45,7 @@ public class AdminReportController {
 
   /** Customers with credit accounts, biggest balance first. */
   @GetMapping("/credit/accounts")
-  public com.vijay.mall.common.Page<CreditReportService.Debtor> creditAccounts(
+  public Page<CreditReportService.Debtor> creditAccounts(
       @RequestParam(defaultValue = "true") boolean outstandingOnly, @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
     return creditReports.debtors(outstandingOnly, page, size);

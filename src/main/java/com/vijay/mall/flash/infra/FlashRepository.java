@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -189,7 +190,7 @@ public class FlashRepository {
     Map<UUID, List<Item>> items = new LinkedHashMap<>();
     jdbc.sql("select i.* from flash_sale_item i join flash_sale s on s.id = i.flash_sale_id where s.cancelled_at is null and s.ends_at > :now "
         + "order by i.created_at, i.id").param("now", utc(now)).query(ITEM).list()
-        .forEach(i -> items.computeIfAbsent(i.flashSaleId(), _ -> new java.util.ArrayList<>()).add(i));
+        .forEach(i -> items.computeIfAbsent(i.flashSaleId(), _ -> new ArrayList<>()).add(i));
     return sales.stream().map(s -> new SaleWithItems(s, items.getOrDefault(s.id(), List.of()))).toList();
   }
 

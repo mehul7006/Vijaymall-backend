@@ -14,8 +14,8 @@ import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
-import com.vijay.mall.pos.infra.OfflineExceptionRepository;
 import com.vijay.mall.pos.infra.OfflineExceptionRepository.Row;
+import com.vijay.mall.pos.infra.OfflineExceptionRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class OfflineExceptionServiceTest {
   private static final Instant NOW = Instant.parse("2026-11-08T10:00:00Z");
@@ -105,7 +106,7 @@ class OfflineExceptionServiceTest {
     when(repo.find(id)).thenReturn(Optional.of(row(NOW)));
     service.review(id, " ", admin);
     service.review(id, null, admin);
-    verify(repo, org.mockito.Mockito.times(2)).review(id, admin, null, NOW);
+    verify(repo, Mockito.times(2)).review(id, admin, null, NOW);
     assertThatThrownBy(() -> service.review(id, "x".repeat(501), admin)).isInstanceOf(ApiException.class);
   }
 

@@ -7,10 +7,12 @@ import com.vijay.mall.payment.app.PaymentService;
 import com.vijay.mall.payment.infra.PaymentRepository;
 import com.vijay.mall.support.FakeGateway;
 import com.vijay.mall.support.IntegrationTestBase;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -19,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -40,7 +43,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Autowired PaymentService payments;
   @Autowired PaymentRepository paymentRepo;
 
-  @org.junit.jupiter.api.BeforeEach
+  @BeforeEach
   void enableOnlinePayment() {
     restock("Orange Juice", 20);
     // ONLINE ships switched off; the shop owner turns it on from the admin screen
@@ -66,12 +69,12 @@ class OnlinePaymentIT extends IntegrationTestBase {
   }
 
   @SuppressWarnings("rawtypes")
-  private org.springframework.http.ResponseEntity<Map> webhook(String signature, Map<String, Object> body) {
+  private ResponseEntity<Map> webhook(String signature, Map<String, Object> body) {
     return client().post().uri("/api/v1/payments/webhook/fake").contentType(MediaType.APPLICATION_JSON)
         .headers(h -> { if (signature != null) h.set("x-fake-signature", signature); }).body(body).retrieve().toEntity(Map.class);
   }
 
-  private org.springframework.http.ResponseEntity<Map> event(String id, String type, String orderId, long amount) {
+  private ResponseEntity<Map> event(String id, String type, String orderId, long amount) {
     return webhook("ok", Map.of("eventId", id, "type", type, "providerOrderId", "fake_" + orderId, "amount", amount));
   }
 
@@ -202,7 +205,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
     Instant old = Instant.now().minusSeconds(3600);
     jdbc.update("INSERT INTO refund (id, payment_id, amount_paise, status, reason, created_at, attempts, updated_at) "
         + "SELECT ?, id, 100, 'PROCESSING', 'crash', ?, 0, ? FROM payment WHERE order_id = ?::uuid",
-        refund, java.sql.Timestamp.from(old), java.sql.Timestamp.from(old), p.orderId());
+        refund, Timestamp.from(old), Timestamp.from(old), p.orderId());
     assertThat(paymentRepo.requeueStuckRefunds(Instant.now().minusSeconds(600), Instant.now())).isGreaterThanOrEqualTo(1);
     assertThat(jdbc.queryForMap("SELECT status, attempts FROM refund WHERE id = ?", refund))
         .containsEntry("status", "PENDING").containsEntry("attempts", 1);
@@ -267,7 +270,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
     int before = stock(placeOnlineProductId());
     var p = placeOnline("Orange Juice", 3);
     assertThat(stock(p.productId())).isEqualTo(before);
-    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
     orders.expireUnpaid();
     assertThat(order(p)).containsEntry("status", "CANCELLED");
     assertThat(stock(p.productId())).isEqualTo(before);
@@ -276,7 +279,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Test
   void paymentArrivingAfterExpiryIsRefunded() {
     var p = placeOnline("Orange Juice", 1);
-    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
     orders.expireUnpaid();
     int refundsBefore = fake.refunds.size();
     event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
@@ -287,7 +290,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Test
   void reconcileLeavesPaymentsAloneWhenTheProviderHasNothingToReport() {
     var p = placeOnline("Orange Juice", 1);
-    jdbc.update("UPDATE payment SET created_at = ? WHERE order_id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(3600)), p.orderId());
+    jdbc.update("UPDATE payment SET created_at = ? WHERE order_id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(3600)), p.orderId());
     payments.reconcile();
     assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
   }

@@ -1,5 +1,8 @@
 package com.vijay.mall.inventory.infra;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -25,11 +28,11 @@ public class DefectiveRepository {
 
   public void insert(UUID id, UUID productId, int qty, String source, UUID refId, String note, UUID actor, Instant now) {
     jdbc.sql("insert into defective_stock (id, product_id, qty, source, ref_id, note, created_at, created_by) values (:id, :p, :q, :s, :r, :n, :t, :a)")
-        .param("id", id).param("p", productId).param("q", qty).param("s", source).param("r", refId).param("n", note).param("t", java.sql.Timestamp.from(now))
+        .param("id", id).param("p", productId).param("q", qty).param("s", source).param("r", refId).param("n", note).param("t", Timestamp.from(now))
         .param("a", actor).update();
   }
 
-  private static Row map(java.sql.ResultSet r) throws java.sql.SQLException {
+  private static Row map(ResultSet r) throws SQLException {
     return new Row(r.getObject("id", UUID.class), r.getObject("product_id", UUID.class), r.getString("name_en"), r.getInt("qty"), r.getString("source"),
         r.getObject("ref_id", UUID.class), r.getString("note"), r.getString("status"), r.getTimestamp("created_at").toInstant(),
         r.getObject("created_by", UUID.class), r.getTimestamp("reviewed_at") == null ? null : r.getTimestamp("reviewed_at").toInstant(),
@@ -70,12 +73,12 @@ public class DefectiveRepository {
   /** The reviewer's decision on a claim: false when the batch was not waiting for review (already decided, or unknown). */
   public boolean review(UUID id, String newStatus, String note, UUID actor, Instant now) {
     return jdbc.sql("update defective_stock set status = :s, reviewed_at = :t, reviewed_by = :a, review_note = :n where id = :id and status = 'PENDING_REVIEW'")
-        .param("s", newStatus).param("t", java.sql.Timestamp.from(now)).param("a", actor).param("n", note).param("id", id).update() == 1;
+        .param("s", newStatus).param("t", Timestamp.from(now)).param("a", actor).param("n", note).param("id", id).update() == 1;
   }
 
   /** Moves a HELD batch to its final status; false when it was not HELD (already dealt with, or unknown). */
   public boolean resolve(UUID id, String status, String note, UUID actor, Instant now) {
     return jdbc.sql("update defective_stock set status = :s, resolved_at = :t, resolved_by = :a, resolve_note = :n where id = :id and status = 'HELD'")
-        .param("s", status).param("t", java.sql.Timestamp.from(now)).param("a", actor).param("n", note).param("id", id).update() == 1;
+        .param("s", status).param("t", Timestamp.from(now)).param("a", actor).param("n", note).param("id", id).update() == 1;
   }
 }

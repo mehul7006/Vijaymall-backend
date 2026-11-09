@@ -7,6 +7,7 @@ import com.vijay.mall.order.domain.OrderStatus;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminOrderController {
   public record StatusBody(@NotNull OrderStatus status, String note) {}
 
-  public record RejectBody(@NotNull @jakarta.validation.constraints.Size(min = 1, max = 200) String reason) {}
+  public record RejectBody(@NotNull @Size(min = 1, max = 200) String reason) {}
 
   private final OrderService orders;
 

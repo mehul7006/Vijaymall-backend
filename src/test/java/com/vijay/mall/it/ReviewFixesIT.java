@@ -3,6 +3,7 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,7 +26,7 @@ class ReviewFixesIT extends IntegrationTestBase {
   }
 
   private Map address(String label, Boolean isDefault) {
-    var m = new java.util.HashMap<String, Object>(Map.of("label", label, "line1", "12 Main Road", "area", "Navrangpura", "pincode", "380009"));
+    var m = new HashMap<String, Object>(Map.of("label", label, "line1", "12 Main Road", "area", "Navrangpura", "pincode", "380009"));
     if (isDefault != null) m.put("isDefault", isDefault);
     return m;
   }
@@ -81,7 +82,7 @@ class ReviewFixesIT extends IntegrationTestBase {
   void anAlertLevelOfZeroCanBeSetOnEditAndAnOmittedOneKeepsTheCurrent() {
     String admin = adminToken();
     Map current = get("/api/v1/admin/products/" + productByName(admin, "Orange Juice").get("id"), admin).getBody();
-    Map body = new java.util.HashMap<String, Object>();
+    Map body = new HashMap<String, Object>();
     body.put("categoryId", current.get("categoryId"));
     body.put("nameEn", current.get("nameEn"));
     body.put("nameGu", current.get("nameGu"));
@@ -108,7 +109,7 @@ class ReviewFixesIT extends IntegrationTestBase {
     String admin = adminToken();
     restock("Orange Juice", 60);
     Map current = get("/api/v1/admin/products/" + productByName(admin, "Orange Juice").get("id"), admin).getBody();
-    Map body = new java.util.HashMap<String, Object>();
+    Map body = new HashMap<String, Object>();
     body.put("categoryId", current.get("categoryId"));
     body.put("nameEn", current.get("nameEn"));
     body.put("nameGu", current.get("nameGu"));
@@ -165,7 +166,7 @@ class ReviewFixesIT extends IntegrationTestBase {
     Object rice = products.stream().filter(p -> "Basmati Rice".equals(p.get("nameEn")) && "1 kg".equals(p.get("packSize"))).findFirst().orElseThrow().get("id");
     restock("Basmati Rice", 100);
     var noMode = call(HttpMethod.POST, "/api/v1/pos/sales", cashier, Map.of("cart", Map.of("items", List.of(Map.of("productId", rice, "qty", 1))),
-        "payments", List.of(new java.util.HashMap<String, Object>(Map.of("amountPaise", 12500)))), UUID.randomUUID().toString());
+        "payments", List.of(new HashMap<String, Object>(Map.of("amountPaise", 12500)))), UUID.randomUUID().toString());
     assertThat(noMode.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     // offline upload: a bill without a cart is reported as refused with a validation code, not as an internal error
     var sync = call(HttpMethod.POST, "/api/v1/pos/sync/sales", cashier,

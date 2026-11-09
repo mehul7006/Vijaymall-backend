@@ -12,12 +12,15 @@ import com.vijay.mall.common.ShopIdentity;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -173,7 +176,7 @@ class OrderRepositoryCoverageTest {
     assertThat(repo.numbers(List.of())).isEmpty();
     verify(orders, never()).numbers(any());
     UUID a = UUID.randomUUID();
-    when(orders.numbers(List.of(a))).thenReturn(java.util.Collections.singletonList(new Object[] {a, "VSM-5"}));
+    when(orders.numbers(List.of(a))).thenReturn(Collections.singletonList(new Object[] {a, "VSM-5"}));
     assertThat(repo.numbers(List.of(a))).containsEntry(a, "VSM-5");
   }
 
@@ -187,17 +190,17 @@ class OrderRepositoryCoverageTest {
 
     repo.adminList(null, null, 0, 10);
     repo.adminList("  ", "  ", 0, 10);
-    verify(orders, org.mockito.Mockito.times(2)).findAll(any(Pageable.class));
+    verify(orders, Mockito.times(2)).findAll(any(Pageable.class));
 
     repo.adminList(null, " 1001 ", 0, 10);
-    verify(orders).searchByNumber(org.mockito.ArgumentMatchers.eq("%1001%"), any());
+    verify(orders).searchByNumber(ArgumentMatchers.eq("%1001%"), any());
 
     repo.adminList("PLACED", null, 0, 10);
     repo.adminList("PLACED", "", 0, 10);
-    verify(orders, org.mockito.Mockito.times(2)).findByStatus(org.mockito.ArgumentMatchers.eq("PLACED"), any());
+    verify(orders, Mockito.times(2)).findByStatus(ArgumentMatchers.eq("PLACED"), any());
 
     repo.adminList("PLACED", " 77 ", 0, 10);
-    verify(orders).searchByStatusAndNumber(org.mockito.ArgumentMatchers.eq("PLACED"), org.mockito.ArgumentMatchers.eq("%77%"), any());
+    verify(orders).searchByStatusAndNumber(ArgumentMatchers.eq("PLACED"), ArgumentMatchers.eq("%77%"), any());
     assertThat(OrderRepository.pattern(" VSM-1_0%1 ")).as("case folded, wildcards removed").isEqualTo("%vsm-101%");
     verify(items, never()).countsFor(any());
   }
@@ -206,9 +209,9 @@ class OrderRepositoryCoverageTest {
   void theThreeArgumentAdminListHasNoSearchText() {
     UUID id = UUID.randomUUID();
     OrderEntity e = entity(id, "PLACED", 0L);
-    when(orders.findByStatus(org.mockito.ArgumentMatchers.eq("PLACED"), any()))
+    when(orders.findByStatus(ArgumentMatchers.eq("PLACED"), any()))
         .thenReturn(new PageImpl<>(List.of(e), PageRequest.of(1, 5), 11));
-    when(items.countsFor(List.of(id))).thenReturn(java.util.Collections.singletonList(new Object[] {id, 6L}));
+    when(items.countsFor(List.of(id))).thenReturn(Collections.singletonList(new Object[] {id, 6L}));
     Page<OrderRepository.SummaryRow> p = repo.adminList("PLACED", 1, 5);
     assertThat(p.total()).isEqualTo(11);
     assertThat(p.page()).isEqualTo(1);

@@ -10,9 +10,10 @@ import static org.mockito.Mockito.when;
 
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.PricedLine;
-import com.vijay.mall.common.FlashPricing;
+import com.vijay.mall.catalog.domain.Product;
 import com.vijay.mall.common.FlashPricing.Applied;
 import com.vijay.mall.common.FlashPricing.Channel;
+import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.order.app.quote.SubtotalStep;
 import com.vijay.mall.order.domain.Fulfilment;
 import com.vijay.mall.order.domain.Quote;
@@ -109,7 +110,7 @@ class FlashSeamsTest {
   @Test
   void productViewsKeepTheirOldConstructors() {
     var offer = new FlashPricing.Offer(sale, "S", 100, 80, 20, 5, 1, null, null);
-    var p = new com.vijay.mall.catalog.domain.Product(product, null, "a", "b", "", 100, 100, "kg", "", null, true, 5, false, true, true, product, 0, 0);
+    var p = new Product(product, null, "a", "b", "", 100, 100, "kg", "", null, true, 5, false, true, true, product, 0, 0);
     assertThat(p.flash()).isNull();
     assertThat(p.withFlash(offer).flash()).isEqualTo(offer);
     var v = new CatalogService.Variant(product, "n", "p", "u", "l", 1, 1, null, true, 1);

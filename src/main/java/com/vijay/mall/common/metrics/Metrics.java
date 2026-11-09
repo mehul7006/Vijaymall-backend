@@ -2,6 +2,7 @@ package com.vijay.mall.common.metrics;
 
 import com.vijay.mall.common.error.ApiException;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import java.util.function.Supplier;
 
@@ -33,6 +34,6 @@ public final class Metrics {
   /** Adds {@code amount} to the counter {@code name} with one tag. */
   public static void count(MeterRegistry registry, String name, String description, String tagKey, String tagValue, double amount) {
     if (registry == null) return;
-    registry.counter(name, io.micrometer.core.instrument.Tags.of(tagKey, tagValue == null ? "none" : tagValue)).increment(amount);
+    registry.counter(name, Tags.of(tagKey, tagValue == null ? "none" : tagValue)).increment(amount);
   }
 }

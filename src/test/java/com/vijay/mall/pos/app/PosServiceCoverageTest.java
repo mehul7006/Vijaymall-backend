@@ -27,6 +27,7 @@ import com.vijay.mall.pos.app.PosViews.SaleInput;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
+import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
@@ -42,6 +43,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
@@ -129,10 +132,10 @@ class PosServiceCoverageTest {
 
   @Test void hold_blankMobileIsAllowedAndStoredAsNull() {
     when(holds.insert(any(), anyString(), any(), anyString(), any())).thenReturn(
-        new com.vijay.mall.pos.domain.PosRecords.HoldRecord(UUID.randomUUID(), cashier, "L", null, "{}", NOW));
+        new PosRecords.HoldRecord(UUID.randomUUID(), cashier, "L", null, "{}", NOW));
     service.hold(cashier, " L ", new Cart(List.of(new Item(rice, 1)), "  ", null, null, null));
-    verify(holds).insert(org.mockito.ArgumentMatchers.eq(cashier), org.mockito.ArgumentMatchers.eq("L"),
-        org.mockito.ArgumentMatchers.isNull(), anyString(), any());
+    verify(holds).insert(ArgumentMatchers.eq(cashier), ArgumentMatchers.eq("L"),
+        ArgumentMatchers.isNull(), anyString(), any());
   }
 
   @Test void hold_basketThatCannotBeWritten_isAServerError() {
@@ -177,7 +180,7 @@ class PosServiceCoverageTest {
     verify(shifts, never()).requireOpen(any());
     service.setShiftRule(null, true);
     service.sale(cashier, "k-none", in); // required, but the shift module is not wired: billing still works
-    verify(sales, org.mockito.Mockito.times(2)).insert(any(), anyString());
+    verify(sales, Mockito.times(2)).insert(any(), anyString());
   }
 
   @Test void upiLink_withoutNote_buildsWithEmptyNote() {

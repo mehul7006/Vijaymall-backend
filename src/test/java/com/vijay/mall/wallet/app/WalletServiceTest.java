@@ -24,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -103,7 +104,7 @@ class WalletServiceTest {
   @Test
   void reverseReturnsCoinsToTheirLotsAndBalance() {
     UUID redeemId = UUID.randomUUID(), lot = UUID.randomUUID();
-    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(java.util.Optional.of(redeemId));
+    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(Optional.of(redeemId));
     when(repo.lotUses(redeemId)).thenReturn(List.of(new WalletRepository.LotUse(lot, 30, NOW.plusSeconds(500))));
     service.reverse(user, order);
     verify(repo).changeLot(lot, 30);
@@ -114,7 +115,7 @@ class WalletServiceTest {
   @Test
   void coinsFromAnExpiredLotComeBackAsAShortLivedLot() {
     UUID redeemId = UUID.randomUUID(), lot = UUID.randomUUID();
-    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(java.util.Optional.of(redeemId));
+    when(repo.ledgerIdByKey("redeem:" + order)).thenReturn(Optional.of(redeemId));
     when(repo.lotUses(redeemId)).thenReturn(List.of(new WalletRepository.LotUse(lot, 30, NOW.minusSeconds(5))));
     service.reverse(user, order);
     verify(repo, never()).changeLot(any(), anyInt());
@@ -124,7 +125,7 @@ class WalletServiceTest {
 
   @Test
   void reverseWithoutARedeemDoesNothing() {
-    when(repo.ledgerIdByKey(anyString())).thenReturn(java.util.Optional.empty());
+    when(repo.ledgerIdByKey(anyString())).thenReturn(Optional.empty());
     service.reverse(user, order);
     verify(repo, never()).addBalance(any(), anyInt());
   }

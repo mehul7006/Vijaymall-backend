@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vijay.mall.catalog.app.CatalogService;
+import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.pos.app.PosCatalogService;
 import com.vijay.mall.pos.app.StaffService;
@@ -49,7 +50,7 @@ class DevDataSeederTest {
     when(catalog.createCategory(anyString(), anyString(), anyInt(), anyBoolean()))
         .thenAnswer(i -> new Category(UUID.randomUUID(), i.getArgument(0), i.getArgument(1), null, i.getArgument(2)));
     when(catalog.create(any(), any())).thenAnswer(i -> {
-      var product = mock(com.vijay.mall.catalog.domain.AdminProduct.class);
+      var product = mock(AdminProduct.class);
       when(product.id()).thenReturn(UUID.randomUUID());
       return product;
     });

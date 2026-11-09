@@ -27,6 +27,7 @@ import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.PosCatalogRepository;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,7 +57,7 @@ class PosCatalogServiceTest {
     ProductData riceData = PosTestData.product(rice, "Rice", 5900, true);
     ProductData sugarData = PosTestData.product(sugar, "Sugar", 8000, true);
     when(catalog.posProducts(any())).thenAnswer(inv -> {
-      java.util.Collection<UUID> ids = inv.getArgument(0);
+      Collection<UUID> ids = inv.getArgument(0);
       return List.of(riceData, sugarData).stream().filter(p -> ids.contains(p.id())).toList();
     });
     when(repo.forProducts(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006"),

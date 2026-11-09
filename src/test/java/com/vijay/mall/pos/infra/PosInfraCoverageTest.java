@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -102,7 +103,7 @@ class PosInfraCoverageTest {
     verify(payments).saveAndFlush(c.capture());
     assertThat(c.getValue().note).isEmpty();
     credit.insertRepayment(UUID.randomUUID(), "RC2", "k2", UUID.randomUUID(), UUID.randomUUID(), 500, "by hand", NOW, List.of());
-    verify(payments, org.mockito.Mockito.times(2)).saveAndFlush(c.capture());
+    verify(payments, Mockito.times(2)).saveAndFlush(c.capture());
     assertThat(c.getValue().note).isEqualTo("by hand");
   }
 

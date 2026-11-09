@@ -3,6 +3,7 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /** Manual discounts and the manager's approval PIN, and the loss-prevention report, against real PostgreSQL. */
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -40,8 +42,8 @@ class PosDiscountIT extends IntegrationTestBase {
     return ((Number) post("/api/v1/pos/quote", token, cart).getBody().get("totalPaise")).longValue();
   }
 
-  private org.springframework.http.ResponseEntity<Map> sell(String token, Map cart, long pay, Map discount) {
-    Map<String, Object> body = new java.util.HashMap<>();
+  private ResponseEntity<Map> sell(String token, Map cart, long pay, Map discount) {
+    Map<String, Object> body = new HashMap<>();
     body.put("cart", cart);
     body.put("payments", List.of(Map.of("mode", "CASH", "amountPaise", pay)));
     if (discount != null) body.put("manualDiscount", discount);

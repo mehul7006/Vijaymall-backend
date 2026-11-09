@@ -8,6 +8,7 @@ import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.ratelimit.RateLimiter;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +16,7 @@ class RateLimiterTest {
   static class MutableClock extends Clock {
     long millis = 1_000_000;
     @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
-    @Override public Clock withZone(java.time.ZoneId z) { return this; }
+    @Override public Clock withZone(ZoneId z) { return this; }
     @Override public Instant instant() { return Instant.ofEpochMilli(millis); }
     @Override public long millis() { return millis; }
   }

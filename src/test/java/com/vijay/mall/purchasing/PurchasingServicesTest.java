@@ -16,19 +16,23 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
-import com.vijay.mall.purchasing.app.PurchaseService;
 import com.vijay.mall.purchasing.app.PurchaseService.ItemInput;
+import com.vijay.mall.purchasing.app.PurchaseService;
 import com.vijay.mall.purchasing.app.StockTakeService;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -55,8 +59,8 @@ class PurchasingServicesTest {
         Clock.fixed(NOW, ZoneOffset.UTC));
     stockTake = new StockTakeService(inventory, catalog, audit);
     when(catalog.names(any())).thenAnswer(i -> {
-      var out = new java.util.HashMap<UUID, String>();
-      for (Object o : (java.util.Collection<?>) i.getArgument(0)) {
+      var out = new HashMap<UUID, String>();
+      for (Object o : (Collection<?>) i.getArgument(0)) {
         if (o.equals(rice)) out.put(rice, "Rice");
         if (o.equals(dal)) out.put(dal, "Dal");
       }
@@ -94,7 +98,7 @@ class PurchasingServicesTest {
     assertThat(v.totalCostPaise()).isEqualTo(6600);
   }
 
-  private static long anyLong() { return org.mockito.ArgumentMatchers.anyLong(); }
+  private static long anyLong() { return ArgumentMatchers.anyLong(); }
 
   @Test
   void aRepeatedKeyReturnsTheFirstDeliveryWithoutAddingStockAgain() {
@@ -143,7 +147,7 @@ class PurchasingServicesTest {
 
   @Test
   void tooManyLinesAreRefused() {
-    var many = java.util.stream.IntStream.range(0, PurchaseService.MAX_LINES + 1).mapToObj(i -> new ItemInput(UUID.randomUUID(), 1, 1)).toList();
+    var many = IntStream.range(0, PurchaseService.MAX_LINES + 1).mapToObj(i -> new ItemInput(UUID.randomUUID(), 1, 1)).toList();
     assertThatThrownBy(() -> purchases.receive(actor, "k", new PurchaseService.Input("S", "", "", many))).isInstanceOf(ApiException.class);
   }
 
@@ -172,7 +176,7 @@ class PurchasingServicesTest {
       assertThat(c.counted()).isEqualTo(47);
       assertThat(c.delta()).isEqualTo(-3);
     });
-    verify(audit).log(eq(actor), eq("STOCK_TAKE"), eq("inventory"), eq(null), org.mockito.ArgumentMatchers.contains("1 changed, 1 matched"));
+    verify(audit).log(eq(actor), eq("STOCK_TAKE"), eq("inventory"), eq(null), ArgumentMatchers.contains("1 changed, 1 matched"));
   }
 
   @Test
@@ -191,7 +195,7 @@ class PurchasingServicesTest {
         .isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> stockTake.apply(actor, "", List.of(new StockTakeService.Count(rice, -1)))).isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> stockTake.apply(actor, "", List.of(new StockTakeService.Count(UUID.randomUUID(), 1)))).isInstanceOf(ApiException.class);
-    var many = java.util.stream.IntStream.range(0, StockTakeService.MAX_LINES + 1).mapToObj(i -> new StockTakeService.Count(UUID.randomUUID(), 1)).toList();
+    var many = IntStream.range(0, StockTakeService.MAX_LINES + 1).mapToObj(i -> new StockTakeService.Count(UUID.randomUUID(), 1)).toList();
     assertThatThrownBy(() -> stockTake.apply(actor, "", many)).isInstanceOf(ApiException.class);
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any());
   }

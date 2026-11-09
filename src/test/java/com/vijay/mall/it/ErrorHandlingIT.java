@@ -3,11 +3,13 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.client.RestClient;
 
 /** Real HTTP: every kind of bad request gets the same error envelope and a trace id. */
 class ErrorHandlingIT extends IntegrationTestBase {
@@ -46,7 +48,7 @@ class ErrorHandlingIT extends IntegrationTestBase {
 
   @Test
   void missingRequiredHeaderIs400() {
-    var res = post("/api/v1/orders", token(freshEmail()), Map.of("items", java.util.List.of(), "paymentMethod", "COD"));
+    var res = post("/api/v1/orders", token(freshEmail()), Map.of("items", List.of(), "paymentMethod", "COD"));
     assertThat(res.getStatusCode().is4xxClientError()).isTrue();
   }
 
@@ -62,7 +64,7 @@ class ErrorHandlingIT extends IntegrationTestBase {
   @Test
   void unknownImageIs404AndHealthIsOnThePrivatePortOnly() {
     assertThat(get("/img/does-not-exist.jpg", null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-    var health = org.springframework.web.client.RestClient.builder().baseUrl("http://localhost:" + managementPort)
+    var health = RestClient.builder().baseUrl("http://localhost:" + managementPort)
         .defaultStatusHandler(_ -> true, (_, _) -> { }).build().get().uri("/actuator/health").retrieve().toEntity(String.class);
     assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(get("/actuator/health", null).getStatusCode()).as("not on the public port any more").isEqualTo(HttpStatus.NOT_FOUND);

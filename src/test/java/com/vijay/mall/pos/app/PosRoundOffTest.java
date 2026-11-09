@@ -31,6 +31,7 @@ import com.vijay.mall.pos.infra.PosHoldRepository;
 import com.vijay.mall.pos.infra.PosSaleRepository;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.wallet.app.WalletService;
+import com.vijay.mall.wallet.domain.CoinRedemption;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -95,7 +96,7 @@ class PosRoundOffTest {
   void aBillDownToTheRupeeIsRoundedAndThePaymentMustMatchTheRoundedAmount() {
     billOf(30); // 117.70 -> 118.00 (+0.30)
     when(settings.get(Settings.GST_ROUND_OFF)).thenReturn("NEAREST_RUPEE");
-    var view = service.quote(new Cart(List.of(new Item(rice, 2)), "9000000001", null, com.vijay.mall.wallet.domain.CoinRedemption.Mode.ALL, null));
+    var view = service.quote(new Cart(List.of(new Item(rice, 2)), "9000000001", null, CoinRedemption.Mode.ALL, null));
     assertThat(view.totalPaise()).isEqualTo(11800);
     assertThat(view.roundOffPaise()).isEqualTo(30);
     service.sale(cashier, "k1", sale(11800));

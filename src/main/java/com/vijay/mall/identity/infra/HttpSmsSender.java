@@ -3,6 +3,7 @@ package com.vijay.mall.identity.infra;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
+import com.vijay.mall.identity.app.SmsOtpSender;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -24,7 +26,7 @@ import tools.jackson.databind.json.JsonMapper;
  * The code and the provider headers (the API key) are never logged.
  */
 @Component
-public class HttpSmsSender implements com.vijay.mall.identity.app.SmsOtpSender {
+public class HttpSmsSender implements SmsOtpSender {
   private static final Logger log = LoggerFactory.getLogger(HttpSmsSender.class);
   private static final String PROVIDER_ERROR = "SMS_PROVIDER_ERROR";
   private static final String SAFE_MESSAGE = "The code could not be sent by SMS right now. Please try again or use email.";
@@ -87,7 +89,7 @@ public class HttpSmsSender implements com.vijay.mall.identity.app.SmsOtpSender {
     JsonNode n;
     try {
       n = json.readTree(raw);
-    } catch (tools.jackson.core.JacksonException e) {
+    } catch (JacksonException e) {
       throw new IllegalArgumentException("headers");
     }
     if (!n.isObject()) throw new IllegalArgumentException("headers");

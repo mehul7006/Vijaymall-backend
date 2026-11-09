@@ -16,12 +16,14 @@ import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 class AuthServiceTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -124,7 +126,7 @@ class AuthServiceTest {
 
   @Test
   void badOtpStopsEverything() {
-    org.mockito.Mockito.doThrow(ApiException.unprocessable("OTP_INVALID", "no", java.util.Map.of()))
+    Mockito.doThrow(ApiException.unprocessable("OTP_INVALID", "no", Map.of()))
         .when(otp).verify("a@b.com", "0");
     assertThatThrownBy(() -> service(null).verify("a@b.com", "0", "d")).isInstanceOf(ApiException.class);
     verify(users, never()).findByEmail(any());

@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
 class OtpServiceTest {
@@ -61,7 +62,7 @@ class OtpServiceTest {
   @Test
   void sendGeneratesFiveDigitCodeWhenNoFixedCode() {
     service("").send("a@b.com", "ip");
-    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    var code = ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq("a@b.com"), code.capture());
     assertThat(code.getValue()).matches("\\d{5}");
     verify(repo).insert("a@b.com", hash("a@b.com", code.getValue()), NOW.plus(Duration.ofMinutes(5)), NOW);
@@ -70,7 +71,7 @@ class OtpServiceTest {
   @Test
   void blankFixedCodeAndNullFixedCodeBothGenerateRandom() {
     service(null).send("a@b.com", "ip");
-    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    var code = ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq("a@b.com"), code.capture());
     assertThat(code.getValue()).hasSize(5);
   }
@@ -85,7 +86,7 @@ class OtpServiceTest {
   @Test
   void whitespaceOnlyFixedCodeMeansRandomCodes() {
     service("   ").send("a@b.com", "ip");
-    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    var code = ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq("a@b.com"), code.capture());
     assertThat(code.getValue()).matches("\\d{5}");
   }
@@ -94,7 +95,7 @@ class OtpServiceTest {
   void missingOtpSettingsMeanRandomCodes() {
     var props = new AppProps(null, new AppProps.Otp("console", "test-pepper-test-pepper", null, "x@y.z"), null, null, null, null);
     new OtpService(repo, sender, props, clock, limiter, 20).send("a@b.com", "ip");
-    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    var code = ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq("a@b.com"), code.capture());
     assertThat(code.getValue()).hasSize(5);
   }

@@ -16,7 +16,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import tools.jackson.databind.json.JsonMapper;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.audit.AuditService;
@@ -27,7 +26,9 @@ import com.vijay.mall.identity.domain.Address;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.domain.Fulfilment;
+import com.vijay.mall.order.domain.OrderChanged;
 import com.vijay.mall.order.domain.OrderStatus;
+import com.vijay.mall.order.domain.OrderViews;
 import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.order.domain.QuoteRequest;
 import com.vijay.mall.order.infra.OrderRepository;
@@ -40,13 +41,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Order use cases with every collaborator replaced by a mock. */
 class OrderServiceTest {
@@ -61,7 +66,7 @@ class OrderServiceTest {
   private ProfileService profiles;
   private OutboxService outbox;
   private OrderService service;
-  private org.springframework.context.ApplicationEventPublisher events;
+  private ApplicationEventPublisher events;
 
   private final UUID user = UUID.randomUUID();
   private final UUID product = UUID.randomUUID();
@@ -77,7 +82,7 @@ class OrderServiceTest {
     payments = mock(PaymentService.class);
     profiles = mock(ProfileService.class);
     outbox = mock(OutboxService.class);
-    events = mock(org.springframework.context.ApplicationEventPublisher.class);
+    events = mock(ApplicationEventPublisher.class);
     AppProps props = new AppProps(null, null, null, null,
         new AppProps.Payment("fake", 15, null, null, null, null), new AppProps.Delivery(4000, 49900));
     service = new OrderService(repo, quotes, inventory, wallet, promotions, payments, profiles, outbox,
@@ -208,7 +213,7 @@ class OrderServiceTest {
   @Test
   void outOfStockStopsTheOrderBeforeCoinsAndCouponAreTouched() {
     when(quotes.quote(eq(user), any())).thenReturn(quote(10000, 20, "FESTIVE50"));
-    org.mockito.Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of())).when(inventory).checkAvailable(anyList());
+    Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", Map.of())).when(inventory).checkAvailable(anyList());
     assertEquals("OUT_OF_STOCK", assertThrows(ApiException.class,
         () -> service.place(user, "k9", cmd("COD", 10000, addressId, Fulfilment.DELIVERY))).code());
     verify(wallet, never()).redeem(any(), anyInt(), any());
@@ -284,7 +289,7 @@ class OrderServiceTest {
     service.adminChangeStatus(r.id(), OrderStatus.CONFIRMED, null, user);
     ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
     verify(events).publishEvent(sent.capture());
-    var ev = (com.vijay.mall.order.domain.OrderChanged) sent.getValue();
+    var ev = (OrderChanged) sent.getValue();
     assertEquals(user, ev.userId());
     assertEquals("CONFIRMED", ev.status());
     assertEquals("PLACED", ev.previousStatus());
@@ -326,7 +331,7 @@ class OrderServiceTest {
     OrderRepository.Row r = row("CONFIRMED", "ONLINE", "CAPTURED", 20, 7, false, user);
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
-    when(repo.items(r.id())).thenReturn(List.of(new com.vijay.mall.order.domain.OrderViews.Item(product, "Rice", 2, 5000, 10000)));
+    when(repo.items(r.id())).thenReturn(List.of(new OrderViews.Item(product, "Rice", 2, 5000, 10000)));
     when(payments.refund(eq(r.id()), anyString())).thenReturn(true);
 
     service.customerCancel(user, r.id());
@@ -391,7 +396,7 @@ class OrderServiceTest {
   // ---------- stock is taken when staff confirm ----------
   private void stubItems(OrderRepository.Row r) {
     when(repo.find(r.id())).thenReturn(Optional.of(r));
-    when(repo.items(r.id())).thenReturn(List.of(new com.vijay.mall.order.domain.OrderViews.Item(product, "Rice", 2, 5000, 10000)));
+    when(repo.items(r.id())).thenReturn(List.of(new OrderViews.Item(product, "Rice", 2, 5000, 10000)));
   }
 
   @Test
@@ -423,7 +428,7 @@ class OrderServiceTest {
   void confirmingStopsAndChangesNothingWhenTheShelfIsEmpty() {
     OrderRepository.Row placed = row("PLACED", "COD", "NONE", 0, 7, false, user);
     stubItems(placed);
-    org.mockito.Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", java.util.Map.of())).when(inventory).reserve(anyList(), any());
+    Mockito.doThrow(ApiException.conflict("OUT_OF_STOCK", "x", Map.of())).when(inventory).reserve(anyList(), any());
     assertEquals("OUT_OF_STOCK", assertThrows(ApiException.class,
         () -> service.adminChangeStatus(placed.id(), OrderStatus.CONFIRMED, null, user)).code());
     verify(repo, never()).updateStatus(any(), any(), anyLong(), any());

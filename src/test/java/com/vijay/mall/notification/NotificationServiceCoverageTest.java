@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import tools.jackson.databind.json.JsonMapper;
 
 class NotificationServiceCoverageTest {
@@ -89,7 +90,7 @@ class NotificationServiceCoverageTest {
     verify(repo).insert(admin, "Flash sale item sold out", "Rice is sold out in \"Diwali\". It now sells at the normal price.", "FLASH", "s1", NOW);
 
     when(catalog.names(List.of(rice))).thenReturn(Map.of());
-    org.mockito.Mockito.clearInvocations(repo);
+    Mockito.clearInvocations(repo);
     on("FLASH_ITEM_SOLD_OUT", payload);
     verify(repo).insert(admin, "Flash sale item sold out", "An item is sold out in \"Diwali\". It now sells at the normal price.", "FLASH", "s1", NOW);
   }

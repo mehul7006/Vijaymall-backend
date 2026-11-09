@@ -12,19 +12,25 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.outbox.OutboxService;
 import com.vijay.mall.inventory.app.InventoryService.Item;
-import com.vijay.mall.inventory.infra.InventoryRepository;
 import com.vijay.mall.inventory.infra.InventoryRepository.Stock;
+import com.vijay.mall.inventory.infra.InventoryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.InOrder;
+import org.mockito.Mockito;
 
 class InventoryServiceTest {
   private static final Instant NOW = Instant.parse("2026-11-01T10:00:00Z");
@@ -144,11 +150,11 @@ class InventoryServiceTest {
 
   @Test
   void movementsAreClampedAndPassedToTheRepository() {
-    var page = new com.vijay.mall.common.Page<InventoryRepository.Movement>(List.of(), 0, 50, 0);
+    var page = new Page<InventoryRepository.Movement>(List.of(), 0, 50, 0);
     when(repo.movementPage(A, 0, 50)).thenReturn(page);
     assertThat(service.movements(A, -4, 500)).isSameAs(page);
 
-    var all = new com.vijay.mall.common.Page<InventoryRepository.Movement>(List.of(), 2, 20, 0);
+    var all = new Page<InventoryRepository.Movement>(List.of(), 2, 20, 0);
     when(repo.movementPage(null, 2, 20)).thenReturn(all);
     assertThat(service.movements(null, 2, 20)).isSameAs(all);
   }
@@ -157,21 +163,21 @@ class InventoryServiceTest {
   void checkAvailableLooksButNeverTakes() {
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 5, 2), new InventoryRepository.Stock(B, 1, 2)));
     service.checkAvailable(List.of(new Item(A, 2), new Item(A, 3), new Item(B, 1))); // A: 5 wanted of 5, B: 1 of 1
-    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).reserve(any(), anyInt(), any());
+    Mockito.verify(repo, Mockito.never()).reserve(any(), anyInt(), any());
   }
 
   @Test
   void checkAvailableNamesEveryShortLine() {
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 5, 2)));
-    var e = org.junit.jupiter.api.Assertions.assertThrows(com.vijay.mall.common.error.ApiException.class,
+    var e = Assertions.assertThrows(ApiException.class,
         () -> service.checkAvailable(List.of(new Item(A, 2), new Item(A, 4), new Item(B, 1))));
     assertThat(e.code()).isEqualTo("OUT_OF_STOCK");
     assertThat(e.details().get("items").toString()).contains(A.toString()).contains(B.toString());
   }
 
   // ---------- low-stock alerts ----------
-  private com.vijay.mall.common.outbox.OutboxService alerting() {
-    var outbox = mock(com.vijay.mall.common.outbox.OutboxService.class);
+  private OutboxService alerting() {
+    var outbox = mock(OutboxService.class);
     service.setOutbox(outbox);
     when(repo.reserve(any(), anyInt(), any())).thenReturn(1);
     return outbox;
@@ -182,7 +188,7 @@ class InventoryServiceTest {
     var outbox = alerting();
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 5, 5))); // 7 -> 5 : at the level
     service.reserve(List.of(new Item(A, 2)), order);
-    org.mockito.Mockito.verify(outbox).add(org.mockito.ArgumentMatchers.eq("LOW_STOCK"), any());
+    Mockito.verify(outbox).add(ArgumentMatchers.eq("LOW_STOCK"), any());
   }
 
   @Test
@@ -190,7 +196,7 @@ class InventoryServiceTest {
     var outbox = alerting();
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 3, 5))); // 4 -> 3 : was already low
     service.reserve(List.of(new Item(A, 1)), order);
-    org.mockito.Mockito.verify(outbox, org.mockito.Mockito.never()).add(any(), any());
+    Mockito.verify(outbox, Mockito.never()).add(any(), any());
   }
 
   @Test
@@ -198,7 +204,7 @@ class InventoryServiceTest {
     var outbox = alerting();
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 0, 0))); // 2 -> 0, level 0
     service.reserve(List.of(new Item(A, 2)), order);
-    org.mockito.Mockito.verify(outbox).add(org.mockito.ArgumentMatchers.eq("LOW_STOCK"), any());
+    Mockito.verify(outbox).add(ArgumentMatchers.eq("LOW_STOCK"), any());
   }
 
   @Test
@@ -206,8 +212,8 @@ class InventoryServiceTest {
     var outbox = alerting();
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 50, 5), new InventoryRepository.Stock(B, 4, 5)));
     service.reserve(List.of(new Item(A, 1), new Item(B, 2)), order); // A 51->50 fine, B 6->4 crosses
-    var captured = org.mockito.ArgumentCaptor.forClass(Object.class);
-    org.mockito.Mockito.verify(outbox).add(org.mockito.ArgumentMatchers.eq("LOW_STOCK"), captured.capture());
+    var captured = ArgumentCaptor.forClass(Object.class);
+    Mockito.verify(outbox).add(ArgumentMatchers.eq("LOW_STOCK"), captured.capture());
     assertThat(captured.getValue().toString()).contains(B.toString()).doesNotContain(A.toString());
   }
 
@@ -217,9 +223,9 @@ class InventoryServiceTest {
     when(repo.add(any(), anyInt(), any())).thenReturn(1);
     when(repo.stocks(any())).thenReturn(List.of(new InventoryRepository.Stock(A, 2, 5)));
     service.adjust(A, -4, "DAMAGED", UUID.randomUUID()); // 6 -> 2
-    org.mockito.Mockito.verify(outbox).add(org.mockito.ArgumentMatchers.eq("LOW_STOCK"), any());
-    org.mockito.Mockito.clearInvocations(outbox);
+    Mockito.verify(outbox).add(ArgumentMatchers.eq("LOW_STOCK"), any());
+    Mockito.clearInvocations(outbox);
     service.adjust(A, 20, "RESTOCK", UUID.randomUUID());
-    org.mockito.Mockito.verify(outbox, org.mockito.Mockito.never()).add(any(), any());
+    Mockito.verify(outbox, Mockito.never()).add(any(), any());
   }
 }

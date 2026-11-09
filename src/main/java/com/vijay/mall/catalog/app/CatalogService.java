@@ -4,24 +4,35 @@ import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.catalog.domain.PricedLine;
-import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.catalog.domain.Product;
+import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.catalog.infra.BannerRepository;
 import com.vijay.mall.catalog.infra.CategoryRepository;
 import com.vijay.mall.catalog.infra.ProductRepository;
+import com.vijay.mall.common.FlashPricing;
+import com.vijay.mall.common.OrderLimits;
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.inventory.infra.InventoryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,7 +70,7 @@ public class CatalogService {
    */
   public record Variant(UUID id, String variantName, String packSize, String unit, String label, long mrpPaise,
                         long pricePaise, String imageUrl, boolean inStock, int qtyAvailable,
-                        com.vijay.mall.common.FlashPricing.Offer flash) {
+                        FlashPricing.Offer flash) {
     /** A variant not on a flash sale. */
     public Variant(UUID id, String variantName, String packSize, String unit, String label, long mrpPaise,
                    long pricePaise, String imageUrl, boolean inStock, int qtyAvailable) {
@@ -76,7 +87,7 @@ public class CatalogService {
   public record ProductGroup(UUID groupId, UUID defaultVariantId, UUID categoryId, String nameEn, String nameGu,
                              String description, String imageUrl, boolean hotSale, boolean earnsCoins,
                              boolean coinRedeemable, double rating, int reviewCount, long fromPricePaise, boolean inStock,
-                             List<Variant> variants, com.vijay.mall.common.FlashPricing.Offer flash) {
+                             List<Variant> variants, FlashPricing.Offer flash) {
     /** A product not on a flash sale. */
     public ProductGroup(UUID groupId, UUID defaultVariantId, UUID categoryId, String nameEn, String nameGu,
                         String description, String imageUrl, boolean hotSale, boolean earnsCoins,
@@ -101,28 +112,28 @@ public class CatalogService {
   private final InventoryService inventory;
   private final AuditService audit;
   private final Clock clock;
-  private final com.vijay.mall.common.ReferenceNumbers references;
+  private final ReferenceNumbers references;
   private final UnitService units;
 
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
   private void changed() { if (live != null) live.catalog(); }
 
-  private com.vijay.mall.common.FlashPricing flash;
+  private FlashPricing flash;
 
   /** Optional (plain unit tests run without it): shows the flash sale price on products. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setFlash(com.vijay.mall.common.FlashPricing flash) { this.flash = flash; }
+  @Autowired(required = false)
+  void setFlash(FlashPricing flash) { this.flash = flash; }
 
   private List<Product> flashed(List<Product> list) {
     if (flash == null || list.isEmpty()) return list;
     Map<UUID, Long> prices = new LinkedHashMap<>();
     list.forEach(p -> prices.put(p.id(), p.pricePaise()));
-    Map<UUID, com.vijay.mall.common.FlashPricing.Offer> offers = flash.offers(prices);
+    Map<UUID, FlashPricing.Offer> offers = flash.offers(prices);
     return offers.isEmpty() ? list : list.stream().map(p -> offers.containsKey(p.id()) ? p.withFlash(offers.get(p.id())) : p).toList();
   }
 
@@ -130,7 +141,7 @@ public class CatalogService {
     if (flash == null) return g;
     Map<UUID, Long> prices = new LinkedHashMap<>();
     g.variants().forEach(v -> prices.put(v.id(), v.pricePaise()));
-    Map<UUID, com.vijay.mall.common.FlashPricing.Offer> offers = flash.offers(prices);
+    Map<UUID, FlashPricing.Offer> offers = flash.offers(prices);
     if (offers.isEmpty()) return g;
     List<Variant> vs = g.variants().stream().map(v -> new Variant(v.id(), v.variantName(), v.packSize(), v.unit(), v.label(), v.mrpPaise(),
         v.pricePaise(), v.imageUrl(), v.inStock(), v.qtyAvailable(), offers.get(v.id()))).toList();
@@ -142,14 +153,14 @@ public class CatalogService {
   /** Without a unit list, any unit text is accepted as before (plain unit tests). */
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
                         InventoryService inventory, AuditService audit, Clock clock,
-                        com.vijay.mall.common.ReferenceNumbers references) {
+                        ReferenceNumbers references) {
     this(products, categories, banners, inventory, audit, clock, references, null);
   }
 
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
                         InventoryService inventory, AuditService audit, Clock clock,
-                        com.vijay.mall.common.ReferenceNumbers references, UnitService units) {
+                        ReferenceNumbers references, UnitService units) {
     this.units = units;
     this.products = products;
     this.categories = categories;
@@ -161,23 +172,23 @@ public class CatalogService {
   }
 
   // ---------- customer side ----------
-  public java.util.Map<UUID, String> names(java.util.Collection<UUID> ids) { return products.names(ids); }
+  public Map<UUID, String> names(Collection<UUID> ids) { return products.names(ids); }
 
   /** When any product last changed (the offline till compares this with the copy it holds). */
-  public java.time.Instant lastChange() { return products.lastChange(); }
+  public Instant lastChange() { return products.lastChange(); }
 
   /** Names of products still on sale; stock alerts ignore retired products. */
-  public java.util.Map<UUID, String> activeNames(java.util.Collection<UUID> ids) { return products.activeNames(ids); }
+  public Map<UUID, String> activeNames(Collection<UUID> ids) { return products.activeNames(ids); }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): the category list rarely changes and is read on every screen. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   public List<Category> categories() {
     return caches == null ? categories.listActive()
-        : caches.get(com.vijay.mall.common.cache.AppCaches.Name.CATEGORIES, "active", categories::listActive);
+        : caches.get(AppCaches.Name.CATEGORIES, "active", categories::listActive);
   }
 
   /** The shop list. Products with no stock are left out; use the overload to include them. */
@@ -205,7 +216,7 @@ public class CatalogService {
     List<Product> list = flashed(withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
         .map(a -> a.toCustomer(now)).toList());
     // all banners are cached (they change rarely); which ones are on right now depends on the clock, so that is decided here
-    List<HotBanner> all = caches == null ? banners.all() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.BANNERS, "all", banners::all);
+    List<HotBanner> all = caches == null ? banners.all() : caches.get(AppCaches.Name.BANNERS, "all", banners::all);
     return new HotSale(all.stream().filter(b -> b.active() && (b.startAt() == null || !b.startAt().isAfter(now))
         && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list);
   }
@@ -253,7 +264,7 @@ public class CatalogService {
   }
 
   private static ProductGroup toGroup(List<ProductData> members,
-                                      Map<UUID, com.vijay.mall.inventory.infra.InventoryRepository.Stock> stocks,
+                                      Map<UUID, InventoryRepository.Stock> stocks,
                                       Map<UUID, ProductRepository.VariantInfo> info, Instant now) {
     var none = new ProductRepository.VariantInfo("", 0);
     List<ProductData> sorted = members.stream().sorted(Comparator
@@ -284,19 +295,19 @@ public class CatalogService {
   public List<PricedLine> price(List<ItemRequest> items) {
     if (items == null || items.isEmpty()) throw ApiException.validation("items", "cart is empty");
     items.forEach(it -> {
-      if (it.qty() <= 0 || it.qty() > com.vijay.mall.common.OrderLimits.MAX_LINE_QTY) {
-        throw ApiException.validation("qty", "quantity must be 1 to " + com.vijay.mall.common.OrderLimits.MAX_LINE_QTY);
+      if (it.qty() <= 0 || it.qty() > OrderLimits.MAX_LINE_QTY) {
+        throw ApiException.validation("qty", "quantity must be 1 to " + OrderLimits.MAX_LINE_QTY);
       }
     });
     Map<UUID, Integer> merged = items.stream().collect(
-        java.util.stream.Collectors.toMap(ItemRequest::productId, ItemRequest::qty, Integer::sum, LinkedHashMap::new));
+        Collectors.toMap(ItemRequest::productId, ItemRequest::qty, Integer::sum, LinkedHashMap::new));
     // the same product listed twice counts once, so the limit applies to the total
-    if (merged.values().stream().anyMatch(q -> q > com.vijay.mall.common.OrderLimits.MAX_LINE_QTY)) {
-      throw ApiException.validation("qty", "quantity must be 1 to " + com.vijay.mall.common.OrderLimits.MAX_LINE_QTY);
+    if (merged.values().stream().anyMatch(q -> q > OrderLimits.MAX_LINE_QTY)) {
+      throw ApiException.validation("qty", "quantity must be 1 to " + OrderLimits.MAX_LINE_QTY);
     }
     Map<UUID, ProductData> byId = products.findAll(List.copyOf(merged.keySet())).stream()
-        .collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
-    java.util.Set<UUID> counterOnly = products.posOnlyAmong(merged.keySet());
+        .collect(Collectors.toMap(ProductData::id, Function.identity()));
+    Set<UUID> counterOnly = products.posOnlyAmong(merged.keySet());
     return merged.entrySet().stream().map(e -> {
       ProductData p = byId.get(e.getKey());
       if (p == null || !p.active() || counterOnly.contains(p.id())) throw ApiException.validation("productId", "product is not available: " + e.getKey());
@@ -310,9 +321,9 @@ public class CatalogService {
     if (ids.isEmpty()) return List.of();
     Instant now = clock.instant();
     var stocks = inventory.stocks(ids);
-    java.util.Set<UUID> counterOnly = products.posOnlyAmong(ids);
+    Set<UUID> counterOnly = products.posOnlyAmong(ids);
     Map<UUID, ProductData> byId = products.findAll(ids).stream()
-        .collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
+        .collect(Collectors.toMap(ProductData::id, Function.identity()));
     return flashed(ids.stream().map(byId::get)
         .filter(p -> p != null && p.active() && !counterOnly.contains(p.id()))
         .map(p -> p.withStock(stocks.get(p.id()).qty(), stocks.get(p.id()).low()).toCustomer(now)).toList());
@@ -330,7 +341,7 @@ public class CatalogService {
     return products.search(q, null, false, true, true, clock.instant(), Math.max(0, page), Page.clampSize(size));
   }
 
-  public List<ProductData> posProducts(java.util.Collection<UUID> ids) { return products.findAll(List.copyOf(ids)); }
+  public List<ProductData> posProducts(Collection<UUID> ids) { return products.findAll(List.copyOf(ids)); }
 
   @Transactional
   public void setPosOnly(UUID id, boolean posOnly) {
@@ -348,10 +359,10 @@ public class CatalogService {
 
   /** Stock history with product names, newest first. productId null means all products. */
   public Page<StockMovementView> stockMovements(UUID productId, int page, int size) {
-    Page<com.vijay.mall.inventory.infra.InventoryRepository.Movement> rows = inventory.movements(productId, page, size);
+    Page<InventoryRepository.Movement> rows = inventory.movements(productId, page, size);
     Map<UUID, ProductData> byId = products.findAll(rows.items().stream().map(m -> m.productId()).distinct().toList())
-        .stream().collect(java.util.stream.Collectors.toMap(ProductData::id, java.util.function.Function.identity()));
-    Map<UUID, String> numbers = references.of(rows.items().stream().map(m -> m.refId()).filter(java.util.Objects::nonNull)
+        .stream().collect(Collectors.toMap(ProductData::id, Function.identity()));
+    Map<UUID, String> numbers = references.of(rows.items().stream().map(m -> m.refId()).filter(Objects::nonNull)
         .distinct().toList());
     List<StockMovementView> items = rows.items().stream().map(m -> {
       ProductData p = byId.get(m.productId());

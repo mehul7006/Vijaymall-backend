@@ -3,6 +3,7 @@ package com.vijay.mall.order.app;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.domain.OrderChanged;
 import com.vijay.mall.order.domain.OrderReturnMath;
@@ -13,6 +14,8 @@ import com.vijay.mall.wallet.app.WalletService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +24,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -33,11 +37,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class OrderReturnService {
-  private com.vijay.mall.inventory.app.DefectiveService defective;
+  private DefectiveService defective;
 
   /** Optional (plain unit tests run without it): where goods returned as defective are kept. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setDefective(com.vijay.mall.inventory.app.DefectiveService defective) { this.defective = defective; }
+  @Autowired(required = false)
+  void setDefective(DefectiveService defective) { this.defective = defective; }
 
   public record ItemInput(UUID productId, int qty, Boolean restock) {}
 
@@ -105,7 +109,7 @@ public class OrderReturnService {
     Map<UUID, List<OrderRepository.ItemRow>> byProduct = new LinkedHashMap<>();
     for (OrderRepository.ItemRow l : lines) byProduct.computeIfAbsent(l.productId(), _ -> new ArrayList<>()).add(l);
     Map<UUID, ItemInput> asked = new LinkedHashMap<>();
-    Map<UUID, Integer> perLine = new java.util.HashMap<>(); // order line id -> units coming back on it
+    Map<UUID, Integer> perLine = new HashMap<>(); // order line id -> units coming back on it
     Set<UUID> seen = new HashSet<>();
     for (ItemInput i : wanted) {
       if (i.productId() == null || !byProduct.containsKey(i.productId())) throw ApiException.validation("productId", "is not on this order");
@@ -129,7 +133,7 @@ public class OrderReturnService {
 
     // What each line really cost the customer: its price less its coupon share, less its share of the coins spent.
     long[] net = lines.stream().mapToLong(l -> Math.max(0, l.lineTotalPaise() - l.couponDiscountPaise())).toArray();
-    long[] coinShare = OrderReturnMath.allocate(Math.min(order.coinDiscount(), java.util.Arrays.stream(net).sum()), net);
+    long[] coinShare = OrderReturnMath.allocate(Math.min(order.coinDiscount(), Arrays.stream(net).sum()), net);
     OrderReturnRepository.Totals prior = returns.totals(orderId);
 
     UUID returnId = UUID.randomUUID();

@@ -2,18 +2,22 @@ package com.vijay.mall.payment.app;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.LiveEvents;
+import com.vijay.mall.common.metrics.Metrics;
 import com.vijay.mall.payment.domain.InvalidSignatureException;
 import com.vijay.mall.payment.domain.PaymentEvent;
 import com.vijay.mall.payment.domain.PaymentEvents;
 import com.vijay.mall.payment.domain.PaymentGateway;
 import com.vijay.mall.payment.domain.PaymentSession;
 import com.vijay.mall.payment.infra.PaymentRepository;
-import com.vijay.mall.common.metrics.Metrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,7 +29,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Public interface of the payment module. */
@@ -54,14 +61,14 @@ public class PaymentService {
   public record AdminMethod(String code, boolean enabled, boolean configured) {}
 
   /** Methods customers may pick: switched on by the admin and, for ONLINE, set up with provider keys. */
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): which methods are switched on is read for every checkout, so it is cached. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   private List<PaymentRepository.Setting> switches() {
-    return caches == null ? repo.settings() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.PAYMENT_METHODS, "all", repo::settings);
+    return caches == null ? repo.settings() : caches.get(AppCaches.Name.PAYMENT_METHODS, "all", repo::settings);
   }
 
   public List<PaymentRepository.Setting> enabledMethods() {
@@ -259,15 +266,15 @@ public class PaymentService {
     Runnable safe = () -> {
       try {
         var outsideAnyTransaction = new TransactionTemplate(tx.getTransactionManager());
-        outsideAnyTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        outsideAnyTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         outsideAnyTransaction.executeWithoutResult(s -> task.run());
       } catch (RuntimeException e) {
         log.warn("Work after commit failed, the scheduled job will retry: {}", e.getMessage());
       }
     };
-    if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-      org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-          new org.springframework.transaction.support.TransactionSynchronization() {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
             @Override public void afterCommit() { safe.run(); }
           });
     } else {
@@ -320,11 +327,11 @@ public class PaymentService {
   // ---------- admin ----------
   public List<PaymentRepository.Setting> allMethods() { return repo.settings(); }
 
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
   /** Both methods with their switch and whether they are set up, for the admin screen. */
   public List<AdminMethod> adminMethods() {
@@ -337,7 +344,7 @@ public class PaymentService {
    */
   @Transactional
   public List<PaymentRepository.Setting> saveMethods(List<PaymentRepository.Setting> in, UUID actor) {
-    Map<String, Boolean> result = new java.util.LinkedHashMap<>();
+    Map<String, Boolean> result = new LinkedHashMap<>();
     repo.settings().forEach(s -> result.put(s.code(), s.enabled()));
     for (PaymentRepository.Setting s : in) {
       if (!List.of("COD", "ONLINE").contains(s.code())) throw ApiException.validation("code", "unknown method");
@@ -351,7 +358,7 @@ public class PaymentService {
       throw ApiException.validation("methods", "keep at least one payment method on");
     }
     for (PaymentRepository.Setting s : in) repo.setEnabled(s.code(), s.enabled());
-    if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.PAYMENT_METHODS);
+    if (live != null) live.area(CatalogChanged.PAYMENT_METHODS);
     audit.log(actor, "UPDATE", "payment_setting", null, in.toString());
     return repo.settings();
   }

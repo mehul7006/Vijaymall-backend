@@ -14,8 +14,10 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +26,7 @@ class OpsMetricsTest {
   private OrderRepository orders;
   private OutboxService outbox;
   private InventoryService inventory;
-  private final java.util.concurrent.atomic.AtomicReference<Instant> now = new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-11-08T10:00:00Z"));
+  private final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-11-08T10:00:00Z"));
   private OpsMetrics metrics;
   private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
@@ -35,8 +37,8 @@ class OpsMetricsTest {
     outbox = mock(OutboxService.class);
     inventory = mock(InventoryService.class);
     Clock clock = new Clock() {
-      @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
-      @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+      @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+      @Override public Clock withZone(ZoneId zone) { return this; }
       @Override public Instant instant() { return now.get(); }
     };
     metrics = new OpsMetrics(payments, orders, outbox, inventory, clock);

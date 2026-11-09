@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.identity.domain.OtpHasher;
@@ -25,11 +26,11 @@ import java.util.UUID;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 /** Uses a real HS256 encoder/decoder so the token contents are checked, not mocked. */
 class TokenServiceTest {
@@ -131,6 +132,6 @@ class TokenServiceTest {
     service.logout("known");
     service.logout("unknown");
     verify(refresh).revoke(r.id(), NOW);
-    verify(refresh, org.mockito.Mockito.times(1)).revoke(any(), any());
+    verify(refresh, Mockito.times(1)).revoke(any(), any());
   }
 }

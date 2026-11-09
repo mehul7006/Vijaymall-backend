@@ -24,6 +24,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 class ProfileServiceTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -110,7 +112,7 @@ class ProfileServiceTest {
     verify(addresses, never()).clearDefault(uid);
     service.updateAddress(uid, id, addr(true));
     verify(addresses).clearDefault(uid);
-    verify(addresses, org.mockito.Mockito.times(2)).update(any(), any(), any());
+    verify(addresses, Mockito.times(2)).update(any(), any(), any());
   }
 
   @Test
@@ -119,7 +121,7 @@ class ProfileServiceTest {
     when(addresses.find(uid, id)).thenReturn(Optional.of(new Address(id, "H", "l", "a", "390001", true)));
     service.updateAddress(uid, id, addr(false));
     verify(addresses, never()).clearDefault(uid);
-    verify(addresses).update(eq(uid), eq(id), org.mockito.ArgumentMatchers.argThat(a -> a.isDefault()));
+    verify(addresses).update(eq(uid), eq(id), ArgumentMatchers.argThat(a -> a.isDefault()));
   }
 
   @Test
@@ -130,11 +132,11 @@ class ProfileServiceTest {
     when(addresses.list(uid)).thenReturn(List.of(new Address(next, "O", "l2", "a2", "390002", false)));
     service.deleteAddress(uid, id);
     verify(addresses).clearDefault(uid);
-    verify(addresses).update(eq(uid), eq(next), org.mockito.ArgumentMatchers.argThat(a -> a.isDefault() && a.label().equals("O")));
+    verify(addresses).update(eq(uid), eq(next), ArgumentMatchers.argThat(a -> a.isDefault() && a.label().equals("O")));
     UUID other = UUID.randomUUID();
     when(addresses.find(uid, other)).thenReturn(Optional.of(new Address(other, "X", "l", "a", "390001", false)));
     service.deleteAddress(uid, other);
-    verify(addresses, org.mockito.Mockito.times(1)).clearDefault(uid);
+    verify(addresses, Mockito.times(1)).clearDefault(uid);
     when(addresses.find(uid, id)).thenReturn(Optional.of(new Address(id, "H", "l", "a", "390001", true)));
     when(addresses.list(uid)).thenReturn(List.of());
     service.deleteAddress(uid, id);

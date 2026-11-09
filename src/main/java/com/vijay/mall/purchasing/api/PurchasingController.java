@@ -1,14 +1,16 @@
 package com.vijay.mall.purchasing.api;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
-import com.vijay.mall.purchasing.app.PurchaseService;
 import com.vijay.mall.purchasing.app.PurchaseService.PurchaseView;
+import com.vijay.mall.purchasing.app.PurchaseService;
 import com.vijay.mall.purchasing.app.StockTakeService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,11 +26,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class PurchasingController {
-  private com.vijay.mall.common.idem.AdminOps ops;
+  private AdminOps ops;
 
   /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
-  @org.springframework.beans.factory.annotation.Autowired
-  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+  @Autowired
+  void setOps(AdminOps ops) { this.ops = ops; }
 
   public record PurchaseBody(String supplierName, String invoiceNo, String note, @NotEmpty List<PurchaseService.ItemInput> items) {}
 
@@ -59,9 +61,9 @@ public class PurchasingController {
 
   /** Sets stock to the counted figures and returns what changed. */
   @PostMapping("/stock-takes")
-  public StockTakeService.Result stockTake(@Valid @RequestBody StockTakeBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
+  public StockTakeService.Result stockTake(@Valid @RequestBody StockTakeBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     // a repeat with the same key returns the first call's result and applies nothing more
-    return com.vijay.mall.common.idem.AdminOps.runStored(ops, key, "stock-take", CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(b),
+    return AdminOps.runStored(ops, key, "stock-take", CurrentUser.id(), AdminOps.fingerprint(b),
         () -> stockTakes.apply(CurrentUser.id(), b.note(), b.items()), StockTakeService.Result.class);
   }
 }

@@ -6,6 +6,7 @@ import com.vijay.mall.support.IntegrationTestBase;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 
@@ -27,12 +28,12 @@ class LogSettingsIT extends IntegrationTestBase {
       Map body = status.getBody();
       assertThat(body.get("levelApp")).isEqualTo("DEBUG");
       assertThat(body).containsKeys("levelRoot", "levelSql", "retentionDays", "fileLogging", "folder", "files");
-      assertThat(org.slf4j.LoggerFactory.getLogger("com.vijay.mall").isDebugEnabled()).isTrue();
+      assertThat(LoggerFactory.getLogger("com.vijay.mall").isDebugEnabled()).isTrue();
     } finally {
       save(admin, "log.level.app", "INFO");
     }
     assertThat(get("/api/v1/admin/logs/status", admin).getBody().get("levelApp")).isEqualTo("INFO");
-    assertThat(org.slf4j.LoggerFactory.getLogger("com.vijay.mall").isDebugEnabled()).isFalse();
+    assertThat(LoggerFactory.getLogger("com.vijay.mall").isDebugEnabled()).isFalse();
   }
 
   @Test

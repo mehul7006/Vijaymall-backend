@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +33,7 @@ public class MobileOtpService {
   private final SecureRandom random = new SecureRandom();
   private int perMobileHour = 5;
 
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   void setPerMobileHour(@Value("${app.rate-limit.otp-per-mobile-hour:5}") int n) { this.perMobileHour = n; }
 
   public MobileOtpService(OtpRepository repo, SmsOtpSender sender, AppProps props, Clock clock, RateLimiter limiter,

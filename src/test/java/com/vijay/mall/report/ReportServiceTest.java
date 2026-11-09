@@ -24,7 +24,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 /** The dashboard maths with the database mocked: zero-fill, ordering, shop time zone and name lookup. */
 class ReportServiceTest {
-  // 2027-03-10 20:00 UTC is already 11 March, 01:30 in Asia/Kolkata
+  /**
+   * 2027-03-10 20:00 UTC is already 11 March, 01:30 in Asia/Kolkata
+   */
   private static final Instant NOW = Instant.parse("2027-03-10T20:00:00Z");
 
   private final EntityManager em = mock(EntityManager.class);

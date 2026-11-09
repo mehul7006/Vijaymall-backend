@@ -11,17 +11,17 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.common.FlashPricing.Channel;
 import com.vijay.mall.common.FlashPricing.Claim;
+import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.outbox.OutboxService;
 import com.vijay.mall.flash.app.FlashPricingService;
-import com.vijay.mall.flash.infra.FlashRepository;
 import com.vijay.mall.flash.infra.FlashRepository.Claimed;
 import com.vijay.mall.flash.infra.FlashRepository.Item;
 import com.vijay.mall.flash.infra.FlashRepository.Sale;
 import com.vijay.mall.flash.infra.FlashRepository.SaleWithItems;
+import com.vijay.mall.flash.infra.FlashRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +32,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 class FlashPricingServiceTest {
   static final Instant NOW = Instant.parse("2026-11-08T10:00:00Z");
@@ -168,10 +170,10 @@ class FlashPricingServiceTest {
     svc.apply(product, Channel.ONLINE, 10000, user, 1);
     svc.apply(product, Channel.ONLINE, 10000, user, 1);
     assertThat(metrics.find("mall.flash.price.lookup").timers().stream().mapToLong(t -> t.count()).sum()).isEqualTo(2);
-    verify(repo, org.mockito.Mockito.times(1)).openSales(any());
+    verify(repo, Mockito.times(1)).openSales(any());
     caches.invalidate(AppCaches.Name.FLASH);
     svc.apply(product, Channel.ONLINE, 10000, user, 1);
-    verify(repo, org.mockito.Mockito.times(2)).openSales(any());
+    verify(repo, Mockito.times(2)).openSales(any());
   }
 
   // ---------- counting ----------
@@ -214,8 +216,8 @@ class FlashPricingServiceTest {
           assertThat(e.code()).isEqualTo("PRICE_CHANGED");
           assertThat(e.status().value()).isEqualTo(409);
         });
-    verify(repo, never()).insertConsumption(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.anyLong(),
-        org.mockito.ArgumentMatchers.anyLong(), any());
+    verify(repo, never()).insertConsumption(any(), any(), any(), any(), any(), any(), any(), anyInt(), ArgumentMatchers.anyLong(),
+        ArgumentMatchers.anyLong(), any());
     assertThat(metrics.counter("mall.flash.refused", "reason", "LIMIT_REACHED").count()).isEqualTo(1);
   }
 
@@ -242,8 +244,8 @@ class FlashPricingServiceTest {
     when(repo.userQty(itemId, user)).thenReturn(1);
     assertThatThrownBy(() -> svc.consume(Channel.ONLINE, UUID.randomUUID(), user, List.of(claim(2)))).isInstanceOf(FlashPricing.Refused.class);
     svc.consume(Channel.POS, UUID.randomUUID(), null, List.of(claim(2))); // no customer: nothing to limit
-    verify(repo).insertConsumption(any(), any(), any(), eq("POS"), any(), any(), any(), eq(2), org.mockito.ArgumentMatchers.anyLong(),
-        org.mockito.ArgumentMatchers.anyLong(), any());
+    verify(repo).insertConsumption(any(), any(), any(), eq("POS"), any(), any(), any(), eq(2), ArgumentMatchers.anyLong(),
+        ArgumentMatchers.anyLong(), any());
   }
 
   @Test
@@ -253,8 +255,8 @@ class FlashPricingServiceTest {
     when(repo.claim(eq(saleId), eq(other), anyInt(), any(), any())).thenReturn(Optional.of(claimed(null, 1, null, 0)));
     when(repo.refusalReason(any(), anyList(), any())).thenReturn("LIMIT_REACHED");
     svc.consumeLenient(Channel.POS, UUID.randomUUID(), null, List.of(claim(1), new Claim(saleId, other, 1, 8000, 10000)));
-    verify(repo).insertConsumption(any(), any(), eq(other), any(), any(), any(), any(), eq(1), org.mockito.ArgumentMatchers.anyLong(),
-        org.mockito.ArgumentMatchers.anyLong(), any());
+    verify(repo).insertConsumption(any(), any(), eq(other), any(), any(), any(), any(), eq(1), ArgumentMatchers.anyLong(),
+        ArgumentMatchers.anyLong(), any());
   }
 
   @Test
@@ -265,7 +267,7 @@ class FlashPricingServiceTest {
     when(repo.markSoldOutNotified(itemId, NOW)).thenReturn(true, false);
     svc.consume(Channel.ONLINE, UUID.randomUUID(), user, List.of(claim(1)));
     svc.consume(Channel.ONLINE, UUID.randomUUID(), user, List.of(claim(1)));
-    verify(outbox, org.mockito.Mockito.times(1)).add(eq("FLASH_ITEM_SOLD_OUT"), any());
+    verify(outbox, Mockito.times(1)).add(eq("FLASH_ITEM_SOLD_OUT"), any());
   }
 
   @Test
@@ -291,6 +293,6 @@ class FlashPricingServiceTest {
     when(repo.release(order, NOW)).thenReturn(List.of(new FlashRepository.Released(itemId, saleId, product, 2, "ONLINE")), List.of());
     svc.release(order);
     svc.release(order);
-    verify(repo, org.mockito.Mockito.times(2)).release(order, NOW);
+    verify(repo, Mockito.times(2)).release(order, NOW);
   }
 }

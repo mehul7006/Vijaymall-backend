@@ -8,8 +8,10 @@ import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -37,13 +39,13 @@ public class AuditLogService {
   @Transactional(readOnly = true)
   public Page<Row> search(UUID actor, String action, String entity, String entityId, LocalDate from, LocalDate to, int page, int size) {
     if (from != null && to != null && to.isBefore(from)) throw ApiException.validation("to", "must not be before from");
-    if (from != null && to != null && java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS) {
+    if (from != null && to != null && ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS) {
       throw ApiException.validation("to", "range is limited to " + MAX_DAYS + " days");
     }
     Instant f = from == null ? null : from.atStartOfDay(InvoiceNumbers.SHOP_ZONE).toInstant();
     Instant t = to == null ? null : to.plusDays(1).atStartOfDay(InvoiceNumbers.SHOP_ZONE).toInstant();
     Page<AuditQuery.Entry> p = audit.search(actor, blank(action), blank(entity), blank(entityId), f, t, Math.max(0, page), Page.clampSize(size));
-    Set<UUID> ids = p.items().stream().map(AuditQuery.Entry::actorId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+    Set<UUID> ids = p.items().stream().map(AuditQuery.Entry::actorId).filter(Objects::nonNull).collect(Collectors.toSet());
     Map<UUID, User> people = users.findAllByIds(ids).stream().collect(Collectors.toMap(User::id, Function.identity()));
     List<Row> rows = p.items().stream().map(e -> {
       User u = e.actorId() == null ? null : people.get(e.actorId());

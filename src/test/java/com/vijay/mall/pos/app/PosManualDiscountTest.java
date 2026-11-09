@@ -1,5 +1,19 @@
 package com.vijay.mall.pos.app;
 
+import static com.vijay.mall.pos.app.PosTestData.NOW;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
@@ -16,6 +30,7 @@ import com.vijay.mall.pos.app.PosViews.SaleInput;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
+import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
 import com.vijay.mall.pos.infra.PosHoldRepository;
@@ -36,19 +51,6 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import static com.vijay.mall.pos.app.PosTestData.NOW;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Manual discounts at the counter: who may give them, what they need and what ends up on the bill. */
@@ -168,10 +170,10 @@ class PosManualDiscountTest {
   }
 
   @Test void theReceiptShowsTheDiscountLine() {
-    var item = new com.vijay.mall.pos.domain.PosRecords.SaleItemRecord(UUID.randomUUID(), rice, "Rice", SoldBy.UNIT, 2, 5900, 11800, 1000,
+    var item = new PosRecords.SaleItemRecord(UUID.randomUUID(), rice, "Rice", SoldBy.UNIT, 2, 5900, 11800, 1000,
         10800, 5, "1006", 10286, 257, 257, 0);
     var rec = new SaleRecord(UUID.randomUUID(), "VSM/2026-27/000042", cashier, null, null, 11800, null, 0, 0, 0, 10800, 10286, 257, 257, 0,
-        null, 0, NOW, List.of(item), List.of(new com.vijay.mall.pos.domain.PosRecords.PaymentRecord("CASH", 10800, null)), "CASH", 1000,
+        null, 0, NOW, List.of(item), List.of(new PosRecords.PaymentRecord("CASH", 10800, null)), "CASH", 1000,
         "damaged pack", manager);
     when(sales.find(rec.id())).thenReturn(Optional.of(rec));
     assertThat(service.receipt(rec.id(), 32)).contains("Discount").contains("10.00");

@@ -1,16 +1,20 @@
 package com.vijay.mall.customers.api;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
-import com.vijay.mall.customers.app.CustomerAdminService;
 import com.vijay.mall.customers.app.CustomerAdminService.CustomerView;
+import com.vijay.mall.customers.app.CustomerAdminService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,13 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/customers")
 public class AdminCustomerController {
-  private com.vijay.mall.common.idem.AdminOps ops;
+  private AdminOps ops;
 
   /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
-  @org.springframework.beans.factory.annotation.Autowired
-  void setOps(com.vijay.mall.common.idem.AdminOps ops) { this.ops = ops; }
+  @Autowired
+  void setOps(AdminOps ops) { this.ops = ops; }
 
-  public record ActiveBody(@jakarta.validation.constraints.NotNull Boolean active) {}
+  public record ActiveBody(@NotNull Boolean active) {}
 
   public record CoinsBody(int delta, String reason) {}
 
@@ -49,8 +53,8 @@ public class AdminCustomerController {
 
   /** delta above 0 gives coins, below 0 takes them back; a reason is required. */
   @PostMapping("/{id}/coins")
-  public CustomerView coins(@PathVariable UUID id, @Valid @RequestBody CoinsBody b, @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String key) {
-    return com.vijay.mall.common.idem.AdminOps.run(ops, key, "coins-adjust:" + id, CurrentUser.id(), com.vijay.mall.common.idem.AdminOps.fingerprint(id, b),
+  public CustomerView coins(@PathVariable UUID id, @Valid @RequestBody CoinsBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.run(ops, key, "coins-adjust:" + id, CurrentUser.id(), AdminOps.fingerprint(id, b),
         () -> customers.adjustCoins(id, b.delta(), b.reason(), CurrentUser.id()), v -> id.toString(), ref -> customers.get(id));
   }
 }

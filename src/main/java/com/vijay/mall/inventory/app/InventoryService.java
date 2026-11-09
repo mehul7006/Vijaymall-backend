@@ -1,15 +1,22 @@
 package com.vijay.mall.inventory.app;
 
+import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.StockChanged;
+import com.vijay.mall.common.outbox.OutboxService;
 import com.vijay.mall.inventory.infra.InventoryRepository;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,11 +44,11 @@ public class InventoryService {
     this.events = events;
   }
 
-  private com.vijay.mall.common.outbox.OutboxService outbox;
+  private OutboxService outbox;
 
   /** Optional (plain unit tests run without it): lets stock changes raise low-stock alerts. */
   @Autowired(required = false)
-  void setOutbox(com.vijay.mall.common.outbox.OutboxService outbox) { this.outbox = outbox; }
+  void setOutbox(OutboxService outbox) { this.outbox = outbox; }
 
   /**
    * Raises ONE alert per product each time its stock falls onto or below its alert level (or to zero), so staff hear about
@@ -69,7 +76,7 @@ public class InventoryService {
   /** Tells open screens that stock moved, once the surrounding transaction commits. */
   private void changed(List<UUID> productIds, String reason) {
     if (events != null && !productIds.isEmpty()) {
-      events.publishEvent(new com.vijay.mall.common.live.StockChanged(productIds, reason, clock.instant()));
+      events.publishEvent(new StockChanged(productIds, reason, clock.instant()));
     }
   }
 
@@ -106,7 +113,7 @@ public class InventoryService {
    */
   @Transactional
   public List<Map<String, Object>> takeWhatIsLeft(List<Item> items, UUID orderId, String reason) {
-    Map<UUID, Integer> wanted = new java.util.TreeMap<>();
+    Map<UUID, Integer> wanted = new TreeMap<>();
     items.forEach(it -> wanted.merge(it.productId(), it.qty(), Integer::sum));
     List<Map<String, Object>> shortfalls = new ArrayList<>();
     Map<UUID, Integer> taken = new LinkedHashMap<>();
@@ -200,11 +207,11 @@ public class InventoryService {
   public int quantity(UUID productId) { return repo.quantity(productId); }
 
   /** Stock rows for many products at once; products without a row count as empty. */
-  public Map<UUID, InventoryRepository.Stock> stocks(java.util.Collection<UUID> productIds) {
+  public Map<UUID, InventoryRepository.Stock> stocks(Collection<UUID> productIds) {
     Map<UUID, InventoryRepository.Stock> found = repo.stocks(productIds).stream()
-        .collect(java.util.stream.Collectors.toMap(InventoryRepository.Stock::productId, java.util.function.Function.identity()));
-    return productIds.stream().distinct().collect(java.util.stream.Collectors.toMap(
-        java.util.function.Function.identity(), id -> found.getOrDefault(id, new InventoryRepository.Stock(id, 0, 5)),
+        .collect(Collectors.toMap(InventoryRepository.Stock::productId, Function.identity()));
+    return productIds.stream().distinct().collect(Collectors.toMap(
+        Function.identity(), id -> found.getOrDefault(id, new InventoryRepository.Stock(id, 0, 5)),
         (a, _) -> a, LinkedHashMap::new));
   }
 
@@ -214,7 +221,7 @@ public class InventoryService {
   public List<InventoryRepository.Stock> lowStock(int limit) { return repo.lowStock(limit); }
 
   /** Stock history, newest first. productId null means all products. */
-  public com.vijay.mall.common.Page<InventoryRepository.Movement> movements(UUID productId, int page, int size) {
-    return repo.movementPage(productId, Math.max(0, page), com.vijay.mall.common.Page.clampSize(size));
+  public Page<InventoryRepository.Movement> movements(UUID productId, int page, int size) {
+    return repo.movementPage(productId, Math.max(0, page), Page.clampSize(size));
   }
 }

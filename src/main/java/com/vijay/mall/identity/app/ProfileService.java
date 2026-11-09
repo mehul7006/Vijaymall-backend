@@ -7,6 +7,8 @@ import com.vijay.mall.identity.infra.AddressRepository;
 import com.vijay.mall.identity.infra.DeviceRepository;
 import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -93,8 +95,8 @@ public class ProfileService {
   public List<String> deviceTokens(UUID userId) { return devices.tokensOf(userId); }
 
   /** Many users at once (for admin order lists). */
-  public java.util.Map<UUID, User> users(java.util.Collection<UUID> ids) {
-    java.util.Map<UUID, User> out = new java.util.HashMap<>();
+  public Map<UUID, User> users(Collection<UUID> ids) {
+    Map<UUID, User> out = new HashMap<>();
     users.findAllByIds(ids).forEach(u -> out.put(u.id(), u));
     return out;
   }

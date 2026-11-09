@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
 class MobileOtpServiceTest {
@@ -55,7 +56,7 @@ class MobileOtpServiceTest {
   @Test
   void sendGeneratesFiveDigitCodeWhenNoFixedCode() {
     service("").send(MOBILE, "ip");
-    var code = org.mockito.ArgumentCaptor.forClass(String.class);
+    var code = ArgumentCaptor.forClass(String.class);
     verify(sender).send(eq(MOBILE), code.capture());
     assertThat(code.getValue()).matches("\\d{5}");
     verify(repo).insertMobile(MOBILE, hash(code.getValue()), NOW.plus(Duration.ofMinutes(5)), NOW);

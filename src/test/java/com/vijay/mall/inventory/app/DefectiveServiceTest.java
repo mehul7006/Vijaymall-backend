@@ -22,6 +22,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class DefectiveServiceTest {
   private final Instant now = Instant.parse("2026-11-09T10:00:00Z");
@@ -56,10 +57,10 @@ class DefectiveServiceTest {
     UUID ref = UUID.randomUUID();
     service.record(List.of(new InventoryService.Item(product, 2), new InventoryService.Item(UUID.randomUUID(), 0)), "ORDER_RETURN", ref, actor, "  leaking ");
     verify(repo).insert(any(), eq(product), eq(2), eq("ORDER_RETURN"), eq(ref), eq("leaking"), eq(actor), eq(now));
-    verify(repo, org.mockito.Mockito.times(1)).insert(any(), any(), anyInt(), anyString(), any(), any(), any(), any());
+    verify(repo, Mockito.times(1)).insert(any(), any(), anyInt(), anyString(), any(), any(), any(), any());
     service.record(List.of(new InventoryService.Item(product, 1)), "POS_RETURN", ref, actor, "   ");
     service.record(List.of(new InventoryService.Item(product, 1)), "POS_RETURN", ref, actor, null);
-    verify(repo, org.mockito.Mockito.times(2)).insert(any(), eq(product), eq(1), eq("POS_RETURN"), eq(ref), eq(null), eq(actor), eq(now));
+    verify(repo, Mockito.times(2)).insert(any(), eq(product), eq(1), eq("POS_RETURN"), eq(ref), eq(null), eq(actor), eq(now));
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any(), any());
   }
 
@@ -75,7 +76,7 @@ class DefectiveServiceTest {
     service.list("pending_review", null, 0, 20);
     service.list(null, null, 0, 20);
     service.list("  ", null, 0, 20);
-    verify(repo, org.mockito.Mockito.times(2)).page(eq(null), eq(null), eq(0), eq(20));
+    verify(repo, Mockito.times(2)).page(eq(null), eq(null), eq(0), eq(20));
     assertCode(() -> service.list("NOPE", null, 0, 20), "VALIDATION_FAILED");
   }
 
@@ -131,7 +132,7 @@ class DefectiveServiceTest {
     service.review(batch, "CONFIRM_DEFECTIVE", null, UUID.randomUUID(), false); // another person
     service.review(batch, "CONFIRM_DEFECTIVE", null, actor, true);              // the admin may
     service.review(batch, "RESTOCK", null, actor, false);                       // putting goods back on sale is always fine
-    verify(repo, org.mockito.Mockito.times(3)).review(eq(batch), anyString(), any(), any(), eq(now));
+    verify(repo, Mockito.times(3)).review(eq(batch), anyString(), any(), any(), eq(now));
   }
 
   @Test

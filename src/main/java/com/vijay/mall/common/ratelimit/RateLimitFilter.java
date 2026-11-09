@@ -3,12 +3,18 @@ package com.vijay.mall.common.ratelimit;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.error.ErrorBody;
 import com.vijay.mall.common.web.TraceIdFilter;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
+import com.vijay.mall.config.SettingsChanged;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,11 +32,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
    * accepts traffic from that proxy alone; otherwise any client could invent it and dodge every limit.
    */
   private static volatile String trustedHeader = "";
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
 
   public RateLimitFilter(RateLimiter limiter, JsonMapper mapper,
-                         @org.springframework.beans.factory.annotation.Value("${app.rate-limit.api-per-minute:300}") int perMinute,
-                         @org.springframework.beans.factory.annotation.Value("${app.rate-limit.client-ip-header:}") String ipHeader) {
+                         @Value("${app.rate-limit.api-per-minute:300}") int perMinute,
+                         @Value("${app.rate-limit.client-ip-header:}") String ipHeader) {
     trustedHeader = ipHeader == null ? "" : ipHeader.trim();
     this.perMinute = perMinute;
     this.limiter = limiter;
@@ -41,20 +47,20 @@ public class RateLimitFilter extends OncePerRequestFilter {
    * Optional (plain unit tests run without it): the admin's "real client address header" setting, which overrides the startup
    * value and applies at once when it is saved, no restart.
    */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) {
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) {
     this.settings = settings;
     applyHeader();
   }
 
-  @org.springframework.context.event.EventListener
-  void onSettingsChanged(com.vijay.mall.config.SettingsChanged e) {
-    if (e.touches(com.vijay.mall.config.Settings.CLIENT_IP_HEADER)) applyHeader();
+  @EventListener
+  void onSettingsChanged(SettingsChanged e) {
+    if (e.touches(Settings.CLIENT_IP_HEADER)) applyHeader();
   }
 
   private void applyHeader() {
     if (settings == null) return;
-    String v = settings.get(com.vijay.mall.config.Settings.CLIENT_IP_HEADER);
+    String v = settings.get(Settings.CLIENT_IP_HEADER);
     trustedHeader = v == null ? "" : v.trim();
   }
 

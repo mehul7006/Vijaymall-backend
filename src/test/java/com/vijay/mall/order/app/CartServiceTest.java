@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 
 class CartServiceTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -43,7 +44,7 @@ class CartServiceTest {
     when(repo.find(user)).thenReturn(stored);
     var result = service.replace(user, List.of(new Cart.Line(product, 1), new Cart.Line(product, 2)), " fest ", null, null);
     var saved = ArgumentCaptor.forClass(Cart.class);
-    verify(repo).replace(org.mockito.ArgumentMatchers.eq(user), saved.capture(), org.mockito.ArgumentMatchers.eq(NOW));
+    verify(repo).replace(ArgumentMatchers.eq(user), saved.capture(), ArgumentMatchers.eq(NOW));
     assertThat(saved.getValue().items()).containsExactly(new Cart.Line(product, 3));
     assertThat(saved.getValue().couponCode()).isEqualTo("FEST");
     assertThat(result).isSameAs(stored);
