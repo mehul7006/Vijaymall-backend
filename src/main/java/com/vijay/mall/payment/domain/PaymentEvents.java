@@ -6,6 +6,10 @@ import java.util.UUID;
 public final class PaymentEvents {
   private PaymentEvents() {}
 
+  /**
+   * The right amount was received for an open payment, so the order can move on.
+   * @param providerRef the provider's payment id
+   */
   public record PaymentCaptured(UUID orderId, String providerRef) {}
 
   /**
@@ -14,5 +18,9 @@ public final class PaymentEvents {
    */
   public record PaymentAnomaly(UUID orderId, String kind, long expectedPaise, long receivedPaise) {}
 
+  /**
+   * Published when a payment is reported as failed so the order module can react.
+   * @param reason the provider's description
+   */
   public record PaymentFailed(UUID orderId, String reason) {}
 }

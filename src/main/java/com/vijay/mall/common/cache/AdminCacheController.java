@@ -23,6 +23,7 @@ public class AdminCacheController {
   private final RuntimeSettings settings;
   private final AuditService audit;
 
+  /** Creates the controller. */
   public AdminCacheController(AppCaches caches, RuntimeSettings settings, AuditService audit) {
     this.caches = caches;
     this.settings = settings;

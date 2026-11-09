@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code wallet_balance}: creating and row-locking a balance, and the ledger consistency query.
+ */
 interface WalletJpa extends JpaRepository<WalletBalanceEntity, UUID> {
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(value = "insert into wallet_balance (user_id, coins, version) values (:u, 0, 0) on conflict (user_id) do nothing", nativeQuery = true)

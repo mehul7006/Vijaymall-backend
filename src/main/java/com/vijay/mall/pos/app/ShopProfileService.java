@@ -33,6 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Service
 public class ShopProfileService implements OnlineOrdering {
+  /** Opening hours of one weekday: {@code open} and {@code close} times, or {@code closed} for a day off. */
   public record DayHours(String day, String open, String close, boolean closed) {}
 
   /** What is stored and edited. */
@@ -57,6 +58,7 @@ public class ShopProfileService implements OnlineOrdering {
   private AppCaches caches;
   private LiveEvents live;
 
+  /** Creates the service. */
   public ShopProfileService(ShopProfileRepository repo, ImageStore images, AuditService audit, Clock clock, JsonMapper json) {
     this.repo = repo;
     this.images = images;
@@ -85,6 +87,10 @@ public class ShopProfileService implements OnlineOrdering {
         r.onlineOrdersEnabled(), r.onlineOrdersMessage(), r.updatedAt());
   }
 
+  /**
+   * The shop profile (logo, contact links, hours, holiday note, online-ordering switch), cached when caches are
+   * available.
+   */
   public Profile get() { return caches == null ? load() : caches.get(AppCaches.Name.SHOP_PROFILE, "1", this::load); }
 
   /** The profile plus whether the shop is open this minute (shop time) and today's hours as text. */
@@ -140,6 +146,7 @@ public class ShopProfileService implements OnlineOrdering {
     return load();
   }
 
+  /** Removes the shop logo (the profile then shows no logo), audits the change and tells open app screens. */
   @Transactional
   public Profile removeLogo(UUID actor) {
     updateLogo("");

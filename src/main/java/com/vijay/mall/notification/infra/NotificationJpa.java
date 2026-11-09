@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code notification} rows: pages per user, unread count and marking read. */
 interface NotificationJpa extends JpaRepository<NotificationEntity, UUID> {
   Page<NotificationEntity> findByUserId(UUID userId, Pageable page);
 

@@ -16,6 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class TraceIdFilter extends OncePerRequestFilter {
+  /** Name of the log context entry and of the key used in error bodies. */
   public static final String KEY = "traceId";
 
   @Override

@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("!dev & !test")
 public class ProdConfigGuard {
+  /**
+   * Checks the configuration at start-up and aborts with {@code IllegalStateException} listing every problem found.
+   */
   public ProdConfigGuard(AppProps props) {
     List<String> problems = problems(props);
     if (!problems.isEmpty()) {

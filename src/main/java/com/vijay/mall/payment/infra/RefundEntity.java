@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Row of the {@code refund} table: a refund in the queue ({@code PENDING}, {@code PROCESSING}, {@code ISSUED} or {@code FAILED}) with its attempt count and last error.
+ */
 @Entity
 @Table(name = "refund")
 class RefundEntity extends BaseEntity {
@@ -21,5 +24,6 @@ class RefundEntity extends BaseEntity {
   String lastError;
   Instant updatedAt;
 
+  /** For JPA. */
   protected RefundEntity() {}
 }

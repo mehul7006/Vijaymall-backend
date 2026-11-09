@@ -12,6 +12,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores user accounts (customers, cashiers and admins) and exposes them as {@link User} records. */
 @Repository
 public class UserRepository {
   private final UserJpa jpa;
@@ -20,14 +21,18 @@ public class UserRepository {
 
   private static User toDomain(UserEntity e) { return new User(e.id, e.email, e.name, e.mobile, e.role); }
 
+  /** The user with this id, if any. */
   public Optional<User> findById(UUID id) { return jpa.findById(id).map(UserRepository::toDomain); }
 
+  /** The users with these ids in one query; unknown ids are skipped. */
   public List<User> findAllByIds(Collection<UUID> ids) {
     return ids.isEmpty() ? List.of() : jpa.findAllById(ids).stream().map(UserRepository::toDomain).toList();
   }
 
+  /** The user with this (already normalised) e-mail, if any. */
   public Optional<User> findByEmail(String email) { return jpa.findByEmail(email).map(UserRepository::toDomain); }
 
+  /** Creates an active user that signs in by e-mail with the given role. */
   @Transactional
   public User insert(String email, String role, Instant now) {
     UserEntity e = new UserEntity();
@@ -40,6 +45,10 @@ public class UserRepository {
     return toDomain(jpa.save(e));
   }
 
+  /**
+   * Saves name and mobile. A null name keeps the saved name, a changed mobile loses its verified flag, and a
+   * verified mobile (or the only contact of an account without e-mail) is never blanked.
+   */
   @Transactional
   public void updateProfile(UUID id, String name, String mobile, Instant now) {
     jpa.findById(id).ifPresent(e -> {
@@ -91,6 +100,7 @@ public class UserRepository {
     return toDomain(jpa.save(e));
   }
 
+  /** Changes the role of a user. */
   @Transactional
   public void setRole(UUID id, String role) { jpa.findById(id).ifPresent(e -> e.role = role); }
 
@@ -135,6 +145,7 @@ public class UserRepository {
     return toDomain(jpa.save(e));
   }
 
+  /** Users with this role, newest first. */
   public List<User> byRole(String role) {
     return jpa.findByRoleOrderByCreatedAtDesc(role).stream().map(UserRepository::toDomain).toList();
   }
@@ -158,6 +169,7 @@ public class UserRepository {
   /** What the admin sees about a customer beyond the public profile. */
   public record Detail(User user, String status, boolean mobileVerified, String source, Instant createdAt) {}
 
+  /** Admin view of one user, or empty when the id is unknown. */
   public Optional<Detail> detail(UUID id) {
     return jpa.findById(id).map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt));
   }
@@ -173,11 +185,14 @@ public class UserRepository {
   /** An active admin and the hash of their manager-approval PIN. */
   public record AdminPin(UUID id, String hash) {}
 
+  /** Stores the hash of an admin's manager-approval PIN. */
   @Transactional
   public void setApprovalPin(UUID id, String hash) { jpa.findById(id).ifPresent(e -> e.approvalPinHash = hash); }
 
+  /** Active admins that have a manager-approval PIN, with its hash. */
   public List<AdminPin> adminPins() { return jpa.adminsWithPin().stream().map(e -> new AdminPin(e.id, e.approvalPinHash)).toList(); }
 
+  /** Sets the account status, {@code ACTIVE} or {@code BLOCKED}. */
   @Transactional
   public void setStatus(UUID id, String status) { jpa.findById(id).ifPresent(e -> e.status = status); }
 
@@ -187,5 +202,6 @@ public class UserRepository {
   /** Active admins and counter staff: everyone who works the orders. */
   public List<UUID> staffIds() { return jpa.activeStaffIds(); }
 
+  /** True when the account is blocked and must not sign in. */
   public boolean isBlocked(UUID id) { return jpa.existsByIdAndStatus(id, "BLOCKED"); }
 }

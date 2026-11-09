@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code pos_sale_item}, the lines of counter bills. */
 interface PosSaleItemJpa extends JpaRepository<PosSaleItemEntity, UUID> {
   List<PosSaleItemEntity> findBySaleId(UUID saleId);
 

@@ -23,12 +23,19 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 public class DefectiveController {
+  /**
+   * Request body for a review: {@code decision} is {@code CONFIRM_DEFECTIVE} or {@code RESTOCK}; {@code note} is optional, at most 200 characters.
+   */
   public record ReviewBody(@NotBlank String decision, String note) {}
 
+  /**
+   * Request body for the final decision: {@code action} is {@code WRITE_OFF} or {@code RETURN_TO_SUPPLIER}; {@code note} is optional, at most 200 characters.
+   */
   public record ResolveBody(@NotBlank String action, String note) {}
 
   private final DefectiveService defective;
 
+  /** Creates the controller with the defective-goods service. */
   public DefectiveController(DefectiveService defective) { this.defective = defective; }
 
   // ---------- staff and admin: review the claims ----------

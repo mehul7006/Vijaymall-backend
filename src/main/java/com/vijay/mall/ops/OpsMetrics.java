@@ -27,6 +27,14 @@ public class OpsMetrics implements MeterBinder {
   private static final Logger log = LoggerFactory.getLogger(OpsMetrics.class);
   static final long CACHE_MS = 15_000;
 
+  /**
+   * One reading of the operations gauges.
+   * @param refundsPending refunds waiting or being sent
+   * @param refundsFailed refunds that need a person
+   * @param outboxPending events not yet delivered
+   * @param lowStock products at or below their alert level
+   * @param ordersByStatus online order counts per status
+   */
   record Snapshot(long refundsPending, long refundsFailed, long outboxPending, long lowStock, Map<String, Long> ordersByStatus) {}
 
   private final PaymentRepository payments;
@@ -37,6 +45,7 @@ public class OpsMetrics implements MeterBinder {
   private volatile Snapshot snapshot = new Snapshot(0, 0, 0, 0, Map.of());
   private volatile long takenAt = Long.MIN_VALUE;
 
+  /** Creates the binder. */
   public OpsMetrics(PaymentRepository payments, OrderRepository orders, OutboxService outbox, InventoryService inventory, Clock clock) {
     this.payments = payments;
     this.orders = orders;

@@ -7,6 +7,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** Table {@code address}: one saved delivery address of a user, with an is_default flag. */
 @Entity
 @Table(name = "address")
 class AddressEntity extends BaseEntity {
@@ -18,5 +19,6 @@ class AddressEntity extends BaseEntity {
   @Column(name = "is_default") boolean defaultAddress;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected AddressEntity() {}
 }

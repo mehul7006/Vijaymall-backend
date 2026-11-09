@@ -8,6 +8,13 @@ import java.util.stream.Collectors;
 public final class ReceiptText {
     private ReceiptText() { }
 
+    /**
+     * Lays a bill out as plain text for a thermal printer.
+     *
+     * @param width characters per line; only 32 (58 mm paper) and 48 (80 mm paper) are accepted
+     * @return the receipt, one line per row, ending with a newline
+     * @throws IllegalArgumentException if the width is not 32 or 48
+     */
     public static String render(ReceiptData r, int width) {
         if (width != 32 && width != 48) {
             throw new IllegalArgumentException("width must be 32 or 48");
@@ -52,6 +59,7 @@ public final class ReceiptText {
         return out.stream().collect(Collectors.joining("\n", "", "\n"));
     }
 
+    /** Centres a line by padding the left; a line as wide as the paper is returned unchanged. */
     static String center(String s, int w) {
         return s.length() >= w ? s : " ".repeat((w - s.length()) / 2) + s;
     }
@@ -63,6 +71,7 @@ public final class ReceiptText {
         return l + " ".repeat(Math.max(1, w - l.length() - right.length())) + right;
     }
 
+    /** Breaks text into lines of at most {@code w} characters at spaces; a word longer than a line is cut. */
     static List<String> wrap(String text, int w) {
         List<String> lines = new ArrayList<>();
         StringBuilder cur = new StringBuilder();

@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** A row of {@code pos_hold}: a basket a cashier parked, stored as JSON. */
 @Entity
 @Table(name = "pos_hold")
 class PosHoldEntity extends BaseEntity {
@@ -15,5 +16,6 @@ class PosHoldEntity extends BaseEntity {
   String payload;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected PosHoldEntity() {}
 }

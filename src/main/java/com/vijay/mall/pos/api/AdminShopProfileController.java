@@ -24,13 +24,23 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/admin/shop-profile")
 public class AdminShopProfileController {
+  /**
+   * Request body for the shop profile: contact links, opening hours, holiday note and the online-ordering pause
+   * switch with its message.
+   */
   public record ProfileBody(String email, String whatsapp, String mapUrl, String website, String instagram, String facebook, List<DayHours> hours,
                             String holidayNote, Boolean onlineOrdersEnabled, String onlineOrdersMessage) {}
 
   private final ShopProfileService profile;
 
+  /**
+   * Creates the controller.
+   *
+   * @param profile shop profile service
+   */
   public AdminShopProfileController(ShopProfileService profile) { this.profile = profile; }
 
+  /** Returns the shop profile as the admin edits it. */
   @GetMapping
   public Profile get() { return profile.get(); }
 
@@ -48,6 +58,7 @@ public class AdminShopProfileController {
     return profile.setLogo(file.getBytes(), CurrentUser.id());
   }
 
+  /** Removes the shop logo and returns the updated profile. */
   @DeleteMapping("/logo")
   public Profile removeLogo() { return profile.removeLogo(CurrentUser.id()); }
 }

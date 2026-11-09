@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class CounterControlsController {
   private final CounterControlsService controls;
 
+  /** Creates the controller. */
   public CounterControlsController(CounterControlsService controls) { this.controls = controls; }
 
   /** period = week | month | quarter (default week), or an explicit from/to as yyyy-MM-dd, both days included. */

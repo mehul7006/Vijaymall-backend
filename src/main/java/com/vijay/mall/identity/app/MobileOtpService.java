@@ -36,6 +36,10 @@ public class MobileOtpService {
   @Autowired(required = false)
   void setPerMobileHour(@Value("${app.rate-limit.otp-per-mobile-hour:5}") int n) { this.perMobileHour = n; }
 
+  /**
+   * Creates the service (wired by Spring).
+   * @param ipPerHour how many codes one client IP may ask for per hour
+   */
   public MobileOtpService(OtpRepository repo, SmsOtpSender sender, AppProps props, Clock clock, RateLimiter limiter,
                           @Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
     this.repo = repo;
@@ -55,6 +59,14 @@ public class MobileOtpService {
   /** The hash input names the channel, so a code for a mobile can never match an email code. */
   static String hashKey(String mobile) { return "mobile:" + mobile; }
 
+  /**
+   * Creates a code for the mobile number, stores only its hash and sends it by SMS.
+   * <p>
+   * The code is valid for 5 minutes. The number and the caller's IP are rate limited per hour (429 {@code RATE_LIMITED}).
+   * If the SMS cannot be sent the stored code is rolled back.
+   * @param rawMobile the number as typed
+   * @param ip the caller's IP address, used for rate limiting
+   */
   @Transactional
   public void send(String rawMobile, String ip) {
     String mobile = require(rawMobile);

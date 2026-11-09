@@ -59,6 +59,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
   public record PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise,
                              String slot) {
+    /** Without a slot. */
     public PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise) {
       this(quote, addressId, paymentMethod, expectedTotalPaise, null);
     }
@@ -84,6 +85,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   private final Clock clock;
   private final ApplicationEventPublisher events;
 
+  /** Creates the service with all collaborators it talks to through their services. */
   public OrderService(OrderRepository repo, QuoteService quotes, InventoryService inventory, WalletService wallet,
                       PromotionService promotions, PaymentService payments, ProfileService profiles, OutboxService outbox,
                       AuditService audit, JsonMapper json, TransactionTemplate tx, AppProps props, Clock clock,
@@ -215,6 +217,11 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   }
 
   // ---------- status changes ----------
+  /**
+   * Staff move an order to {@code target}. A repeat of the current status is a no-op; an unpaid online order can only be cancelled; closed orders answer {@code 409 ILLEGAL_TRANSITION}. Writes an audit entry.
+   * @param note optional note kept in the status history
+   * @param actor the staff member
+   */
   @Transactional
   public OrderViews.AdminView adminChangeStatus(UUID orderId, OrderStatus target, String note, UUID actor) {
     OrderRepository.Row row = repo.find(orderId).orElseThrow(() -> ApiException.notFound("Order"));
@@ -244,6 +251,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     return adminView(repo.find(orderId).orElseThrow());
   }
 
+  /** Customer cancels without giving a reason. */
   @Transactional
   public OrderViews.View customerCancel(UUID userId, UUID orderId) { return customerCancel(userId, orderId, null); }
 
@@ -312,6 +320,9 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   }
 
   // ---------- payment results ----------
+  /**
+   * Reacts to a captured online payment: an order waiting for payment becomes PLACED; if the order was already cancelled the money is refunded; otherwise only the payment status is recorded.
+   */
   @EventListener
   @Transactional
   public void on(PaymentEvents.PaymentCaptured e) {
@@ -353,6 +364,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), row.status(), row.status(), clock.instant()));
   }
 
+  /** Reacts to a failed online payment by cancelling the order if it is still waiting for payment. */
   @EventListener
   @Transactional
   public void on(PaymentEvents.PaymentFailed e) {
@@ -374,11 +386,13 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   }
 
   // ---------- reads ----------
+  /** Returns one of the customer's own orders; {@code 404} if it belongs to someone else. */
   @Transactional(readOnly = true)
   public OrderViews.View get(UUID userId, UUID orderId) {
     return view(repo.find(orderId).filter(r -> r.userId().equals(userId)).orElseThrow(() -> ApiException.notFound("Order")));
   }
 
+  /** Lists the customer's orders, newest first. */
   public Page<OrderViews.Summary> list(UUID userId, int page, int size) {
     Page<OrderRepository.SummaryRow> p = repo.list(userId, Math.max(0, page), Page.clampSize(size));
     return new Page<>(p.items().stream().map(r -> new OrderViews.Summary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
@@ -387,6 +401,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
         p.page(), p.size(), p.total());
   }
 
+  /** Staff list of all orders, optionally of one status. */
   public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
   /** q filters by order number (part of it is enough). */
@@ -418,6 +433,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   @Override
   public Map<UUID, String> numbers(Collection<UUID> ids) { return repo.numbers(ids); }
 
+  /** Staff view of one order, including the customer's name and contact details. */
   @Transactional(readOnly = true)
   public OrderViews.AdminView adminGet(UUID orderId) {
     return adminView(repo.find(orderId).orElseThrow(() -> ApiException.notFound("Order")));

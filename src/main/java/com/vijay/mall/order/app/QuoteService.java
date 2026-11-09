@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class QuoteService {
   private final List<QuoteStep> steps;
 
+  /** Creates the service; the steps are sorted by their {@code order()}. */
   public QuoteService(List<QuoteStep> steps) {
     this.steps = steps.stream().sorted(Comparator.comparingInt(QuoteStep::order)).toList();
   }
@@ -32,6 +33,7 @@ public class QuoteService {
     return ctx.toQuote();
   }
 
+  /** Prices an online basket by running every step: subtotal, coupon, coins, delivery fee, total, coins to earn. */
   @Transactional(readOnly = true)
   public Quote quote(UUID userId, QuoteRequest req) {
     QuoteContext ctx = new QuoteContext(userId, req);

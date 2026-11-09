@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** Row of {@code app_setting}: one setting the admin saved; the value is encrypted when {@code secret} is true. */
 @Entity
 @Table(name = "app_setting")
 class SettingEntity {
@@ -15,5 +16,6 @@ class SettingEntity {
   Instant updatedAt;
   UUID updatedBy;
 
+  /** For JPA. */
   protected SettingEntity() {}
 }

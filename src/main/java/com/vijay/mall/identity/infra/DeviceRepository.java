@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores the push tokens of customers' phones. */
 @Repository
 public class DeviceRepository {
   private final DeviceJpa jpa;
@@ -27,8 +28,10 @@ public class DeviceRepository {
     jpa.save(e);
   }
 
+  /** All push tokens registered to the user. */
   public List<String> tokensOf(UUID userId) { return jpa.tokensOf(userId); }
 
+  /** Removes all of the user's push tokens (account deletion). */
   @Transactional
   public void deleteAll(UUID userId) { jpa.deleteAllOf(userId); }
 

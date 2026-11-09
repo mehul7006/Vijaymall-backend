@@ -14,6 +14,7 @@ import org.springframework.data.domain.Persistable;
  */
 @MappedSuperclass
 public abstract class BaseEntity implements Persistable<UUID> {
+  /** The primary key, assigned by the application. */
   @Id
   public UUID id;
 

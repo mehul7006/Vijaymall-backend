@@ -20,14 +20,28 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1")
 public class PosShiftController {
+  /** Request body for opening a shift: the cash float already in the drawer, in paise. */
   public record OpenBody(@Min(0) long openingFloatPaise) {}
 
+  /**
+   * Request body for closing a shift: the cash counted in the drawer, in paise, and a note that is required when it
+   * differs from the expected cash.
+   */
   public record CloseBody(@Min(0) long countedCashPaise, String note) {}
 
   private final ShiftService shifts;
 
+  /**
+   * Creates the controller.
+   *
+   * @param shifts shift service
+   */
   public PosShiftController(ShiftService shifts) { this.shifts = shifts; }
 
+  /**
+   * Opens the calling cashier's shift with the opening float (201). Answers 409 {@code SHIFT_ALREADY_OPEN} if one is
+   * already open.
+   */
   @PostMapping("/pos/shifts/open")
   @ResponseStatus(HttpStatus.CREATED)
   public ShiftView open(@Valid @RequestBody OpenBody b) { return shifts.open(CurrentUser.id(), b.openingFloatPaise()); }
@@ -36,6 +50,10 @@ public class PosShiftController {
   @GetMapping("/pos/shifts/current")
   public ShiftView current() { return shifts.current(CurrentUser.id()); }
 
+  /**
+   * Closes the calling cashier's shift with the counted cash. Answers 422 {@code VARIANCE_NEEDS_NOTE} when the count
+   * differs from the expected cash and no note is given, and 404 when no shift is open.
+   */
   @PostMapping("/pos/shifts/close")
   public ShiftView close(@Valid @RequestBody CloseBody b) { return shifts.close(CurrentUser.id(), b.countedCashPaise(), b.note()); }
 

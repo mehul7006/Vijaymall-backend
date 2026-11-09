@@ -13,8 +13,13 @@ import org.springframework.stereotype.Repository;
 /** Aggregates for the cash-up and the dashboard. {@code cashier} null means every cashier. */
 @Repository
 public class PosReportRepository {
+  /**
+   * Totals of counter bills in a period: number of bills, takings, taxable value, CGST and SGST in paise, and coins
+   * redeemed.
+   */
   public record Totals(long bills, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsUsed) {}
 
+  /** Totals of credit notes in a period: how many, and the refunded value in paise. */
   public record ReturnTotals(long notes, long refundPaise) {}
 
   @PersistenceContext
@@ -30,6 +35,7 @@ public class PosReportRepository {
 
   private static long num(Object o) { return o == null ? 0 : ((Number) o).longValue(); }
 
+  /** Totals of the bills rung in the half-open period {@code [from, to)}, optionally for one cashier. */
   public Totals sales(Instant from, Instant to, UUID cashier) {
     Object[] r = (Object[]) bind(em.createQuery("select count(s), sum(s.totalPaise), sum(s.taxablePaise), sum(s.cgstPaise), "
         + "sum(s.sgstPaise), sum(s.coinsUsed) from PosSaleEntity s where s.createdAt >= :f and s.createdAt < :t"
@@ -37,12 +43,17 @@ public class PosReportRepository {
     return new Totals(num(r[0]), num(r[1]), num(r[2]), num(r[3]), num(r[4]), num(r[5]));
   }
 
+  /** Totals of the credit notes issued in {@code [from, to)}, optionally for one cashier. */
   public ReturnTotals returns(Instant from, Instant to, UUID cashier) {
     Object[] r = (Object[]) bind(em.createQuery("select count(x), sum(x.refundPaise) from PosReturnEntity x "
         + "where x.createdAt >= :f and x.createdAt < :t" + cashierClause("x", cashier)), from, to, cashier).getSingleResult();
     return new ReturnTotals(num(r[0]), num(r[1]));
   }
 
+  /**
+   * Money taken on bills in the period, in paise by payment mode (includes {@code CREDIT} for the part put on
+   * account).
+   */
   @SuppressWarnings("unchecked")
   public Map<String, Long> paidByMode(Instant from, Instant to, UUID cashier) {
     List<Object[]> rows = bind(em.createQuery("select p.mode, sum(p.amountPaise) from PosPaymentEntity p "
@@ -66,6 +77,7 @@ public class PosReportRepository {
     return rows.stream().collect(Collectors.toMap(r -> (String) r[0], r -> num(r[1])));
   }
 
+  /** Money paid out on credit notes in the period, in paise by payment mode. */
   @SuppressWarnings("unchecked")
   public Map<String, Long> refundedByMode(Instant from, Instant to, UUID cashier) {
     List<Object[]> rows = bind(em.createQuery("select p.mode, sum(p.amountPaise) from PosRefundPaymentEntity p "
@@ -75,12 +87,16 @@ public class PosReportRepository {
   }
 
   // ---------- counter controls (loss prevention) ----------
+  /** Per cashier: bills, takings, and how many bills had a manual discount and how much it came to, in paise. */
   public record CashierSales(UUID cashierId, long bills, long totalPaise, long manualDiscounts, long manualDiscountPaise) {}
 
+  /** Per cashier: credit notes issued and the refunded value in paise. */
   public record CashierReturns(UUID cashierId, long notes, long refundPaise) {}
 
+  /** Per cashier: shifts closed and the sum of their cash differences in paise. */
   public record CashierShifts(UUID cashierId, long closed, long variancePaise) {}
 
+  /** Bills and manual discounts per cashier in {@code [from, to)}, for spotting unusual discounting. */
   @SuppressWarnings("unchecked")
   public List<CashierSales> salesByCashier(Instant from, Instant to) {
     List<Object[]> rows = em.createQuery("select s.cashierId, count(s), sum(s.totalPaise), "
@@ -89,6 +105,7 @@ public class PosReportRepository {
     return rows.stream().map(r -> new CashierSales((UUID) r[0], num(r[1]), num(r[2]), num(r[3]), num(r[4]))).toList();
   }
 
+  /** Credit notes per cashier in {@code [from, to)}, for spotting unusual refunds. */
   @SuppressWarnings("unchecked")
   public List<CashierReturns> returnsByCashier(Instant from, Instant to) {
     List<Object[]> rows = em.createQuery("select x.cashierId, count(x), sum(x.refundPaise) from PosReturnEntity x "

@@ -30,6 +30,9 @@ public class AdminCreditController {
   @Autowired
   void setOps(AdminOps ops) { this.ops = ops; }
 
+  /**
+   * Request body for changing a known customer's credit limit. {@code limitPaise} is in paise; 0 switches credit off.
+   */
   public record LimitBody(@PositiveOrZero long limitPaise) {}
 
   /** Approves credit for a customer by mobile number, creating the customer if the shop has not seen them yet. */
@@ -40,16 +43,32 @@ public class AdminCreditController {
 
   private final CreditService credit;
 
+  /**
+   * Creates the controller.
+   *
+   * @param credit credit (udhar) account service
+   */
   public AdminCreditController(CreditService credit) { this.credit = credit; }
 
+  /**
+   * Approves credit for a customer by mobile number and sets their limit; admin only. Creates the customer if the
+   * shop has not seen the number yet. Answers 400 for a bad mobile number or a negative limit.
+   *
+   * @return the customer's credit account after the change
+   */
   @PutMapping("/limit")
   public CreditService.AccountView approve(@Valid @RequestBody MobileLimitBody body) {
     return credit.setLimitByMobile(body.mobile(), body.limitPaise(), CurrentUser.id());
   }
 
+  /**
+   * Shows one customer's credit account (balance owed, limit, available credit); admin only. Answers 404 if the
+   * customer does not exist.
+   */
   @GetMapping("/accounts/{customerId}")
   public CreditService.AccountView get(@PathVariable UUID customerId) { return credit.account(customerId); }
 
+  /** Lists one customer's credit ledger, newest first, page by page; admin only. */
   @GetMapping("/accounts/{customerId}/ledger")
   public Page<CreditService.LedgerView> ledger(@PathVariable UUID customerId, @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "20") int size) {
@@ -62,6 +81,14 @@ public class AdminCreditController {
     return credit.setLimit(customerId, body.limitPaise(), CurrentUser.id());
   }
 
+  /**
+   * Writes a correction or write-off on a customer's credit balance; admin only. Negative {@code amountPaise} lowers
+   * what the customer owes, positive raises it, and a note is required. Answers 422 {@code CREDIT_ADJUST_TOO_LARGE}
+   * when it would take the balance below zero. A repeated request with the same {@code Idempotency-Key} header does
+   * not apply the change twice.
+   *
+   * @param key optional idempotency key; send one so a double tap is harmless
+   */
   @PostMapping("/accounts/{customerId}/adjust")
   public CreditService.AccountView adjust(@PathVariable UUID customerId, @Valid @RequestBody AdjustBody body, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     // an amount is relative, so a double tap on a Rs 500 write-off must not write off Rs 1000

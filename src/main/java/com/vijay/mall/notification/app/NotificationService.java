@@ -46,6 +46,7 @@ public class NotificationService {
     this.inventory = inventory;
   }
 
+  /** Creates the service (wired by Spring). */
   public NotificationService(NotificationRepository repo, PushSender push, ProfileService profiles, JsonMapper json, Clock clock) {
     this.repo = repo;
     this.push = push;
@@ -57,6 +58,14 @@ public class NotificationService {
   /** Marks a note written when staff reject an order (see OrderService.adminReject). */
   public static final String REJECTED = "rejected by shop:";
 
+  /**
+   * Event listener: turns a business event from the outbox into notifications for the right people.
+   * <p>
+   * Handles {@code ORDER_PLACED}, {@code ORDER_STATUS}, {@code ORDER_RETURN}, {@code PAYMENT_ANOMALY}, {@code LOW_STOCK}
+   * and the flash-sale events; other types are ignored. Customers hear about their own orders, staff (admins and cashiers)
+   * hear about new orders, payment problems, stock and flash sales. Each notification is saved and also pushed to the
+   * user's devices. Errors are logged, never thrown.
+   */
   @EventListener
   public void on(OutboxMessage m) {
     try {
@@ -173,6 +182,9 @@ public class NotificationService {
     for (UUID staff : profiles.staffIds()) notify(staff, title, stockLine(lines), "STOCK", null);
   }
 
+  /**
+   * A page of the user's notifications, newest first, with the unread count. The page size is clamped to the allowed maximum.
+   */
   public Inbox inbox(UUID userId, int page, int size) {
     Page<NotificationRepository.Row> p = repo.page(userId, Math.max(0, page), Page.clampSize(size));
     return new Inbox(p.items(), p.page(), p.size(), p.total(), repo.unread(userId));
@@ -184,6 +196,7 @@ public class NotificationService {
     repo.markRead(userId, id, clock.instant());
   }
 
+  /** Marks all of the user's notifications read. */
   public void markAllRead(UUID userId) { repo.markAllRead(userId, clock.instant()); }
 
   private void notify(UUID userId, String title, String body, String kind, String ref) {

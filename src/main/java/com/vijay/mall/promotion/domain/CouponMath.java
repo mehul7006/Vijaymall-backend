@@ -16,6 +16,10 @@ public final class CouponMath {
     return lines.stream().filter(l -> c.covers(l.categoryId())).mapToLong(PricedLine::lineTotalPaise).sum();
   }
 
+  /**
+   * Discount in paise: the fixed value for FLAT, or the percentage of the base for PERCENT, capped at
+   * {@code maxDiscountPaise} when set and never more than the base.
+   */
   public static long discount(Coupon c, long base) {
     long d = switch (c.kind()) {
       case Coupon.FLAT -> c.value();

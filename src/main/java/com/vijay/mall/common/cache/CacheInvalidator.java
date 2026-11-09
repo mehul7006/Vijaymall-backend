@@ -17,6 +17,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class CacheInvalidator {
   private final AppCaches caches;
 
+  /** Creates the invalidator. */
   public CacheInvalidator(AppCaches caches) { this.caches = caches; }
 
   /** A new expiry time or switching caching on/off applies to everything at once, so start from empty. */
@@ -25,6 +26,7 @@ public class CacheInvalidator {
     if (e.keys().stream().anyMatch(k -> k.startsWith("cache."))) caches.invalidateAll();
   }
 
+  /** Empties the caches that hold the changed area, after the change has committed. */
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void on(CatalogChanged e) {
     switch (e.area()) {

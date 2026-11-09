@@ -34,6 +34,7 @@ public class DevDataSeeder implements CommandLineRunner {
   private final PosCatalogService posCatalog;
   private final StaffService staff;
 
+  /** Creates the seeder. */
   public DevDataSeeder(CatalogService catalog, WalletService wallet, PromotionService promotions,
                        PosCatalogService posCatalog, StaffService staff) {
     this.catalog = catalog;

@@ -47,6 +47,7 @@ public class PaymentService {
   private final Clock clock;
   private final TransactionTemplate tx;
 
+  /** Creates the service. */
   public PaymentService(PaymentRepository repo, PaymentGatewayRegistry registry, ApplicationEventPublisher events,
                         AuditService audit, Clock clock, TransactionTemplate tx) {
     this.tx = tx;
@@ -60,7 +61,7 @@ public class PaymentService {
   /** What the admin sees: the switch, and whether the method could actually work (ONLINE needs its provider keys). */
   public record AdminMethod(String code, boolean enabled, boolean configured) {}
 
-  /** Methods customers may pick: switched on by the admin and, for ONLINE, set up with provider keys. */
+  /** The cache registry that keeps the payment-method switches in memory; null in plain unit tests. */
   private AppCaches caches;
 
   /** Optional (plain unit tests run without it): which methods are switched on is read for every checkout, so it is cached. */
@@ -71,10 +72,14 @@ public class PaymentService {
     return caches == null ? repo.settings() : caches.get(AppCaches.Name.PAYMENT_METHODS, "all", repo::settings);
   }
 
+  /**
+   * The methods customers may pick: switched on by the admin and, for {@code ONLINE}, set up with provider keys. Cached.
+   */
   public List<PaymentRepository.Setting> enabledMethods() {
     return switches().stream().filter(PaymentRepository.Setting::enabled).filter(s -> usable(s.code())).toList();
   }
 
+  /** Fails with a validation error on {@code paymentMethod} when the method is switched off or not usable. */
   public void requireEnabled(String method) {
     boolean on = caches == null ? repo.enabled(method) : switches().stream().anyMatch(s -> s.code().equals(method) && s.enabled());
     if (!on || !usable(method)) throw ApiException.validation("paymentMethod", method + " is not available");
@@ -137,6 +142,7 @@ public class PaymentService {
   public static final String REASON_DUPLICATE = "duplicate payment";
   /** Anomaly kinds, as stored and as the metric tag. */
   public static final String KIND_MISMATCH = "MISMATCH";
+  /** Anomaly kind: a second payment arrived on an order that is already paid. */
   public static final String KIND_DUPLICATE = "DUPLICATE";
 
   /**
@@ -195,6 +201,7 @@ public class PaymentService {
     return repo.anomalyPage(Math.max(0, page), Page.clampSize(size));
   }
 
+  /** How many times a refund is sent to the provider before it is marked {@code FAILED} and needs a person. */
   public static final int MAX_REFUND_TRIES = 10;
   static final int AFTER_COMMIT_REFUNDS = 5;
 
@@ -214,12 +221,6 @@ public class PaymentService {
     return true;
   }
 
-  /**
-   * Runs {@code task} once the surrounding transaction has committed. At that moment Spring still has the finished
-   * transaction bound to the thread, so database work started there would join it and never be saved (or fail). The
-   * task therefore runs with that transaction suspended, so each of its steps gets its own. A failure is logged, never
-   * thrown: the business change is already committed, and the 30-second job will pick the work up again.
-   */
   /**
    * Queues a refund of part of a captured online payment (for example goods sent back after delivery) and returns true.
    * Returns false when the order was not paid online. Never pays back more than was paid: the total already refunded or
@@ -262,6 +263,12 @@ public class PaymentService {
     afterCommit(() -> sendQueuedRefunds(AFTER_COMMIT_REFUNDS));
   }
 
+  /**
+   * Runs {@code task} once the surrounding transaction has committed. At that moment Spring still has the finished
+   * transaction bound to the thread, so database work started there would join it and never be saved (or fail). The
+   * task therefore runs with that transaction suspended, so each of its steps gets its own. A failure is logged, never
+   * thrown: the business change is already committed, and the 30-second job will pick the work up again.
+   */
   private void afterCommit(Runnable task) {
     Runnable safe = () -> {
       try {
@@ -325,6 +332,7 @@ public class PaymentService {
   }
 
   // ---------- admin ----------
+  /** Every method with its switch, read straight from the database. */
   public List<PaymentRepository.Setting> allMethods() { return repo.settings(); }
 
   private LiveEvents live;

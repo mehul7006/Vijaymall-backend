@@ -18,9 +18,14 @@ public record Coupon(UUID id, String code, String kind, long value, long minOrde
                      UUID categoryId, int perUserLimit, int totalLimit, int usedCount, Instant startAt,
                      Instant endAt, boolean active, boolean worksWithCoins, boolean firstOrderOnly,
                      List<UUID> categoryIds) {
+  /** Kind of a coupon whose value is a fixed amount in paise. */
   public static final String FLAT = "FLAT";
+  /** Kind of a coupon whose value is a percentage of the covered amount. */
   public static final String PERCENT = "PERCENT";
 
+  /**
+   * Normalises the category list: nulls and duplicates are dropped and the single {@code categoryId} and the list are kept in step.
+   */
   public Coupon {
     List<UUID> ids = categoryIds == null ? List.of()
         : categoryIds.stream().filter(Objects::nonNull).distinct().toList();

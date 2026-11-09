@@ -12,6 +12,10 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code product_pos}, the counter attributes of products; also tells when any of them last
+ * changed.
+ */
 interface PosProductJpa extends JpaRepository<ProductPosEntity, UUID> {
   Optional<ProductPosEntity> findByPlu(String plu);
 

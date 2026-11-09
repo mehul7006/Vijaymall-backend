@@ -42,7 +42,7 @@ class ReportServiceCoverageTest {
         new Object[] {"2027-03-09 00:00:00", 2000L},
         new Object[] {LocalDate.parse("2027-03-08"), 4000L}));
     Query zero = scalar(0L);
-    when(em.createNativeQuery(any(String.class))).thenReturn(zero, zero, zero, zero, zero, zero, zero, days);
+    when(em.createNativeQuery(any(String.class))).thenReturn(zero, zero, zero, zero, zero, zero, zero, zero, days);
     var d = service.dashboard();
     assertThat(d.last7Days()).hasSize(7);
     assertThat(d.last7Days().stream().filter(x -> x.date().equals(LocalDate.parse("2027-03-10"))).findFirst().orElseThrow()

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code coupon_category}: the categories a coupon is limited to. */
 interface CouponCategoryJpa extends JpaRepository<CouponCategoryEntity, CouponCategoryId> {
   List<CouponCategoryEntity> findByCouponIdInOrderByCategoryId(Collection<UUID> couponIds);
 

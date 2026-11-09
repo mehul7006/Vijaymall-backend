@@ -45,13 +45,13 @@ class ReportServiceTest {
   void usesTheShopCalendarAndFillsMissingDaysWithZero() {
     ReflectionTestUtils.setField(service, "em", em);
     Query sales = scalar(150000L), count = scalar(3L), fresh = scalar(2L), coins = scalar(40L);
-    Query posSales = scalar(80000L), posBills = scalar(5L), posRefunds = scalar(1000L);
+    Query posSales = scalar(80000L), posBills = scalar(5L), posRefunds = scalar(1000L), onlineRefunds = scalar(250L);
     Query days = mock(Query.class);
     when(days.setParameter(any(String.class), any())).thenReturn(days);
     when(days.getResultList()).thenReturn(List.of(
         new Object[] {Date.valueOf("2027-03-11"), 90000L},
         new Object[] {Date.valueOf("2027-03-08"), 60000L}));
-    when(em.createNativeQuery(any(String.class))).thenReturn(sales, count, fresh, coins, posSales, posBills, posRefunds, days);
+    when(em.createNativeQuery(any(String.class))).thenReturn(sales, count, fresh, coins, posSales, posBills, posRefunds, onlineRefunds, days);
 
     UUID low = UUID.randomUUID();
     UUID unnamed = UUID.randomUUID();
@@ -67,6 +67,7 @@ class ReportServiceTest {
     assertThat(d.posSalesTodayPaise()).isEqualTo(80000);
     assertThat(d.posBillsToday()).isEqualTo(5);
     assertThat(d.posRefundsTodayPaise()).isEqualTo(1000);
+    assertThat(d.onlineRefundsTodayPaise()).as("refunds on returned online orders are shown too").isEqualTo(250);
     assertThat(d.last7Days()).hasSize(7);
     assertThat(d.last7Days().getFirst().date()).isEqualTo(LocalDate.parse("2027-03-05"));
     assertThat(d.last7Days().getLast().date()).isEqualTo(LocalDate.parse("2027-03-11"));

@@ -12,12 +12,14 @@ import org.springframework.stereotype.Service;
 /** Products a customer saved for later. Adding and removing are repeatable without error. */
 @Service
 public class WishlistService {
+  /** The most products one customer may save. */
   static final int MAX_ITEMS = 200;
 
   private final WishlistRepository repo;
   private final CatalogService catalog;
   private final Clock clock;
 
+  /** Creates the service (wired by Spring). */
   public WishlistService(WishlistRepository repo, CatalogService catalog, Clock clock) {
     this.repo = repo;
     this.catalog = catalog;
@@ -27,6 +29,10 @@ public class WishlistService {
   /** Saved products, newest first. Products that were hidden since are left out. */
   public List<Product> list(UUID userId) { return catalog.visible(repo.productIds(userId)); }
 
+  /**
+   * Saves a product for the customer. Fails with 404 when the product is not visible to customers and with 422 when
+   * the list already holds {@code MAX_ITEMS} products; saving one that is already there always succeeds.
+   */
   public void add(UUID userId, UUID productId) {
     catalog.get(productId); // 404 for a product customers cannot see
     if (!repo.contains(userId, productId) && repo.count(userId) >= MAX_ITEMS) {
@@ -35,5 +41,6 @@ public class WishlistService {
     repo.add(userId, productId, clock.instant());
   }
 
+  /** Removes a product from the customer's list; removing one that is not there is harmless. */
   public void remove(UUID userId, UUID productId) { repo.remove(userId, productId); }
 }

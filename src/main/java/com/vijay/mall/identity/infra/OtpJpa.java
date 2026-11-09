@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code otp_challenge} rows: the newest unused code of an e-mail or mobile, attempt counting, consuming and cleanup.
+ */
 interface OtpJpa extends JpaRepository<OtpChallengeEntity, UUID> {
   Optional<OtpChallengeEntity> findFirstByEmailAndConsumedFalseOrderByCreatedAtDesc(String email);
 

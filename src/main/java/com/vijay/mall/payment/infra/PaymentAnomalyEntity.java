@@ -18,5 +18,6 @@ class PaymentAnomalyEntity extends BaseEntity {
   String providerRef;
   Instant createdAt;
 
+  /** For JPA. */
   protected PaymentAnomalyEntity() {}
 }

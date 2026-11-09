@@ -15,6 +15,7 @@ public class RoutingSmsOtpSender implements SmsOtpSender {
   private final HttpSmsSender http;
   private final UnconfiguredSmsOtpSender unconfigured;
 
+  /** Creates the router with the live settings and every SMS channel (wired by Spring). */
   public RoutingSmsOtpSender(RuntimeSettings settings, ConsoleSmsOtpSender console, HttpSmsSender http, UnconfiguredSmsOtpSender unconfigured) {
     this.settings = settings;
     this.console = console;

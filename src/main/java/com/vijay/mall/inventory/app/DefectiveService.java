@@ -27,7 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DefectiveService {
   private static final Logger log = LoggerFactory.getLogger(DefectiveService.class);
+  /** Decisions a reviewer may take on a claim. */
   public static final Set<String> REVIEW_DECISIONS = Set.of("CONFIRM_DEFECTIVE", "RESTOCK");
+  /** Final actions the owner may take on goods confirmed defective. */
   public static final Set<String> RESOLVE_ACTIONS = Set.of("WRITE_OFF", "RETURN_TO_SUPPLIER");
   private static final Set<String> STATUSES = Set.of("PENDING_REVIEW", "HELD", "WRITTEN_OFF", "RETURNED_TO_SUPPLIER", "RESTOCKED");
 
@@ -36,6 +38,7 @@ public class DefectiveService {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service. */
   public DefectiveService(DefectiveRepository repo, InventoryService inventory, AuditService audit, Clock clock) {
     this.repo = repo;
     this.inventory = inventory;
@@ -68,8 +71,10 @@ public class DefectiveService {
   /** Per product: units waiting for review and units held as confirmed defective. */
   public List<DefectiveRepository.Summary> summary() { return repo.openSummary(); }
 
+  /** Units currently held as confirmed defective, waiting for a write-off or return to the supplier. */
   public long heldUnits() { return repo.heldUnits(); }
 
+  /** Units waiting for a review decision. */
   public long pendingReviewUnits() { return repo.pendingReviewUnits(); }
 
   /**

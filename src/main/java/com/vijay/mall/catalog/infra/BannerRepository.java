@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores hot-sale banners in the {@code hot_banner} table and hands them out as {@link HotBanner} records. */
 @Repository
 public class BannerRepository {
   private final BannerJpa jpa;
@@ -18,12 +19,16 @@ public class BannerRepository {
     return new HotBanner(e.id, e.title, e.subtitle, e.imageUrl, e.startAt, e.endAt, e.active);
   }
 
+  /** Every banner, including inactive and expired ones, oldest start first. */
   public List<HotBanner> all() { return jpa.allOrdered().stream().map(BannerRepository::toDomain).toList(); }
 
+  /** Banners that are active and inside their start/end window at {@code now}. */
   public List<HotBanner> live(Instant now) { return jpa.live(now).stream().map(BannerRepository::toDomain).toList(); }
 
+  /** Finds one banner by id. */
   public Optional<HotBanner> find(UUID id) { return jpa.findById(id).map(BannerRepository::toDomain); }
 
+  /** Saves a new banner and returns its generated id. */
   @Transactional
   public UUID insert(String title, String subtitle, String imageUrl, Instant start, Instant end, boolean active) {
     HotBannerEntity e = new HotBannerEntity();
@@ -32,11 +37,13 @@ public class BannerRepository {
     return jpa.save(e).id;
   }
 
+  /** Overwrites all banner fields; does nothing when the id does not exist. */
   @Transactional
   public void update(UUID id, String title, String subtitle, String imageUrl, Instant start, Instant end, boolean active) {
     jpa.findById(id).ifPresent(e -> fill(e, title, subtitle, imageUrl, start, end, active));
   }
 
+  /** Deletes the banner with this id. */
   @Transactional
   public void delete(UUID id) { jpa.deleteById(id); }
 

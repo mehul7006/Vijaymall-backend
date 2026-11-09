@@ -85,6 +85,7 @@ public class PosService implements ReferenceLookup {
   private static final int MAX_UNITS = 9_999;
   private static final int MAX_GRAMS = 100_000;
 
+  /** A basket priced line by line: the lines for quoting and the drafts for the GST bill. */
   private record Priced(List<PricedLine> lines, List<BillCalculator.Draft> drafts) {}
 
   private final PosCatalogService catalog;
@@ -103,6 +104,7 @@ public class PosService implements ReferenceLookup {
   private final Clock clock;
   private final CreditService credit;
 
+  /** Creates the service. */
   public PosService(PosCatalogService catalog, QuoteService quotes, InventoryService inventory, WalletService wallet,
                     PromotionService promotions, UserRepository users, ShopService shop, PosSaleRepository sales,
                     PosHoldRepository holds, InvoiceCounterRepository counters, AuditService audit, JsonMapper json,
@@ -595,6 +597,11 @@ public class PosService implements ReferenceLookup {
   public Optional<SaleRecord> findByIdempotencyKey(String key) { return sales.findByIdem(key); }
 
   // ---------- read ----------
+  /**
+   * One bill with its lines and payments.
+   *
+   * @throws ApiException 404 if there is no such bill
+   */
   public SaleRecord get(UUID id) { return sales.find(id).orElseThrow(() -> ApiException.notFound("Bill")); }
 
   /** Finds bills by invoice number, customer mobile, or (default) the bills of one day, newest first. */
@@ -614,6 +621,12 @@ public class PosService implements ReferenceLookup {
     return UpiLink.build(s.upiId(), s.shopName(), amountPaise, note == null ? "" : note);
   }
 
+  /**
+   * Renders a bill as plain text for a thermal printer.
+   *
+   * @param width characters per line
+   * @throws ApiException 400 if the width is too narrow
+   */
   public String receipt(UUID id, int width) {
     SaleRecord s = get(id);
     ShopSetting shopInfo = shop.get();
@@ -633,6 +646,11 @@ public class PosService implements ReferenceLookup {
   }
 
   // ---------- held baskets ----------
+  /**
+   * Parks a basket (with an optional label and customer mobile) so the cashier can serve someone else.
+   *
+   * @throws ApiException 400 if the basket is empty
+   */
   @Transactional
   public HoldView hold(UUID cashierId, String label, Cart cart) {
     if (cart.items() == null || cart.items().isEmpty()) throw ApiException.validation("items", "basket is empty");
@@ -645,10 +663,21 @@ public class PosService implements ReferenceLookup {
     }
   }
 
+  /** All parked baskets, newest first. */
   public List<HoldView> holds() { return holds.all().stream().map(this::toView).toList(); }
 
+  /**
+   * One parked basket.
+   *
+   * @throws ApiException 404 if it was already resumed or discarded
+   */
   public HoldView getHold(UUID id) { return toView(holds.find(id).orElseThrow(() -> ApiException.notFound("Held basket"))); }
 
+  /**
+   * Deletes a parked basket.
+   *
+   * @throws ApiException 404 if it does not exist
+   */
   @Transactional
   public void discardHold(UUID id) {
     if (!holds.delete(id)) throw ApiException.notFound("Held basket");

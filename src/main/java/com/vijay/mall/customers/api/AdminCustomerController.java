@@ -29,12 +29,22 @@ public class AdminCustomerController {
   @Autowired
   void setOps(AdminOps ops) { this.ops = ops; }
 
+  /**
+   * Request body to switch an account on or off.
+   * @param active false to block the customer, true to unblock
+   */
   public record ActiveBody(@NotNull Boolean active) {}
 
+  /**
+   * Request body for a manual coin correction.
+   * @param delta coins to give (above 0) or take back (below 0); the wallet allows 1 to 100000 either way
+   * @param reason why, 1 to 100 characters, kept in the audit trail
+   */
   public record CoinsBody(int delta, String reason) {}
 
   private final CustomerAdminService customers;
 
+  /** Creates the controller (wired by Spring). */
   public AdminCustomerController(CustomerAdminService customers) { this.customers = customers; }
 
   /** q matches part of a name, e-mail or mobile number; leave it out for everyone, newest first. */
@@ -44,6 +54,9 @@ public class AdminCustomerController {
     return customers.search(q, page, size);
   }
 
+  /**
+   * Returns one customer with coins, credit owed and open orders. Fails with 404 for an unknown id or a staff account.
+   */
   @GetMapping("/{id}")
   public CustomerView get(@PathVariable UUID id) { return customers.get(id); }
 

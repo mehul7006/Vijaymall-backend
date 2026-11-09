@@ -16,11 +16,17 @@ import java.util.UUID;
 import javax.imageio.ImageIO;
 import org.springframework.stereotype.Component;
 
+/**
+ * Image store that writes resized JPEG copies into the folder configured as {@code imagesDir}; the files are served under {@code /img}.
+ * <p>Each upload is saved at a maximum side of 400 px and 1000 px under a random UUID name, so the original file name is never used.
+ */
 @Component
 public class LocalDiskImageStore implements ImageStore {
+  /** Largest accepted image in pixels (width times height), to protect memory when decoding. */
   private static final long MAX_PIXELS = 25_000_000L;
   private final Path root;
 
+  /** Creates the store rooted at the configured images directory (made absolute). */
   public LocalDiskImageStore(AppProps props) { this.root = Path.of(props.imagesDir()).toAbsolutePath(); }
 
   @Override
@@ -41,6 +47,10 @@ public class LocalDiskImageStore implements ImageStore {
     }
   }
 
+  /**
+   * Shrinks the image so its longer side is at most {@code maxSide} (never enlarges it) and flattens it onto a white background,
+   * because JPEG has no transparency.
+   */
   static BufferedImage scale(BufferedImage src, int maxSide) {
     int w = src.getWidth(), h = src.getHeight();
     double f = Math.min(1.0, (double) maxSide / Math.max(w, h));

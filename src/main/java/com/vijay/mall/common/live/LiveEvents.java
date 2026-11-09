@@ -15,6 +15,7 @@ public class LiveEvents {
   private final ApplicationEventPublisher events;
   private final Clock clock;
 
+  /** Creates the publisher. */
   public LiveEvents(ApplicationEventPublisher events, Clock clock) {
     this.events = events;
     this.clock = clock;
@@ -23,8 +24,10 @@ public class LiveEvents {
   /** Products, prices, categories, banners, variants. */
   public void catalog() { area(CatalogChanged.CATALOG); }
 
+  /** Tells every open screen that an area (see {@link CatalogChanged}) changed. */
   public void area(String area) { events.publishEvent(new CatalogChanged(area, clock.instant())); }
 
+  /** Tells one customer's open screens that their credit account changed. */
   public void credit(UUID customerId, String reason, long deltaPaise) {
     events.publishEvent(new CreditChanged(customerId, reason, deltaPaise, clock.instant()));
   }

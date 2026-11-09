@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("!dev & !test")
 public class ManagementPortGuard {
+  /**
+   * Checks the ports at start-up and aborts with {@code IllegalStateException} when metrics would share the public port.
+   */
   public ManagementPortGuard(Environment env) {
     String problem = problem(env.getProperty("management.server.port"), env.getProperty("server.port", "8080"));
     if (problem != null) throw new IllegalStateException("Unsafe configuration: " + problem);

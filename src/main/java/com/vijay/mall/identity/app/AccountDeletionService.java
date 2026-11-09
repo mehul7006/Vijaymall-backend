@@ -35,6 +35,9 @@ public class AccountDeletionService {
   private final AuditService audit;
   private final Clock clock;
 
+  /**
+   * Creates the service with the repositories and the order and credit modules it checks before erasing (wired by Spring).
+   */
   public AccountDeletionService(UserRepository users, AddressRepository addresses, DeviceRepository devices,
                                 RefreshTokenRepository tokens, OrderService orders, CreditService credit, AuditService audit,
                                 Clock clock) {
@@ -48,6 +51,14 @@ public class AccountDeletionService {
     this.clock = clock;
   }
 
+  /**
+   * Erases the customer's personal data after checking that deleting is allowed.
+   * <p>
+   * Fails with 403 for staff accounts, 409 {@code ACCOUNT_HAS_OPEN_ORDERS} while an order is still open and 409
+   * {@code ACCOUNT_HAS_DUES} while the customer owes the shop credit. On success addresses and devices are removed, every
+   * refresh token is revoked and the user row is anonymised.
+   * @param userId the customer to delete
+   */
   @Transactional
   public void deleteAccount(UUID userId) {
     User u = users.findById(userId).orElseThrow(() -> ApiException.notFound("User"));

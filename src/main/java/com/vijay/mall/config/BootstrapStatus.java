@@ -14,14 +14,25 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class BootstrapStatus {
+  /**
+   * How a start-up setting looks: {@code OK}, {@code DEFAULT} (a development default), {@code MISSING}, or {@code UNSAFE} (set to a known weak value).
+   */
   public enum State { OK, DEFAULT, MISSING, UNSAFE }
 
+  /**
+   * One start-up setting.
+   * @param name what it is, in plain words
+   * @param setBy the environment variable(s) that set it
+   * @param state how it looks
+   * @param detail a short note that never contains the value
+   */
   public record Item(String name, String setBy, State state, String detail) {}
 
   private final Environment env;
   private final ConfigCrypto crypto;
   private final String imagesDir;
 
+  /** Creates the service. */
   public BootstrapStatus(Environment env, ConfigCrypto crypto, @Value("${app.images-dir:./data/images}") String imagesDir) {
     this.env = env;
     this.crypto = crypto;
@@ -33,6 +44,9 @@ public class BootstrapStatus {
     return v == null ? "" : v;
   }
 
+  /**
+   * Checks the database address and password, JWT secret, OTP pepper, fixed login code, encryption key, management port, first-admin e-mail, image folder and active profile.
+   */
   public List<Item> items() {
     List<Item> out = new ArrayList<>();
     String url = p("spring.datasource.url");

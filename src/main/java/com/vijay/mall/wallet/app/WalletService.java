@@ -27,6 +27,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** Public interface of the wallet module: balance, rules, redeem, credit, undo, expire. */
 @Service
 public class WalletService {
+  /** How long coins given back to a customer after their earlier coins have expired stay valid, in days. */
+  static final long REFUND_LOT_DAYS = 30;
+
   private static final Logger log = LoggerFactory.getLogger(WalletService.class);
 
   private final WalletRepository repo;
@@ -40,6 +43,10 @@ public class WalletService {
     this(repo, audit, clock, tx, null);
   }
 
+  /**
+   * Creates the service (wired by Spring).
+   * @param events publishes balance-change events to open screens; may be null
+   */
   @Autowired
   public WalletService(WalletRepository repo, AuditService audit, Clock clock, TransactionTemplate tx,
                        ApplicationEventPublisher events) {
@@ -65,6 +72,9 @@ public class WalletService {
 
   private void forget(AppCaches.Name name) { if (caches != null) caches.invalidate(name); }
 
+  /**
+   * The shop-wide coin settings (paise per coin, redeem cap, expiry months); served from a cache when one is available.
+   */
   public CoinSettings settings() {
     return caches == null ? repo.settings() : caches.get(AppCaches.Name.COIN_SETTINGS, "1", repo::settings);
   }
@@ -73,12 +83,15 @@ public class WalletService {
     return caches == null ? repo.rules() : caches.get(AppCaches.Name.COIN_RULES, "all", repo::rules);
   }
 
+  /** Current coin balance of the customer. */
   public int balance(UUID userId) { return repo.balance(userId); }
 
+  /** The earning rules that are switched on and inside their dates at {@code now}. */
   public List<CoinRule> activeRules(Instant now) {
     return allRules().stream().filter(r -> r.isLive(now)).map(StoredRule::rule).toList();
   }
 
+  /** A page of the customer's coin history, newest first; the page size is clamped to the allowed maximum. */
   public Page<WalletRepository.LedgerRow> ledger(UUID userId, int page, int size) {
     return repo.ledger(userId, Math.max(0, page), Page.clampSize(size));
   }
@@ -133,7 +146,7 @@ public class WalletService {
     if (total == 0) return;
     if (!repo.insertLedger(UUID.randomUUID(), userId, "REVERSE", total, null, null, orderId, null, "reverse:" + orderId, now)) return;
     if (refundedToNewLot > 0) {
-      repo.insertLedger(UUID.randomUUID(), userId, "ADJUST", 0, refundedToNewLot, now.plusSeconds(30L * 86400), orderId,
+      repo.insertLedger(UUID.randomUUID(), userId, "ADJUST", 0, refundedToNewLot, now.plusSeconds(REFUND_LOT_DAYS * 86400L), orderId,
           null, "refund-lot:" + orderId, now);
     }
     repo.addBalance(userId, total);
@@ -171,7 +184,7 @@ public class WalletService {
     if (coins <= 0) return;
     Instant now = clock.instant();
     repo.lockBalance(userId);
-    if (repo.insertLedger(UUID.randomUUID(), userId, "ADJUST", coins, coins, now.plusSeconds(30L * 86400), returnId, null,
+    if (repo.insertLedger(UUID.randomUUID(), userId, "ADJUST", coins, coins, now.plusSeconds(REFUND_LOT_DAYS * 86400L), returnId, null,
         "restore:" + returnId, now)) {
       repo.addBalance(userId, coins);
       log.info("Coins restored user={} return={} coins={}", userId, returnId, coins);
@@ -219,6 +232,10 @@ public class WalletService {
   }
 
   // ---------- jobs ----------
+  /**
+   * Nightly job (02:00): removes the unspent coins of every lot past its expiry, one lot per transaction, writing an
+   * {@code EXPIRE} ledger row and telling open screens. Handles up to 500 lots per run.
+   */
   @Scheduled(cron = "0 0 2 * * *")
   public void expireLots() {
     for (WalletRepository.ExpiredLot e : repo.expiredLots(clock.instant(), 500)) tx.executeWithoutResult(t -> expireOne(e));
@@ -238,6 +255,9 @@ public class WalletService {
     }
   }
 
+  /**
+   * Nightly job (02:15): logs an error for every wallet whose balance differs from its ledger. It reports only and never repairs.
+   */
   @Scheduled(cron = "0 15 2 * * *")
   public void consistencyCheck() {
     for (WalletRepository.Mismatch m : repo.mismatches()) {
@@ -246,8 +266,10 @@ public class WalletService {
   }
 
   // ---------- admin ----------
+  /** All stored earning rules for the admin screen, read straight from the database. */
   public List<StoredRule> rules() { return repo.rules(); } // the admin always sees the stored truth, never a cached copy
 
+  /** Admin: adds an earning rule, audits it and clears the rule cache. */
   @Transactional
   public StoredRule createRule(StoredRule in, UUID actor) {
     UUID id = repo.insertRule(in);
@@ -256,6 +278,10 @@ public class WalletService {
     return repo.rule(id).orElseThrow();
   }
 
+  /**
+   * Admin: changes an earning rule, audits it and clears the rule cache.
+   * @throws com.vijay.mall.common.error.ApiException 404 when the rule does not exist
+   */
   @Transactional
   public StoredRule updateRule(UUID id, StoredRule in, UUID actor) {
     repo.rule(id).orElseThrow(() -> ApiException.notFound("Coin rule"));
@@ -265,6 +291,7 @@ public class WalletService {
     return repo.rule(id).orElseThrow();
   }
 
+  /** Admin: deletes an earning rule, audits it and clears the rule cache. */
   @Transactional
   public void deleteRule(UUID id, UUID actor) {
     repo.deleteRule(id);
@@ -272,6 +299,11 @@ public class WalletService {
     forget(AppCaches.Name.COIN_RULES);
   }
 
+  /**
+   * Admin: saves the coin settings after validating them (paise per coin above zero, redeem cap 0 to 100 percent, expiry
+   * months above zero), audits the change and clears the settings cache.
+   * @throws com.vijay.mall.common.error.ApiException 422 validation error naming the bad field
+   */
   @Transactional
   public CoinSettings saveSettings(CoinSettings s, UUID actor) {
     if (s.paisePerCoin() <= 0) throw ApiException.validation("paisePerCoin", "must be positive");

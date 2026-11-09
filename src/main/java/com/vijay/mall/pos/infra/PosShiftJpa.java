@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+/** Spring Data access to {@code pos_shift}; finds a cashier's open shift and lists shifts newest first. */
 interface PosShiftJpa extends JpaRepository<PosShiftEntity, UUID> {
   Optional<PosShiftEntity> findFirstByCashierIdAndClosedAtIsNull(UUID cashierId);
 

@@ -64,6 +64,7 @@ public class CartRepository {
         .param("pct", cart.percent()).param("now", utc(now)).update();
   }
 
+  /** Removes the user's basket lines and header. */
   @Transactional
   public void delete(UUID userId) {
     jdbc.sql("delete from cart_item where user_id = :u").param("u", userId).update();

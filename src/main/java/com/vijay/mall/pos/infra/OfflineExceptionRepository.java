@@ -27,6 +27,11 @@ public class OfflineExceptionRepository {
 
   private final JdbcClient jdbc;
 
+  /**
+   * Creates the repository.
+   *
+   * @param jdbc JDBC client used for the plain SQL queries
+   */
   public OfflineExceptionRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
   private static Instant instant(Timestamp t) { return t == null ? null : t.toInstant(); }
@@ -61,11 +66,13 @@ public class OfflineExceptionRepository {
         .param("reviewed", reviewed).param("l", size).param("o", (long) page * size).query((r, _) -> map(r)).list();
   }
 
+  /** How many exceptions there are in the reviewed or the open list; used for paging. */
   public long count(boolean reviewed) {
     return jdbc.sql("select count(*) from pos_offline_exception where (reviewed_at is not null) = :reviewed").param("reviewed", reviewed)
         .query(Long.class).single();
   }
 
+  /** One exception with its bill details. */
   public Optional<Row> find(UUID id) { return jdbc.sql(SELECT + "where e.id = :id").param("id", id).query((r, _) -> map(r)).optional(); }
 
   /** Marks the exception reviewed; false when it was already reviewed or does not exist. */

@@ -15,11 +15,13 @@ public class CartService {
   private final CartRepository carts;
   private final Clock clock;
 
+  /** Creates the service. */
   public CartService(CartRepository carts, Clock clock) {
     this.carts = carts;
     this.clock = clock;
   }
 
+  /** Returns the customer's saved basket, or an empty one when none was saved. */
   public Cart get(UUID userId) {
     Cart c = carts.find(userId);
     return c == null ? Cart.empty() : c;
@@ -32,6 +34,7 @@ public class CartService {
     return get(userId);
   }
 
+  /** Deletes the customer's saved basket. */
   @Transactional
   public void clear(UUID userId) { carts.delete(userId); }
 }

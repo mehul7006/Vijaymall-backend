@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores the admin-managed units of measure in the {@code unit_of_measure} table. */
 @Repository
 public class UnitRepository {
   private final UnitJpa jpa;
@@ -21,8 +22,10 @@ public class UnitRepository {
     return new UnitOfMeasure(e.code, e.nameEn, e.nameGu, e.soldBy, e.sortOrder, e.active);
   }
 
+  /** Every unit, including switched-off ones, in display order. */
   public List<UnitOfMeasure> all() { return jpa.findAllByOrderBySortOrderAscCodeAsc().stream().map(UnitRepository::toDomain).toList(); }
 
+  /** Active units in display order. */
   public List<UnitOfMeasure> allActive() {
     return jpa.findByActiveTrueOrderBySortOrderAscCodeAsc().stream().map(UnitRepository::toDomain).toList();
   }
@@ -30,6 +33,7 @@ public class UnitRepository {
   /** Finds a unit ignoring case, so "KG", "Kg" and "kg" are one unit. */
   public Optional<UnitOfMeasure> findIgnoreCase(String code) { return jpa.findByCodeIgnoreCase(code).map(UnitRepository::toDomain); }
 
+  /** Saves a new unit with the code given in {@code u}. */
   @Transactional
   public UnitOfMeasure insert(UnitOfMeasure u) {
     UnitEntity e = new UnitEntity();
@@ -67,11 +71,13 @@ public class UnitRepository {
     return products;
   }
 
+  /** How many products currently use this unit code. */
   public long productsUsing(String code) {
     return em.createQuery("select count(p) from ProductEntity p where p.unit = :c", Long.class)
         .setParameter("c", code).getSingleResult();
   }
 
+  /** Deletes the unit row; callers must first make sure no product uses it. */
   @Transactional
   public void delete(String code) { jpa.deleteById(code); }
 }

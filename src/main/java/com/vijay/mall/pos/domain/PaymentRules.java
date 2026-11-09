@@ -13,6 +13,10 @@ public final class PaymentRules {
 
     private PaymentRules() { }
 
+    /**
+     * One payment part of a bill, refund or repayment: mode, amount in paise and an optional reference such as a UPI
+     * transaction id.
+     */
     public record Line(String mode, long amountPaise, String reference) { }
 
     /**
@@ -73,6 +77,10 @@ public final class PaymentRules {
         return others == 1 ? lines.get(0).mode() : "SPLIT";
     }
 
+    /**
+     * Checks every part has a known mode and a positive amount, and that a bill has at most one {@code CREDIT} part
+     * (credit is not allowed when {@code allowCredit} is false).
+     */
     private static void checkLines(List<Line> lines, boolean allowCredit) {
         if (allowCredit && lines.stream().filter(l -> CREDIT.equals(l.mode())).count() > 1) {
             throw new IllegalArgumentException("only one credit payment is allowed on a bill");

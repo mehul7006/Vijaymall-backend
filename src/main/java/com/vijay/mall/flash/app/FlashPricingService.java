@@ -51,11 +51,13 @@ public class FlashPricingService implements FlashPricing {
   private MeterRegistry metrics;
   private OutboxService outbox;
 
+  /** Creates the service. */
   public FlashPricingService(FlashRepository repo, Clock clock) {
     this.repo = repo;
     this.clock = clock;
   }
 
+  /** Optional: the cache that holds the sale definitions for a few seconds. */
   @Autowired(required = false)
   public void setCaches(AppCaches caches) { this.caches = caches; }
 
@@ -67,6 +69,7 @@ public class FlashPricingService implements FlashPricing {
   @Autowired(required = false)
   public void setOutbox(OutboxService outbox) { this.outbox = outbox; }
 
+  /** The cached definitions of all sales that have not ended. */
   Defs defs() {
     return caches == null ? loadDefs() : caches.get(AppCaches.Name.FLASH, "defs", this::loadDefs);
   }
@@ -93,6 +96,9 @@ public class FlashPricingService implements FlashPricing {
   }
 
   // ---------- price ----------
+  /**
+   * Looks up the flash price for a product and quantity on one channel, limited by the item cap and the customer's allowance; empty when no sale price applies. Reads only, nothing is counted yet.
+   */
   @Override
   public Optional<Applied> apply(UUID productId, Channel channel, long listPricePaise, UUID userIdOrNull, int qty) {
     return Metrics.timed(metrics, "mall.flash.price.lookup", "Time to look up the flash sale price of a product",
@@ -112,6 +118,9 @@ public class FlashPricingService implements FlashPricing {
     return n <= 0 ? Optional.empty() : Optional.of(new Applied(d.saleId(), d.itemId(), price.get(), n, list));
   }
 
+  /**
+   * Online sale offers for the given products (list price per product id); products with no live offer or whose item sold out are left out.
+   */
   @Override
   public Map<UUID, Offer> offers(Map<UUID, Long> listPrices) {
     Instant now = clock.instant();
@@ -136,10 +145,16 @@ public class FlashPricingService implements FlashPricing {
   }
 
   // ---------- counting ----------
+  /**
+   * Counts the claimed units against their items for an order or counter bill, all or nothing: throws {@code Refused} with the reason (such as {@code ENDED}, {@code LIMIT_REACHED}, {@code CUSTOMER_LIMIT}) when any claim cannot be met.
+   */
   @Override
   @Transactional
   public void consume(Channel channel, UUID refId, UUID userId, List<Claim> claims) { claimAll(channel, refId, userId, claims, true); }
 
+  /**
+   * Same counting as {@code consume} but a claim that cannot be met is only logged and counted in metrics, not thrown (used for offline bills that already happened).
+   */
   @Override
   @Transactional
   public void consumeLenient(Channel channel, UUID refId, UUID userId, List<Claim> claims) { claimAll(channel, refId, userId, claims, false); }
@@ -194,6 +209,9 @@ public class FlashPricingService implements FlashPricing {
     return Optional.empty();
   }
 
+  /**
+   * Gives back the units counted for a cancelled or returned order or bill. Repeat-safe: a second call finds nothing to give back.
+   */
   @Override
   @Transactional
   public void release(UUID refId) {

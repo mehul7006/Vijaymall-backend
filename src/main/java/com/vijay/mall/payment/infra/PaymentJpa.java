@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to the {@code payment} table, including the lookup of payments still {@code CREATED} after a while (webhook never arrived).
+ */
 interface PaymentJpa extends JpaRepository<PaymentEntity, UUID> {
   Optional<PaymentEntity> findByProviderAndProviderOrderId(String provider, String providerOrderId);
 

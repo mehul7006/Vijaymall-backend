@@ -15,5 +15,6 @@ class CreditAccountEntity {
   long limitPaise;
   Instant updatedAt;
 
+  /** Required by JPA; not for application code. */
   protected CreditAccountEntity() {}
 }

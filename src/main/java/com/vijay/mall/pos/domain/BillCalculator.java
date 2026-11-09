@@ -9,15 +9,30 @@ import java.util.stream.IntStream;
 public final class BillCalculator {
     private BillCalculator() { }
 
+    /**
+     * One priced basket line before GST is split: the product, how it is sold, quantity (pieces, or grams for a
+     * weighed item), unit price in paise and the GST percent that applies.
+     */
     public record Draft(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, int gstPercent, String hsn) {
+        /**
+         * The line amount in paise before any discount (price times quantity, or price per 1000 g for weighed items).
+         */
         public long linePaise() {
             return soldBy.lineAmount(unitPricePaise, qty);
         }
     }
 
+    /**
+     * One line of a finished bill, all money in paise: gross amount, the discount share taken off it, the net amount
+     * the customer pays and the GST split of that net amount.
+     */
     public record Line(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
                        long discountPaise, long netPaise, int gstPercent, String hsn, TaxSplit tax) { }
 
+    /**
+     * A finished GST bill: its lines, subtotal before discount, the discount actually applied, the total payable and
+     * the summed GST split.
+     */
     public record Bill(List<Line> lines, long subtotalPaise, long discountPaise, long totalPaise, TaxSplit tax) { }
 
     /** Spreads {@code discount} (capped at the subtotal) over the lines, then splits GST on what each line really costs. */

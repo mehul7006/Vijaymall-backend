@@ -13,6 +13,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code outbox_event}: count undelivered rows, fetch the next batch and purge old ones. */
 interface OutboxJpa extends JpaRepository<OutboxEventEntity, UUID> {
   long countByPublishedAtIsNull();
 

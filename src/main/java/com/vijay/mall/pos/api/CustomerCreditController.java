@@ -14,11 +14,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class CustomerCreditController {
   private final CreditService credit;
 
+  /**
+   * Creates the controller.
+   *
+   * @param credit credit (udhar) account service
+   */
   public CustomerCreditController(CreditService credit) { this.credit = credit; }
 
+  /** Shows the signed-in customer's credit account: what they owe, their limit and what is still available. */
   @GetMapping
   public CreditService.AccountView account() { return credit.account(CurrentUser.id()); }
 
+  /**
+   * Lists the signed-in customer's credit ledger (sales on credit, repayments, returns, adjustments), newest first.
+   */
   @GetMapping("/ledger")
   public Page<CreditService.LedgerView> ledger(@RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "20") int size) {

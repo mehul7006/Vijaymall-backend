@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.util.UUID;
 
+/** A row of {@code credit_payment_line}: one mode (cash, UPI or card) and amount of a split credit repayment. */
 @Entity
 @Table(name = "credit_payment_line")
 class CreditPaymentLineEntity extends BaseEntity {
@@ -13,5 +14,6 @@ class CreditPaymentLineEntity extends BaseEntity {
   long amountPaise;
   String reference;
 
+  /** Required by JPA; not for application code. */
   protected CreditPaymentLineEntity() {}
 }

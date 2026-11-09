@@ -10,8 +10,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Stock levels and the stock-movement history. Quantity changes use single conditional UPDATEs so stock can never go below zero, even with concurrent buyers.
+ */
 @Repository
 public class InventoryRepository {
+  /** A product's units on hand and its low-stock alert level ({@code low}). */
   public record Stock(UUID productId, int qty, int low) {}
 
   /** One line of the stock history. refId is the order or sale behind it; actorId the person who adjusted it. */
@@ -47,16 +51,26 @@ public class InventoryRepository {
   @Transactional
   public int add(UUID productId, int delta, Instant now) { return jpa.add(productId, delta, now); }
 
+  /** Sets the low-stock alert level of a product. */
   @Transactional
   public void setThreshold(UUID productId, int low) { jpa.setThreshold(productId, low); }
 
+  /** Units on hand; 0 when the product has no stock row. */
   public int quantity(UUID productId) { return jpa.findById(productId).map(e -> e.qtyOnHand).orElse(0); }
 
+  /** Units on hand, read with a lock held until the transaction ends (used by stock takes); 0 when the product has no stock row. */
+  @Transactional
+  public int quantityForUpdate(UUID productId) { return jpa.lockById(productId).map(e -> e.qtyOnHand).orElse(0); }
+
+  /** Stock rows of these products; a product without a row is simply absent. */
   public List<Stock> stocks(Collection<UUID> productIds) {
     if (productIds.isEmpty()) return List.of();
     return jpa.byIds(productIds).stream().map(e -> new Stock(e.productId, e.qtyOnHand, e.lowThreshold)).toList();
   }
 
+  /**
+   * Writes one line to the stock history. {@code delta} is signed (negative removes stock); {@code refId} and {@code actorId} may be null.
+   */
   @Transactional
   public void movement(UUID productId, int delta, String reason, UUID refId, UUID actorId, Instant now) {
     StockMovementEntity m = new StockMovementEntity();

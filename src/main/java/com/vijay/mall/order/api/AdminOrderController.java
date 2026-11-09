@@ -17,17 +17,39 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Staff endpoints for working the online orders: list and search, open one, change its status, or reject it.
+ * <p>Open to ADMIN and CASHIER (counter staff work the orders too; see {@code SecurityConfig}). The status rules and side
+ * effects live in {@link com.vijay.mall.order.app.OrderService}.
+ */
 @RestController
 @RequestMapping("/api/v1/admin/orders")
 public class AdminOrderController {
+  /**
+   * Body of the status change.
+   * @param status the status to move to; {@code PAYMENT_PENDING} cannot be chosen
+   * @param note optional note kept in the order's status history
+   */
   public record StatusBody(@NotNull OrderStatus status, String note) {}
 
+  /**
+   * Body of a rejection.
+   * @param reason why the order is turned down, 1 to 200 characters; shown to the customer
+   */
   public record RejectBody(@NotNull @Size(min = 1, max = 200) String reason) {}
 
   private final OrderService orders;
 
+  /** Creates the controller. */
   public AdminOrderController(OrderService orders) { this.orders = orders; }
 
+  /**
+   * Lists all orders, newest first, with the customer's name and contact details.
+   * @param status optional order status to filter on; blank means every status
+   * @param q optional part of the order number (for example {@code 1001})
+   * @param page zero-based page number
+   * @param size page size; clamped to the allowed maximum
+   */
   @GetMapping
   public Page<OrderViews.AdminSummary> list(@RequestParam(required = false) String status,
                                             @RequestParam(required = false) String q,
@@ -36,6 +58,9 @@ public class AdminOrderController {
     return orders.adminList(status, q, page, size);
   }
 
+  /**
+   * Returns one order with its lines, timeline and the customer's contact details; {@code 404 NOT_FOUND} if it does not exist.
+   */
   @GetMapping("/{id}")
   public OrderViews.AdminView get(@PathVariable UUID id) { return orders.adminGet(id); }
 
@@ -45,6 +70,11 @@ public class AdminOrderController {
     return orders.adminReject(id, b.reason(), CurrentUser.id());
   }
 
+  /**
+   * Moves an order to another status. Repeating the current status is a no-op.
+   * <p>Errors: {@code 409 ILLEGAL_TRANSITION} for a closed order, {@code 409 AWAITING_PAYMENT} for an unpaid online order that
+   * is not being cancelled, {@code 409 OUT_OF_STOCK} when confirming and the shelf is short.
+   */
   @PostMapping("/{id}/status")
   public OrderViews.AdminView status(@PathVariable UUID id, @Valid @RequestBody StatusBody b) {
     return orders.adminChangeStatus(id, b.status(), b.note(), CurrentUser.id());

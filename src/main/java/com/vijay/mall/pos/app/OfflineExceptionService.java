@@ -33,6 +33,7 @@ public class OfflineExceptionService {
   private final MeterRegistry metrics;
   private final Clock clock;
 
+  /** Creates the service. */
   public OfflineExceptionService(OfflineExceptionRepository repo, AuditService audit, MeterRegistry metrics, Clock clock) {
     this.repo = repo;
     this.audit = audit;

@@ -4,6 +4,9 @@ package com.vijay.mall.wallet.domain;
 public final class CoinRedemption {
   private CoinRedemption() {}
 
+  /**
+   * How much of the allowed coin payment the customer wants to use: none, the maximum, or a percentage of the maximum.
+   */
   public enum Mode { NONE, ALL, PERCENT }
 
   /**

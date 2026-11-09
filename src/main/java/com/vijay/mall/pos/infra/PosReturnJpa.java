@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code pos_return}, the credit notes; can find one by its idempotency key. */
 interface PosReturnJpa extends JpaRepository<PosReturnEntity, UUID> {
   Optional<PosReturnEntity> findByIdemKey(String idemKey);
 

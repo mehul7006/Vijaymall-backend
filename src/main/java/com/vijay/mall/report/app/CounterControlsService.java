@@ -29,22 +29,33 @@ public class CounterControlsService {
                     double discountPercentOfSales, long returns, long refundsPaise, double refundPercentOfSales, long shiftsClosed,
                     long shiftVariancePaise) {}
 
+  /**
+   * The counter-controls report for a period.
+   * @param from first day, in the shop's time zone
+   * @param to last day, included
+   * @param cashiers one row per cashier who sold, took returns or closed a shift, biggest sales first
+   */
   public record Report(LocalDate from, LocalDate to, List<Row> cashiers) {}
 
   private final PosReportRepository repo;
   private final UserRepository users;
   private final Clock clock;
 
+  /** Creates the service. */
   public CounterControlsService(PosReportRepository repo, UserRepository users, Clock clock) {
     this.repo = repo;
     this.users = users;
     this.clock = clock;
   }
 
+  /** {@code part} as a percentage of {@code whole} to one decimal; 0 when {@code whole} is not positive. */
   public static double percent(long part, long whole) {
     return whole <= 0 ? 0.0 : Math.round(part * 1000.0 / whole) / 10.0;
   }
 
+  /**
+   * Builds the report for the period (week, month, quarter, or explicit from/to days; same rules as the sales summary).
+   */
   @Transactional(readOnly = true)
   public Report report(String period, LocalDate from, LocalDate to) {
     LocalDate today = clock.instant().atZone(InvoiceNumbers.SHOP_ZONE).toLocalDate();

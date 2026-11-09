@@ -19,6 +19,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * One-time sign-in codes sent by e-mail.
+ * <p>
+ * A code is 5 digits and valid for 5 minutes, at most 5 wrong tries are allowed, and only an HMAC hash (with a secret
+ * pepper) is stored. Asking for codes is limited per e-mail address and per client IP. A configured fixed code
+ * replaces random codes for development and testing and must never be used in production.
+ */
 @Service
 public class OtpService {
   private static final Logger log = LoggerFactory.getLogger(OtpService.class);
@@ -39,6 +46,10 @@ public class OtpService {
     this.perEmailHour = n;
   }
 
+  /**
+   * Creates the service (wired by Spring).
+   * @param ipPerHour how many codes one client IP may ask for per hour
+   */
   public OtpService(OtpRepository repo, OtpSender sender, AppProps props, Clock clock, RateLimiter limiter,
                     @Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
     this.ipPerHour = ipPerHour;
@@ -59,8 +70,16 @@ public class OtpService {
     return Optional.ofNullable(props.otp()).map(AppProps.Otp::fixedCode).map(String::trim).filter(c -> !c.isEmpty());
   }
 
+  /** Trims and lower-cases an e-mail address so the same person always maps to the same account. */
   public static String normalize(String email) { return email.trim().toLowerCase(); }
 
+  /**
+   * Creates a code for the address, stores only its hash and e-mails it.
+   * <p>
+   * Fails with 429 {@code RATE_LIMITED} when the address or the IP asked for too many codes in the last hour.
+   * @param rawEmail the address as typed
+   * @param ip the caller's IP address, used for rate limiting
+   */
   @Transactional
   public void send(String rawEmail, String ip) {
     String email = normalize(rawEmail);

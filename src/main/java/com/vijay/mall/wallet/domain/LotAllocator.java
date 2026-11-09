@@ -10,8 +10,19 @@ import java.util.stream.Stream;
 public final class LotAllocator {
   private LotAllocator() {}
 
+  /**
+   * An earning lot that may still hold coins.
+   * @param id the earning ledger row
+   * @param remaining coins left in it
+   * @param expiresAt when it expires, null if never
+   */
   public record Lot(UUID id, int remaining, Instant expiresAt) {}
 
+  /**
+   * Coins to take from one lot.
+   * @param lotId the lot
+   * @param coins how many coins
+   */
   public record Use(UUID lotId, int coins) {}
 
   /** Immutable fold state: coins still to find, and the uses chosen so far. */
@@ -25,6 +36,11 @@ public final class LotAllocator {
   private static final Comparator<Lot> SOONEST_FIRST =
       Comparator.comparing(Lot::expiresAt, Comparator.nullsLast(Comparator.naturalOrder()));
 
+  /**
+   * Chooses which lots to take {@code coins} from, soonest expiry first.
+   * @throws IllegalArgumentException if coins is negative
+   * @throws IllegalStateException if the lots do not hold enough coins
+   */
   public static List<Use> allocate(List<Lot> lots, int coins) {
     if (coins < 0) throw new IllegalArgumentException("coins cannot be negative");
     Pick result = lots.stream().sorted(SOONEST_FIRST)

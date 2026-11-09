@@ -6,6 +6,12 @@ import java.util.Locale;
 public enum FlashKind {
   PERCENT, FIXED_PRICE, NONE;
 
+  /**
+   * Reads a discount kind typed by staff, ignoring case and surrounding spaces.
+   * @param text {@code PERCENT}, {@code FIXED_PRICE} or {@code NONE}; null or blank means {@code NONE}
+   * @return the matching kind
+   * @throws IllegalArgumentException when the text is not one of the three kinds
+   */
   public static FlashKind parse(String text) {
     if (text == null || text.isBlank()) return NONE;
     try {

@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** A row of {@code product_barcode}: one barcode (the key) and the product it identifies. */
 @Entity
 @Table(name = "product_barcode")
 class ProductBarcodeEntity {
@@ -13,5 +14,6 @@ class ProductBarcodeEntity {
   UUID productId;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected ProductBarcodeEntity() {}
 }

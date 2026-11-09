@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/** Spring Data access to {@code credit_ledger}, the history of every change to customers' credit balances. */
 interface CreditLedgerJpa extends JpaRepository<CreditLedgerEntity, UUID> {
   Page<CreditLedgerEntity> findByUserId(UUID userId, Pageable page);
 

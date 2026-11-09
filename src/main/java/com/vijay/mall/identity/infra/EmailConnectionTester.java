@@ -12,6 +12,7 @@ public class EmailConnectionTester implements ConnectionTester {
   private final RuntimeSettings settings;
   private final SmtpEmailOtpSender sender;
 
+  /** Creates the tester with the live settings and the SMTP sender (wired by Spring). */
   public EmailConnectionTester(RuntimeSettings settings, SmtpEmailOtpSender sender) {
     this.settings = settings;
     this.sender = sender;

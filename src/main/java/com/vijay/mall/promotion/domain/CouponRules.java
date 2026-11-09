@@ -11,6 +11,10 @@ public final class CouponRules {
     return broken ? Optional.of(code) : Optional.empty();
   }
 
+  /**
+   * The coupon conditions in the order they are checked; the first one broken is the reason shown. The reason codes are
+   * {@code EXPIRED}, {@code MIN_ORDER}, {@code CATEGORY}, {@code LIMIT_REACHED} and {@code FIRST_ORDER_ONLY}.
+   */
   public static final List<CouponRule> STANDARD = List.of(
       c -> violation(!c.coupon().active(), "EXPIRED"),
       c -> {

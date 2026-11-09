@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * JPA entity for the {@code product_review} table: one customer's star rating and comment for a product, with the delivered order it was written for.
+ */
 @Entity
 @Table(name = "product_review")
 class ReviewEntity extends BaseEntity {
@@ -17,5 +20,6 @@ class ReviewEntity extends BaseEntity {
   Instant createdAt;
   Instant updatedAt;
 
+  /** No-argument constructor required by JPA; not for application code. */
   protected ReviewEntity() {}
 }

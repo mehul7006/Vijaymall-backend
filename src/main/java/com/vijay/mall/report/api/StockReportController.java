@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class StockReportController {
   private final ReportService reports;
 
+  /** Creates the controller. */
   public StockReportController(ReportService reports) { this.reports = reports; }
 
   /** Products at or below their own stock alert level, emptiest first. limit is 1 to 200 (default 50). */

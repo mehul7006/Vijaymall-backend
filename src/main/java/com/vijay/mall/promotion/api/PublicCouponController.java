@@ -13,8 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 public class PublicCouponController {
   private final PromotionService promotions;
 
+  /** Creates the controller (wired by Spring). */
   public PublicCouponController(PromotionService promotions) { this.promotions = promotions; }
 
+  /** Lists the coupons on offer right now: active, inside their dates and not used up. No sign-in needed. */
   @GetMapping
   public List<PublicCoupon> list() { return promotions.listOffered(); }
 }

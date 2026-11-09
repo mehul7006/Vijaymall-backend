@@ -12,11 +12,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class FlashController {
   private final FlashSaleService sales;
 
+  /** Creates the controller with the sale service. */
   public FlashController(FlashSaleService sales) { this.sales = sales; }
 
+  /** Flash sales running now for online shoppers, with prices and units left. Public. */
   @GetMapping("/active")
   public FlashViews.ShopSales active() { return sales.active(); }
 
+  /** Flash sales that have not started yet, with the price they will have. Public. */
   @GetMapping("/upcoming")
   public FlashViews.ShopSales upcoming() { return sales.upcoming(); }
 }

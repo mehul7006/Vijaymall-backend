@@ -33,6 +33,7 @@ import org.springframework.stereotype.Service;
 public class PosSyncService {
   private static final Logger log = LoggerFactory.getLogger(PosSyncService.class);
 
+  /** Most bills accepted in one upload. */
   public static final int BATCH_LIMIT = 50;
 
   /**
@@ -64,6 +65,10 @@ public class PosSyncService {
     }
   }
 
+  /**
+   * What an offline till needs to know before syncing: the server time, the catalog version stamp, how many days old
+   * an offline bill may be, and the upload batch size.
+   */
   public record Status(Instant serverTime, Instant catalogVersion, int maxOfflineDays, int batchLimit) {}
 
   private final PosService pos;
@@ -71,6 +76,7 @@ public class PosSyncService {
   private final OfflineExceptionService exceptions;
   private final Clock clock;
 
+  /** Creates the service. */
   public PosSyncService(PosService pos, PosCatalogService catalog, OfflineExceptionService exceptions, Clock clock) {
     this.pos = pos;
     this.catalog = catalog;
@@ -78,6 +84,7 @@ public class PosSyncService {
     this.clock = clock;
   }
 
+  /** Current server time, catalog version, maximum offline age and batch limit. */
   public Status status() {
     return new Status(clock.instant(), catalog.catalogVersion(), (int) PosService.MAX_OFFLINE_DAYS, BATCH_LIMIT);
   }

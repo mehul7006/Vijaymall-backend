@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.util.UUID;
 
+/** A row of {@code pos_sale_item}: one line of a counter bill, with its GST split and the units returned so far. */
 @Entity
 @Table(name = "pos_sale_item")
 class PosSaleItemEntity extends BaseEntity {
@@ -24,5 +25,6 @@ class PosSaleItemEntity extends BaseEntity {
   long sgstPaise;
   int returnedQty;
 
+  /** Required by JPA; not for application code. */
   protected PosSaleItemEntity() {}
 }

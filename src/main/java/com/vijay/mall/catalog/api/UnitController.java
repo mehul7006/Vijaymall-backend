@@ -20,6 +20,10 @@ import org.springframework.web.bind.annotation.RestController;
 /** Units of measure: a public list for every screen, and admin add / edit / remove. */
 @RestController
 public class UnitController {
+  /**
+   * Request body to create or update a unit. {@code code} is required on create only (on update a blank code keeps the
+   * current one); {@code soldBy} is {@code UNIT} (default) or {@code WEIGHT}.
+   */
   public record Body(@Size(max = 20) String code, @NotBlank String nameEn, String nameGu, String soldBy,
                      Integer sortOrder, Boolean active) {
     UnitOfMeasure toUnit() {
@@ -29,24 +33,29 @@ public class UnitController {
 
   private final UnitService units;
 
+  /** Creates the controller with the unit service. */
   public UnitController(UnitService units) { this.units = units; }
 
   /** Active units for the customer app, the counter and the product forms. */
   @GetMapping("/api/v1/units")
   public List<UnitOfMeasure> list() { return units.active(); }
 
+  /** Admin: every unit, including switched-off ones. */
   @GetMapping("/api/v1/admin/units")
   public List<UnitOfMeasure> adminList() { return units.all(); }
 
+  /** Admin: adds a unit; answers 201 Created, or 409 {@code UNIT_EXISTS} when the code is taken. */
   @PostMapping("/api/v1/admin/units")
   @ResponseStatus(HttpStatus.CREATED)
   public UnitOfMeasure create(@Valid @RequestBody Body b) { return units.create(b.toUnit(), CurrentUser.id()); }
 
+  /** Admin: edits a unit; renaming the code moves every product that uses it. 404 when the code is unknown. */
   @PutMapping("/api/v1/admin/units/{code}")
   public UnitOfMeasure update(@PathVariable String code, @Valid @RequestBody Body b) {
     return units.update(code, b.toUnit(), CurrentUser.id());
   }
 
+  /** Admin: deletes an unused unit; answers 204, or 409 {@code UNIT_IN_USE} when products still use it. */
   @DeleteMapping("/api/v1/admin/units/{code}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete(@PathVariable String code) { units.delete(code, CurrentUser.id()); }

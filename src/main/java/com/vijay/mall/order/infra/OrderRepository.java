@@ -19,13 +19,23 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Stores and reads online orders, their lines and status history. Other modules see rows and views, never the entities.
+ */
 @Repository
 public class OrderRepository {
+  /**
+   * An order as stored. Money is in paise.
+   * @param version optimistic-lock version used by {@link #updateStatus}
+   * @param stockReserved whether the order currently holds shelf stock
+   * @param coinsCredited whether the earned coins were already paid out
+   */
   public record Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                     String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                     long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
                     String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
                     String cancelReason, boolean stockReserved) {
+    /** A row without the stock-reserved flag (taken as {@code false}). */
     public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
@@ -36,6 +46,7 @@ public class OrderRepository {
           placedAt, version, deliverySlot, cancelReason, false);
     }
 
+    /** A row without slot, cancel reason and stock-reserved flag. */
     public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
@@ -46,18 +57,31 @@ public class OrderRepository {
     }
   }
 
+  /**
+   * Everything needed to insert an order. Money is in paise.
+   * @param idemKey the customer's idempotency key; unique per user
+   * @param now the placement time
+   */
   public record NewOrder(UUID id, String orderNo, UUID userId, String idemKey, String fulfilment, String status,
                          long subtotal, String couponCode, long couponDiscount, int coinsUsed, long coinDiscount,
                          long deliveryFee, long total, int coinsEarned, String paymentMethod, String paymentStatus,
                          String addressSnapshot, Instant expiresAt, Instant now, String deliverySlot) {}
 
+  /**
+   * Everything needed to insert one order line; names and flags are copied so the order reads right after the product changes.
+   * @param earns whether the line earns coins
+   * @param redeemable whether coins may pay for it
+   * @param couponDiscount this line's share of the coupon discount, in paise
+   */
   public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
                         boolean redeemable, String nameGu, String unitLabel, long couponDiscount) {
+    /** A line without coupon share. */
     public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
                    boolean redeemable, String nameGu, String unitLabel) {
       this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, nameGu, unitLabel, 0);
     }
 
+    /** A line without Gujarati name or pack label; the English name stands in. */
     public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns, boolean redeemable) {
       this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, name, "");
     }
@@ -92,6 +116,9 @@ public class OrderRepository {
         e.cancelReason, e.stockReserved);
   }
 
+  /**
+   * Next order number: the shop's order prefix (default {@code VSM}) and the next value of the {@code order_no_seq} sequence.
+   */
   public String nextOrderNo() {
     Number n = (Number) em.createNativeQuery("select nextval('order_no_seq')").getSingleResult();
     // The number starts with the prefix from the shop settings, the same one counter bills use.
@@ -99,8 +126,10 @@ public class OrderRepository {
     return (prefix == null || prefix.isBlank() ? "VSM" : prefix) + "-" + n.longValue();
   }
 
+  /** The order with this id, if any. */
   public Optional<Row> find(UUID id) { return orders.findById(id).map(OrderRepository::toRow); }
 
+  /** The customer's order placed with this idempotency key, if any. */
   public Optional<Row> findByIdem(UUID userId, String key) {
     return orders.findByUserIdAndIdemKey(userId, key).map(OrderRepository::toRow);
   }
@@ -133,6 +162,7 @@ public class OrderRepository {
     orders.saveAndFlush(e);
   }
 
+  /** Inserts one order line. */
   @Transactional
   public void insertItem(UUID orderId, NewItem i) {
     OrderItemEntity e = new OrderItemEntity();
@@ -151,6 +181,9 @@ public class OrderRepository {
     items.save(e);
   }
 
+  /**
+   * Appends a status change to the order's history; {@code from} is {@code null} for the first entry and {@code actor} may be {@code null} for system changes.
+   */
   @Transactional
   public void insertHistory(UUID orderId, String from, String to, UUID actor, String note, Instant now) {
     OrderHistoryEntity e = new OrderHistoryEntity();
@@ -168,17 +201,20 @@ public class OrderRepository {
   public record ItemRow(UUID id, UUID productId, String name, int qty, int returnedQty, long unitPricePaise, long lineTotalPaise,
                         long couponDiscountPaise) {}
 
+  /** The order's lines with ids and returned counts, sorted by name. */
   public List<ItemRow> itemRows(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream().map(i -> new ItemRow(i.id, i.productId, i.name, i.qty, i.returnedQty,
         i.unitPricePaise, i.lineTotalPaise, i.couponDiscountPaise)).toList();
   }
 
+  /** The order's lines as customer-facing items, sorted by name. */
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
         .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
             i.unitLabel, i.couponDiscountPaise)).toList();
   }
 
+  /** The order's status changes, oldest first. */
   public List<OrderViews.Step> timeline(UUID orderId) {
     return history.findByOrderIdOrderByCreatedAtAsc(orderId).stream()
         .map(h -> new OrderViews.Step(h.toStatus, h.createdAt)).toList();
@@ -199,6 +235,7 @@ public class OrderRepository {
     }
   }
 
+  /** Sets the payment status of the order. */
   @Transactional
   public void setPaymentStatus(UUID id, String status, Instant now) {
     orders.findById(id).ifPresent(e -> {
@@ -211,6 +248,7 @@ public class OrderRepository {
   @Transactional
   public void setStockReserved(UUID id, boolean reserved) { orders.findById(id).ifPresent(e -> e.stockReserved = reserved); }
 
+  /** Stores why the order was cancelled or rejected. */
   @Transactional
   public void setCancelReason(UUID id, String reason) { orders.findById(id).ifPresent(e -> e.cancelReason = reason); }
 
@@ -233,13 +271,18 @@ public class OrderRepository {
   /** Orders the person has placed that were not cancelled; used for "first order only" coupons. */
   public long activeOrderCount(UUID userId) { return orders.countByUserIdAndStatusNot(userId, "CANCELLED"); }
 
+  /** Records that the earned coins were paid out, so they are never paid twice. */
   @Transactional
   public void markCoinsCredited(UUID id) { orders.findById(id).ifPresent(e -> e.coinsCredited = true); }
 
+  /**
+   * Ids of unpaid online orders whose payment deadline is before {@code now}, earliest first, at most {@code limit}.
+   */
   public List<UUID> expiredPending(Instant now, int limit) {
     return orders.expiredPending(now, PageRequest.of(0, limit)).stream().map(e -> e.id).toList();
   }
 
+  /** Order numbers for the given ids; ids that do not exist are left out. */
   public Map<UUID, String> numbers(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
     return orders.numbers(ids).stream().collect(Collectors.toMap(r -> (UUID) r[0], r -> (String) r[1]));
@@ -256,10 +299,12 @@ public class OrderRepository {
     return new Page<>(rows, pageNo, size, page.getTotalElements());
   }
 
+  /** A customer's orders, newest first. */
   public Page<SummaryRow> list(UUID userId, int page, int size) {
     return summaries(orders.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"))), page, size);
   }
 
+  /** All orders, newest first, optionally of one status. */
   public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
   /** "1001" becomes "%1001%" in lower case; a % or _ typed by the person is dropped so it cannot act as a wildcard. */

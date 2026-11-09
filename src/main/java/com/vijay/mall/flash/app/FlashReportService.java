@@ -25,15 +25,23 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class FlashReportService {
+  /** Time zone of the shop, used for report days and hours. */
   static final ZoneId SHOP_ZONE = ZoneId.of("Asia/Kolkata");
+  /** Longest period a range report may cover, in days. */
   static final int MAX_DAYS = 366;
+  /** How many best-selling items the range report lists. */
   static final int BEST_ITEMS = 10;
 
+  /**
+   * One product's results in a sale or in the best-items list. {@code sellThroughPercent} is units sold as a share of the cap, null when the item has no cap.
+   */
   public record ItemLine(UUID productId, String nameEn, long units, long revenuePaise, long discountPaise, Integer maxQty,
                          Double sellThroughPercent) {}
 
+  /** Units, revenue and discount given on one channel ({@code ONLINE} or {@code POS}). */
   public record ChannelLine(String channel, long units, long revenuePaise, long discountPaise) {}
 
+  /** Units and revenue in one shop-time hour such as {@code 2026-11-08 14:00}. */
   public record HourLine(String hour, long units, long revenuePaise) {}
 
   /** orders = online orders that used the sale; bills = counter bills that did. avgDiscountPercent = discount / list value. */
@@ -41,9 +49,11 @@ public class FlashReportService {
                            long revenuePaise, long discountPaise, double avgDiscountPercent, long customers, Double sellThroughPercent,
                            List<ItemLine> byItem, List<ChannelLine> byChannel, List<HourLine> byHour) {}
 
+  /** One sale's totals inside a range report. */
   public record SaleLine(UUID saleId, String name, String status, Instant startsAt, Instant endsAt, long unitsSold, long orders, long bills,
                          long revenuePaise, long discountPaise, double avgDiscountPercent, long customers) {}
 
+  /** Totals over all sales that started in a date range, with one line per sale and the best items. Money is paise. */
   public record RangeReport(LocalDate from, LocalDate to, long sales, long unitsSold, long orders, long bills, long revenuePaise,
                             long discountPaise, double avgDiscountPercent, long customers, List<SaleLine> bySale, List<ItemLine> bestItems) {}
 
@@ -51,12 +61,17 @@ public class FlashReportService {
   private final CatalogService catalog;
   private final Clock clock;
 
+  /** Creates the service. */
   public FlashReportService(FlashRepository repo, CatalogService catalog, Clock clock) {
     this.repo = repo;
     this.catalog = catalog;
     this.clock = clock;
   }
 
+  /**
+   * Full report of one sale. Units given back by cancelled orders are not counted.
+   * @throws ApiException {@code NOT_FOUND} when the sale does not exist
+   */
   @Transactional(readOnly = true)
   public SaleReport report(UUID saleId) {
     Sale s = repo.findSale(saleId).orElseThrow(() -> ApiException.notFound("Flash sale"));

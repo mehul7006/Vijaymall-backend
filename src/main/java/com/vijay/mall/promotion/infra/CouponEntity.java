@@ -7,6 +7,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Table {@code coupon}: a discount code with its kind (FLAT or PERCENT), value, limits, dates and flags. The column
+ * {@code value} is the field {@code amount} here, and {@code usedCount} is the live count of uses.
+ */
 @Entity
 @Table(name = "coupon")
 class CouponEntity extends BaseEntity {
@@ -25,5 +29,6 @@ class CouponEntity extends BaseEntity {
   boolean worksWithCoins = true;
   boolean firstOrderOnly;
 
+  /** Required by JPA; not for application code. */
   protected CouponEntity() {}
 }

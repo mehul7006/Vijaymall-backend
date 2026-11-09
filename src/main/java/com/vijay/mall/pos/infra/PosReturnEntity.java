@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** A row of {@code pos_return}: a credit note for goods taken back from a bill. */
 @Entity
 @Table(name = "pos_return")
 class PosReturnEntity extends BaseEntity {
@@ -23,5 +24,6 @@ class PosReturnEntity extends BaseEntity {
   long creditAdjustPaise;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected PosReturnEntity() {}
 }

@@ -25,10 +25,15 @@ public class PublicShopController {
                            String whatsapp, String mapUrl, String website, String instagram, String facebook,
                            List<ShopProfileService.DayHours> hours, String holidayNote, boolean openNow, String todayHours,
                            boolean onlineOrdersOpen, String onlineOrdersMessage, String timezone) {
+    /**
+     * Creates the shop details with only the settings fields; the profile fields (logo, links, hours) are left empty
+     * and online ordering is shown as open.
+     */
     public PublicShop(String shopName, String phone, String address, String promise, String details) {
       this(shopName, phone, address, promise, details, "", "", "", "", "", "", "", List.of(), "", false, "", true, "", "");
     }
 
+    /** Creates the shop details without the "about the shop" text. */
     public PublicShop(String shopName, String phone, String address, String promise) {
       this(shopName, phone, address, promise, "");
     }
@@ -37,14 +42,29 @@ public class PublicShopController {
   private final ShopService shop;
   private final ShopProfileService profile;
 
+  /**
+   * Creates the controller without a profile service, so only the shop settings are shown.
+   *
+   * @param shop shop settings service
+   */
   public PublicShopController(ShopService shop) { this(shop, null); }
 
+  /**
+   * Creates the controller.
+   *
+   * @param shop shop settings service
+   * @param profile shop profile service (logo, links, hours, online-order switch)
+   */
   @Autowired
   public PublicShopController(ShopService shop, ShopProfileService profile) {
     this.shop = shop;
     this.profile = profile;
   }
 
+  /**
+   * Builds the public shop details from the shop settings and, when available, the shop profile. Never includes the
+   * GSTIN, UPI id or bill settings.
+   */
   public PublicShop get() {
     ShopSetting s = shop.get();
     String promise = s.promise() == null ? "" : s.promise();

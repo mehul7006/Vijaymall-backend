@@ -20,6 +20,13 @@ public class ApprovalService {
   private final AuditService audit;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
+  /**
+   * Creates the service.
+   *
+   * @param users user store holding the hashed PINs
+   * @param limiter rate limiter that slows PIN guessing
+   * @param audit audit log
+   */
   public ApprovalService(UserRepository users, RateLimiter limiter, AuditService audit) {
     this.users = users;
     this.limiter = limiter;

@@ -13,5 +13,6 @@ class CoinSettingEntity {
   int maxRedeemPercent;
   int expiryMonths;
 
+  /** Required by JPA; not for application code. */
   protected CoinSettingEntity() {}
 }

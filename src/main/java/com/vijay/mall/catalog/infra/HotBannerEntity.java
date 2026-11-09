@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * JPA entity for the {@code hot_banner} table: a promotional banner with an optional start and end time and an active flag.
+ */
 @Entity
 @Table(name = "hot_banner")
 class HotBannerEntity extends BaseEntity {
@@ -16,5 +19,6 @@ class HotBannerEntity extends BaseEntity {
   Instant endAt;
   boolean active;
 
+  /** No-argument constructor required by JPA; not for application code. */
   protected HotBannerEntity() {}
 }

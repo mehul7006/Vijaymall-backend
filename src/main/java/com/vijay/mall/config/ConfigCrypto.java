@@ -23,6 +23,9 @@ public class ConfigCrypto {
   private final SecretKeySpec key;
   private final SecureRandom random = new SecureRandom();
 
+  /**
+   * Creates the cipher from the base64 key; with a blank key {@link #available()} is false. Fails at start-up when the key is not 32 bytes of base64.
+   */
   public ConfigCrypto(@Value("${app.config.encryption-key:}") String base64Key) {
     if (base64Key == null || base64Key.isBlank()) {
       this.key = null;
@@ -38,8 +41,12 @@ public class ConfigCrypto {
     }
   }
 
+  /** Whether an encryption key is configured. */
   public boolean available() { return key != null; }
 
+  /**
+   * Encrypts {@code plain} and returns base64 of IV followed by ciphertext; throws {@code IllegalStateException} without a key.
+   */
   public String encrypt(String plain) {
     requireKey();
     try {

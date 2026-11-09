@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 public class RazorpayTester implements ConnectionTester {
   private final RazorpayGateway gateway;
 
+  /** Creates the tester. */
   public RazorpayTester(RazorpayGateway gateway) { this.gateway = gateway; }
 
   @Override public String target() { return "razorpay"; }

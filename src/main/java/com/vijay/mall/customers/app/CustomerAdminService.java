@@ -33,6 +33,7 @@ public class CustomerAdminService {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service with the user, wallet, credit and order modules it reads (wired by Spring). */
   public CustomerAdminService(UserRepository users, WalletService wallet, CreditService credit, OrderService orders,
                               RefreshTokenRepository tokens, AuditService audit, Clock clock) {
     this.users = users;
@@ -62,6 +63,10 @@ public class CustomerAdminService {
         !"BLOCKED".equals(d.status()), d.createdAt())).toList(), p.page(), p.size(), p.total());
   }
 
+  /**
+   * The full admin picture of one customer: contact details, coins, credit owed and open orders.
+   * @throws com.vijay.mall.common.error.ApiException 404 when the id is unknown or is not a customer
+   */
   @Transactional(readOnly = true)
   public CustomerView get(UUID id) { return view(customer(id)); }
 

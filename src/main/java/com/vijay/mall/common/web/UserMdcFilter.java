@@ -21,7 +21,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
 public class UserMdcFilter extends OncePerRequestFilter {
+  /** Log context entry and request attribute holding the user id. */
   public static final String USER = "userId";
+  /** Log context entry and request attribute holding the role. */
   public static final String ROLE = "role";
 
   @Override

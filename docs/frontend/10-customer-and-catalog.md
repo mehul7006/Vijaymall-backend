@@ -1227,3 +1227,10 @@ These admin/staff calls accept an **optional** `Idempotency-Key` header (max 100
 | `POST /api/v1/admin/stock-takes` (see file 30) | a repeat would overwrite sales made since the count |
 
 For stock takes a repeat returns the first call's result and applies nothing more. A key belongs to one person and one request: the same key with a **different** request (or from a different admin) answers `409 IDEMPOTENCY_KEY_REUSED` (use a new key). If what the first call created has since been deleted, a repeat answers `409 IDEMPOTENT_RESULT_GONE`.
+
+
+---
+## Addendum: smaller behaviour changes
+
+- **Login code e-mail failures**: `POST /api/v1/auth/otp/send` answers `503 OTP_EMAIL_FAILED` ("We could not send the sign-in code right now. Please try again in a moment.") when the shop's mail server cannot be reached; show the message and let the user retry. (Mobile codes: `503 SMS_NOT_CONFIGURED` / `502 SMS_PROVIDER_ERROR`.)
+- **`PUT /api/v1/me`**: `mobile` is validated as request validation: blank or exactly 10 digits, otherwise `400 VALIDATION_FAILED` with `details.fields.mobile` = "must be 10 digits".

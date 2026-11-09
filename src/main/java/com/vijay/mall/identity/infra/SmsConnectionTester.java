@@ -16,6 +16,7 @@ public class SmsConnectionTester implements ConnectionTester {
   private final RuntimeSettings settings;
   private final HttpSmsSender sender;
 
+  /** Creates the tester with the live settings and the HTTP SMS sender (wired by Spring). */
   public SmsConnectionTester(RuntimeSettings settings, HttpSmsSender sender) {
     this.settings = settings;
     this.sender = sender;

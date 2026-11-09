@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageImpl;
@@ -15,7 +16,8 @@ import org.springframework.data.domain.Pageable;
 
 class InventoryRepositoryCoverageTest {
   private final StockMovementJpa movements = mock(StockMovementJpa.class);
-  private final InventoryRepository repo = new InventoryRepository(mock(InventoryJpa.class), movements);
+  private final InventoryJpa stock = mock(InventoryJpa.class);
+  private final InventoryRepository repo = new InventoryRepository(stock, movements);
 
   private static StockMovementEntity row(UUID product) {
     StockMovementEntity m = new StockMovementEntity();
@@ -42,5 +44,15 @@ class InventoryRepositoryCoverageTest {
     when(movements.findByProductId(any(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(row(p))));
     assertThat(repo.movementPage(p, 0, 10).items()).hasSize(1);
     verify(movements).findByProductId(any(), any(Pageable.class));
+  }
+
+  @Test void aLockedCountReadsTheLockedRowAndIsZeroWithoutOne() {
+    UUID p = UUID.randomUUID();
+    InventoryEntity e = new InventoryEntity();
+    e.productId = p;
+    e.qtyOnHand = 12;
+    when(stock.lockById(p)).thenReturn(Optional.of(e));
+    assertThat(repo.quantityForUpdate(p)).isEqualTo(12);
+    assertThat(repo.quantityForUpdate(UUID.randomUUID())).isZero();
   }
 }

@@ -59,6 +59,7 @@ public class PosReturnService {
   private final Clock clock;
   private final CreditService credit;
 
+  /** Creates the service. */
   public PosReturnService(PosSaleRepository sales, InventoryService inventory, WalletService wallet, ShopService shop,
                           InvoiceCounterRepository counters, AuditService audit, TransactionTemplate tx, Clock clock,
                           CreditService credit) {
@@ -100,6 +101,20 @@ public class PosReturnService {
     return refund(cashierId, true, saleId, idemKey, in);
   }
 
+  /**
+   * Takes goods back against a bill, once per idempotency key (a repeat returns the first return). In one transaction
+   * it checks the quantities still returnable, computes the refund and its GST share, puts stock back or into
+   * defective stock, claws back earned coins and restores redeemed coins, first reduces any credit the customer still
+   * owes for the bill, pays out the rest and issues the credit note.
+   *
+   * @param cashierId the user taking the return
+   * @param admin true for a manager, who is not held to the cashier return window
+   * @param saleId the bill the goods came from
+   * @param idemKey client-supplied key; required
+   * @param in the lines, reason and refund payments (default is all cash)
+   * @throws ApiException 422 {@code RETURN_NEEDS_ADMIN} for a bill older than the cashier window, 409 {@code
+   *     RETURN_EXCEEDS_SOLD}, 400 for a bad line or refund split, 404 for an unknown bill
+   */
   public ReturnRecord refund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
     if (idemKey == null || idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
     Optional<ReturnRecord> existing = sales.findReturnByIdem(idemKey);
@@ -112,6 +127,7 @@ public class PosReturnService {
     }
   }
 
+  /** The returns already made against a bill, oldest first. */
   public List<ReturnRecord> returnsOf(UUID saleId) { return sales.returnsOf(saleId); }
 
   private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {

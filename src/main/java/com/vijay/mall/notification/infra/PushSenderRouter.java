@@ -15,6 +15,7 @@ public class PushSenderRouter implements PushSender {
   private final FcmPushSender fcm;
   private final LoggingPushSender logging;
 
+  /** Creates the router with the live settings and both senders (wired by Spring). */
   public PushSenderRouter(RuntimeSettings settings, FcmPushSender fcm, LoggingPushSender logging) {
     this.settings = settings;
     this.fcm = fcm;

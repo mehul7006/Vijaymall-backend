@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Spring Data access to {@code coin_ledger}: open lots for spending, idempotency-key lookups, history pages and expired lots.
+ */
 interface LedgerJpa extends JpaRepository<CoinLedgerEntity, UUID> {
   /** Open lots, soonest expiry first, locked while an order spends from them. */
   @Lock(LockModeType.PESSIMISTIC_WRITE)

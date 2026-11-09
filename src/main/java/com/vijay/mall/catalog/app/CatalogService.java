@@ -36,10 +36,23 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * The shop catalog: products grouped into variants, categories, hot-sale banners and the admin operations on them.
+ * <p>Customers read products through the {@code list}, {@code get}, {@code groups} and {@code hotSale} methods (inactive and
+ * counter-only items are hidden, flash-sale offers are attached). The admin methods create and edit products, adjust stock
+ * through the inventory module (every change leaves a stock movement) and write an audit entry. Prices are integer paise and the
+ * MRP may never be below the selling price. Cart pricing for orders is done by {@link #price}.
+ */
 @Service
 public class CatalogService {
+  /** One cart line to be priced: a product (variant) id and the wanted quantity. */
   public record ItemRequest(UUID productId, int qty) {}
 
+  /**
+   * Admin input to create or update one product (one variant).
+   * <p>{@code qtyOnHand} and {@code lowThreshold} of -1 mean "keep the current value" on update; on create they become 0 stock and
+   * the default low-stock alert level of 5. {@code productGroupId} null keeps the existing group (a new product is its own group).
+   */
   public record ProductInput(UUID categoryId, String nameEn, String nameGu, String description, long mrpPaise,
                              long pricePaise, String unit, String packSize, boolean active, boolean hotSale,
                              Instant hotStart, Instant hotEnd, boolean earnsCoins, boolean coinRedeemable,
@@ -62,6 +75,7 @@ public class CatalogService {
   public record StockMovementView(UUID id, UUID productId, String name, String packLabel, int delta, String reason,
                                   Instant at, UUID cashierId, UUID refId, String ref) {}
 
+  /** The hot-sale screen: the banners that are live now and the in-stock products currently on hot sale. */
   public record HotSale(List<HotBanner> banners, List<Product> products) {}
 
   /**
@@ -157,6 +171,11 @@ public class CatalogService {
     this(products, categories, banners, inventory, audit, clock, references, null);
   }
 
+  /**
+   * Main constructor used by Spring.
+   *
+   * @param units the admin-managed unit list used to validate and normalise product units
+   */
   @Autowired
   public CatalogService(ProductRepository products, CategoryRepository categories, BannerRepository banners,
                         InventoryService inventory, AuditService audit, Clock clock,
@@ -172,6 +191,7 @@ public class CatalogService {
   }
 
   // ---------- customer side ----------
+  /** English names of the given products keyed by id; unknown ids are simply absent. */
   public Map<UUID, String> names(Collection<UUID> ids) { return products.names(ids); }
 
   /** When any product last changed (the offline till compares this with the copy it holds). */
@@ -186,6 +206,9 @@ public class CatalogService {
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  /**
+   * The active categories in display order. Served from a cache when one is available because every screen reads it.
+   */
   public List<Category> categories() {
     return caches == null ? categories.listActive()
         : caches.get(AppCaches.Name.CATEGORIES, "active", categories::listActive);
@@ -196,6 +219,16 @@ public class CatalogService {
     return list(q, categoryId, hot, false, page, size);
   }
 
+  /**
+   * The customer product list, one row per variant, sorted by English name.
+   * <p>Counter-only and inactive products are never returned; flash-sale offers are attached to the rows.
+   * @param q optional text matched against the English and Gujarati names
+   * @param categoryId optional category filter
+   * @param hot only products whose hot-sale flag and window are open now
+   * @param includeOutOfStock also return products with no stock
+   * @param page zero-based page number
+   * @param size requested page size (clamped)
+   */
   public Page<Product> list(String q, UUID categoryId, boolean hot, boolean includeOutOfStock, int page, int size) {
     Instant now = clock.instant();
     int pg = Math.max(0, page);
@@ -205,12 +238,20 @@ public class CatalogService {
     return new Page<>(flashed(p.items().stream().map(a -> a.toCustomer(now)).toList()), p.page(), p.size(), p.total());
   }
 
+  /**
+   * One product as customers see it, with any flash-sale offer.
+   * @throws ApiException {@code NOT_FOUND} when the product is unknown, inactive or counter-only
+   */
   public Product get(UUID id) {
     AdminProduct p = one(id);
     if (!p.active() || products.isPosOnly(id)) throw ApiException.notFound("Product");
     return flashed(List.of(p.toCustomer(clock.instant()))).get(0);
   }
 
+  /**
+   * Builds the hot-sale screen: up to 20 in-stock hot products and the banners whose active flag and time window are open now.
+   * The full banner list is cached; which banners are live is decided against the clock on every call.
+   */
   public HotSale hotSale() {
     Instant now = clock.instant();
     List<Product> list = flashed(withStock(products.searchInStock(null, null, true, now, 0, 20)).items().stream()
@@ -341,8 +382,13 @@ public class CatalogService {
     return products.search(q, null, false, true, true, clock.instant(), Math.max(0, page), Page.clampSize(size));
   }
 
+  /** Stored product data for the counter (POS) for these ids, including inactive and counter-only items. */
   public List<ProductData> posProducts(Collection<UUID> ids) { return products.findAll(List.copyOf(ids)); }
 
+  /**
+   * Marks a product as sold at the counter only (hidden from the online shop) or puts it back online.
+   * @throws ApiException {@code NOT_FOUND} when the product does not exist
+   */
   @Transactional
   public void setPosOnly(UUID id, boolean posOnly) {
     adminGet(id);
@@ -351,10 +397,12 @@ public class CatalogService {
   }
 
   // ---------- admin side ----------
+  /** Admin product list with stock numbers; includes inactive and counter-only products, sorted by English name. */
   public Page<AdminProduct> adminList(String q, UUID categoryId, int page, int size) {
     return withStock(products.search(q, categoryId, false, false, clock.instant(), Math.max(0, page), Page.clampSize(size)));
   }
 
+  /** One product with stock numbers for the admin; {@code NOT_FOUND} when unknown. */
   public AdminProduct adminGet(UUID id) { return one(id); }
 
   /** Stock history with product names, newest first. productId null means all products. */
@@ -392,6 +440,13 @@ public class CatalogService {
     return nz(given, current == null ? "pc" : current);
   }
 
+  /**
+   * Creates a product and its inventory row, and writes an audit entry.
+   * @param in the product details; prices must not be negative and the MRP must not be below the price
+   * @param actor the admin making the change
+   * @return the new product with stock numbers
+   * @throws ApiException validation error for a bad price, an invalid hot-sale window or an unknown unit
+   */
   @Transactional
   public AdminProduct create(ProductInput in, UUID actor) {
     validate(in);
@@ -405,6 +460,11 @@ public class CatalogService {
     return adminGet(id);
   }
 
+  /**
+   * Updates a product's details; a different {@code qtyOnHand} is applied as an {@code ADJUST} stock movement and a
+   * non-negative {@code lowThreshold} replaces the alert level.
+   * @throws ApiException {@code NOT_FOUND} when the product is unknown, or a validation error as for create
+   */
   @Transactional
   public AdminProduct update(UUID id, ProductInput in, UUID actor) {
     validate(in);
@@ -421,6 +481,12 @@ public class CatalogService {
     return adminGet(id);
   }
 
+  /**
+   * Adds or removes stock by a relative amount and records the stock movement and an audit entry.
+   * @param delta units to add (positive) or remove (negative)
+   * @param reason {@code ADJUST} for a correction; any other value is recorded as {@code RESTOCK}
+   * @param actor the admin making the change
+   */
   @Transactional
   public AdminProduct restock(UUID id, int delta, String reason, UUID actor) {
     adminGet(id);
@@ -429,6 +495,7 @@ public class CatalogService {
     return adminGet(id);
   }
 
+  /** Stores the already-uploaded picture path on the product and tells open screens the catalog changed. */
   @Transactional
   public AdminProduct setImage(UUID id, String url) {
     adminGet(id);
@@ -437,6 +504,7 @@ public class CatalogService {
     return adminGet(id);
   }
 
+  /** Creates a category and returns it. */
   @Transactional
   public Category createCategory(String nameEn, String nameGu, int sort, boolean active) {
     UUID id = categories.insert(nameEn, nameGu, sort, active);
@@ -444,6 +512,7 @@ public class CatalogService {
     return categories.find(id).orElseThrow();
   }
 
+  /** Changes a category's names, order and active flag; {@code NOT_FOUND} when it does not exist. */
   @Transactional
   public Category updateCategory(UUID id, String nameEn, String nameGu, int sort, boolean active) {
     categories.find(id).orElseThrow(() -> ApiException.notFound("Category"));
@@ -452,8 +521,10 @@ public class CatalogService {
     return categories.find(id).orElseThrow();
   }
 
+  /** Every hot-sale banner, including inactive and expired ones, ordered by start time. */
   public List<HotBanner> adminBanners() { return banners.all(); }
 
+  /** Creates a hot-sale banner. A null start or end means the banner has no limit on that side. */
   @Transactional
   public HotBanner createBanner(String title, String sub, String img, Instant start, Instant end, boolean active) {
     UUID id = banners.insert(title, nz(sub), img, start, end, active);
@@ -461,6 +532,7 @@ public class CatalogService {
     return banners.find(id).orElseThrow();
   }
 
+  /** Updates a hot-sale banner; {@code NOT_FOUND} when it does not exist. */
   @Transactional
   public HotBanner updateBanner(UUID id, String title, String sub, String img, Instant start, Instant end, boolean active) {
     banners.find(id).orElseThrow(() -> ApiException.notFound("Banner"));
@@ -469,6 +541,7 @@ public class CatalogService {
     return banners.find(id).orElseThrow();
   }
 
+  /** Deletes a hot-sale banner (deleting an unknown id does nothing). */
   @Transactional
   public void deleteBanner(UUID id) {
     banners.delete(id);

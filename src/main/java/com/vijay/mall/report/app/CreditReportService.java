@@ -27,8 +27,18 @@ public class CreditReportService {
   public record Debtor(UUID customerId, String name, String mobile, long balancePaise, long limitPaise,
                        Instant lastSaleAt, Instant lastPaymentAt) {}
 
+  /**
+   * How many counter bills were paid by one payment type and their total.
+   * @param type the bill's payment type, for example cash or credit
+   * @param totalPaise sum of the bills' totals, in paise
+   */
   public record TypeRow(String type, long bills, long totalPaise) {}
 
+  /**
+   * Credit given and recovered on one day.
+   * @param creditGivenPaise credit put on accounts by bills that day, in paise
+   * @param recoveredPaise credit customers paid off that day, in paise
+   */
   @Schema(name = "CreditDayRow")
 
   public record DayRow(LocalDate date, long creditGivenPaise, long recoveredPaise) {}
@@ -50,8 +60,15 @@ public class CreditReportService {
 
   private final Clock clock;
 
+  /** Creates the service. */
   public CreditReportService(Clock clock) { this.clock = clock; }
 
+  /**
+   * Credit given, returned, recovered and corrected in the period, what is still owed in total, recovery by cash/UPI/card, bills by payment type, a row per day and the biggest debtors.
+   * @param period {@code week}, {@code month} or {@code quarter} (default week); ignored when {@code from} is given
+   * @param from first day, or {@code null}
+   * @param to last day, included, or {@code null} for today
+   */
   @Transactional(readOnly = true)
   public Report report(String period, LocalDate from, LocalDate to) {
     ReportSummaryService.Range r = ReportSummaryService.range(period, from, to,

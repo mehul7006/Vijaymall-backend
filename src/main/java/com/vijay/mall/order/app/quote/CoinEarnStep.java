@@ -14,6 +14,7 @@ public class CoinEarnStep implements QuoteStep {
   private final WalletService wallet;
   private final Clock clock;
 
+  /** Creates the step. */
   public CoinEarnStep(WalletService wallet, Clock clock) {
     this.wallet = wallet;
     this.clock = clock;

@@ -41,6 +41,7 @@ public class PosCatalogService {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service. */
   public PosCatalogService(CatalogService catalog, PosCatalogRepository repo, ShopService shop, InventoryService inventory,
                            AuditService audit, Clock clock) {
     this.catalog = catalog;
@@ -91,6 +92,12 @@ public class PosCatalogService {
     return b != null && b.isAfter(a) ? b : a;
   }
 
+  /**
+   * Searches counter products by name, with price, GST, barcodes and stock on hand.
+   *
+   * @param page zero-based page number
+   * @param size page size
+   */
   public Page<PosProduct> search(String q, int page, int size) {
     Page<ProductData> found = catalog.posSearch(q, page, size);
     return new Page<>(views(found.items()), found.page(), found.size(), found.total());
@@ -115,6 +122,11 @@ public class PosCatalogService {
   }
 
   // ---------- admin ----------
+  /**
+   * The counter attributes of a product (how it is sold, PLU, GST, HSN, barcodes); defaults when none were saved.
+   *
+   * @throws ApiException 404 if the product does not exist
+   */
   public PosAttributes attributes(UUID productId) {
     catalog.adminGet(productId);
     ProductPos p = repo.find(productId).orElse(ProductPos.defaults(productId));

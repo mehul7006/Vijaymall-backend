@@ -18,13 +18,21 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Payment endpoints: the methods a customer can pick at checkout, the provider webhook, and the admin switches for the methods.
+ * <p>The webhook is public (it is authenticated by the provider's signature); the {@code /admin} routes are ADMIN only.
+ */
 @RestController
 @RequestMapping("/api/v1")
 public class PaymentController {
   private final PaymentService payments;
 
+  /** Creates the controller. */
   public PaymentController(PaymentService payments) { this.payments = payments; }
 
+  /**
+   * Payment methods customers may choose now: switched on by the admin and, for {@code ONLINE}, with provider keys set. Public to signed-in customers.
+   */
   @GetMapping("/payment-methods")
   public List<PaymentRepository.Setting> methods() { return payments.enabledMethods(); }
 
@@ -38,9 +46,13 @@ public class PaymentController {
     return ResponseEntity.ok().build();
   }
 
+  /** Both payment methods with their switch and whether they are set up (ADMIN). */
   @GetMapping("/admin/payment-methods")
   public List<PaymentService.AdminMethod> adminMethods() { return payments.adminMethods(); }
 
+  /**
+   * Switches methods on or off (ADMIN). Online cannot be switched on before the provider keys are set ({@code 422 PAYMENT_NOT_CONFIGURED}) and at least one method must stay on. Returns the new state.
+   */
   @PutMapping("/admin/payment-methods")
   public List<PaymentService.AdminMethod> save(@RequestBody List<PaymentRepository.Setting> in) {
     payments.saveMethods(in, CurrentUser.id());

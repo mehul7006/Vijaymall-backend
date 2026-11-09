@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class ReferenceNumbers {
   private final Supplier<List<ReferenceLookup>> sources;
 
+  /** Creates the service for Spring; the sources are looked up on each call. */
   @Autowired
   public ReferenceNumbers(ObjectProvider<ReferenceLookup> providers) {
     this.sources = () -> providers.orderedStream().toList();

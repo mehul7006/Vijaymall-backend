@@ -26,6 +26,7 @@ public class ShiftService {
   public record ShiftView(UUID id, UUID cashierId, Instant openedAt, long openingFloatPaise, Instant closedAt,
                           long expectedCashPaise, Long countedCashPaise, Long variancePaise, String note, boolean open) {}
 
+  /** Longest note accepted when closing a shift, in characters. */
   static final int MAX_NOTE = 200;
 
   private final PosShiftRepository shifts;
@@ -33,6 +34,7 @@ public class ShiftService {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service. */
   public ShiftService(PosShiftRepository shifts, PosReportRepository report, AuditService audit, Clock clock) {
     this.shifts = shifts;
     this.report = report;
@@ -55,6 +57,12 @@ public class ShiftService {
         s.variancePaise(), s.note(), s.open());
   }
 
+  /**
+   * Opens a shift with the cash float already in the drawer.
+   *
+   * @param openingFloatPaise cash in the drawer at the start, in paise (not negative)
+   * @throws ApiException 409 {@code SHIFT_ALREADY_OPEN} if the cashier already has one
+   */
   @Transactional
   public ShiftView open(UUID cashierId, long openingFloatPaise) {
     if (openingFloatPaise < 0) throw ApiException.validation("openingFloatPaise", "must not be negative");
@@ -76,6 +84,7 @@ public class ShiftService {
     return view(shifts.open(cashierId).orElseThrow(() -> ApiException.notFound("Open shift")));
   }
 
+  /** Whether the cashier currently has an open shift. */
   @Transactional(readOnly = true)
   public boolean hasOpenShift(UUID cashierId) { return shifts.open(cashierId).isPresent(); }
 

@@ -10,11 +10,20 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Stores and reads returns of online orders and their lines. */
 @Repository
 public class OrderReturnRepository {
   /** A line of a return: which order line, how many pieces, what was refunded for them, and whether they went back on the shelf. */
   public record Line(UUID orderItemId, int qty, long refundPaise, boolean restocked) {}
 
+  /**
+   * A recorded return.
+   * @param refundPaise the refund, in paise
+   * @param refundMode {@code ONLINE}, {@code CASH} or {@code NONE}
+   * @param coinsClawedBack earned coins taken back
+   * @param coinsRestored spent coins given back
+   * @param createdBy the staff member
+   */
   public record Return(UUID id, UUID orderId, String reason, long refundPaise, String refundMode, int coinsClawedBack,
                        int coinsRestored, UUID createdBy, Instant createdAt, List<Line> lines) {}
 
@@ -39,14 +48,18 @@ public class OrderReturnRepository {
         r.coinsRestored, r.createdBy, r.createdAt, byReturn.getOrDefault(r.id, List.of()))).toList();
   }
 
+  /** The return recorded with this idempotency key, if any. */
   public Optional<Return> findByIdem(String key) {
     return returns.findByIdemKey(key).map(r -> withLines(List.of(r)).get(0));
   }
 
+  /** The return with this id, with its lines. */
   public Optional<Return> find(UUID id) { return returns.findById(id).map(r -> withLines(List.of(r)).get(0)); }
 
+  /** The returns of one order, oldest first. */
   public List<Return> forOrder(UUID orderId) { return withLines(returns.findByOrderIdOrderByCreatedAtAsc(orderId)); }
 
+  /** Sums of refund and coin movements of the earlier returns of the order (zero when there are none). */
   public Totals totals(UUID orderId) {
     Object[] t = returns.totalsFor(orderId).get(0);
     return new Totals(((Number) t[0]).longValue(), ((Number) t[1]).intValue(), ((Number) t[2]).intValue());

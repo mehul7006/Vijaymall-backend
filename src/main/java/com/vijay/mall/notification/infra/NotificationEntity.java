@@ -6,6 +6,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/** Table {@code notification}: one in-app message for a user, unread until {@code readAt} is set. */
 @Entity
 @Table(name = "notification")
 class NotificationEntity extends BaseEntity {
@@ -17,5 +18,6 @@ class NotificationEntity extends BaseEntity {
   Instant readAt;
   Instant createdAt;
 
+  /** Required by JPA; not for application code. */
   protected NotificationEntity() {}
 }

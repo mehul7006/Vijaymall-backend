@@ -45,9 +45,13 @@ public class AppCaches implements MeterBinder {
     REPORT_SUMMARY("report-summary", 60, 60, "Sales report for a date range (heavy to compute)"),
     FLASH("flash", 15, 4, "Flash sale definitions (times, discounts, caps); units left are never cached");
 
+    /** Short name used in URLs, metrics and settings, for example {@code categories}. */
     public final String key;
+    /** Default life of a value, in seconds. */
     public final int ttlSeconds;
+    /** How many different keys the cache may hold before it is emptied. */
     public final int maxEntries;
+    /** What the cache holds, in plain words, for the admin screen. */
     public final String description;
 
     Name(String key, int ttlSeconds, int maxEntries, String description) {
@@ -57,6 +61,7 @@ public class AppCaches implements MeterBinder {
       this.description = description;
     }
 
+    /** The cache with this key, or {@code null} if there is none. */
     public static Name byKey(String key) {
       for (Name n : values()) if (n.key.equals(key)) return n;
       return null;
@@ -97,6 +102,7 @@ public class AppCaches implements MeterBinder {
     return settings == null ? name.ttlSeconds : settings.getInt(Settings.ttlOf(name));
   }
 
+  /** Creates the caches, all empty. */
   public AppCaches(Clock clock) {
     this.clock = clock;
     for (Name n : Name.values()) stores.put(n, new Store());
@@ -143,6 +149,7 @@ public class AppCaches implements MeterBinder {
     return loaded;
   }
 
+  /** Empties one cache and counts the clear. */
   public void invalidate(Name name) {
     Store s = stores.get(name);
     int dropped = s.map.size();
@@ -153,8 +160,10 @@ public class AppCaches implements MeterBinder {
         .addKeyValue("cache", name.key).addKeyValue("entries", dropped).log();
   }
 
+  /** Empties every cache. */
   public void invalidateAll() { for (Name n : Name.values()) invalidate(n); }
 
+  /** Current figures of every cache for the admin screen; a switched-off cache shows a life of 0. */
   public List<Stat> stats() {
     List<Stat> out = new ArrayList<>();
     for (Name n : Name.values()) {

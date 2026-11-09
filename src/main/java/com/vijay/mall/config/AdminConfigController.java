@@ -26,12 +26,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/config")
 public class AdminConfigController {
+  /**
+   * One section of the config screen.
+   * @param group the group name, for example {@code PAYMENT}
+   * @param label the heading shown to the admin
+   * @param items the settings in the group
+   */
   public record Group(String group, String label, List<RuntimeSettings.Row> items) {}
 
+  /**
+   * What the config screen loads.
+   * @param groups all settings, grouped
+   * @param issues plain-language warnings about half-finished set-ups
+   */
   public record View(List<Group> groups, List<String> issues) {}
 
+  /**
+   * Body of the save call.
+   * @param changes at least one change; a blank value clears the setting
+   */
   public record SaveBody(@NotEmpty List<RuntimeSettings.Change> changes) {}
 
+  /**
+   * Optional body of a connection test.
+   * @param args extras for the test, for example the mobile number or e-mail to send a test message to
+   */
   public record TestBody(Map<String, String> args) {}
 
   private static final Logger log = LoggerFactory.getLogger(AdminConfigController.class);
@@ -40,6 +59,7 @@ public class AdminConfigController {
   private final BootstrapStatus bootstrap;
   private final List<ConnectionTester> testers;
 
+  /** Creates the controller. */
   public AdminConfigController(RuntimeSettings settings, BootstrapStatus bootstrap, List<ConnectionTester> testers) {
     this.settings = settings;
     this.bootstrap = bootstrap;
@@ -54,6 +74,7 @@ public class AdminConfigController {
     return new View(List.copyOf(groups.values()), settings.issues());
   }
 
+  /** All runtime settings with where each value comes from; secrets are reported only as set or not set. */
   @GetMapping
   public View get() { return view(); }
 

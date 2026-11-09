@@ -25,6 +25,7 @@ public class ShopService implements ShopIdentity {
   private final AuditService audit;
   private final Clock clock;
 
+  /** Creates the service. */
   public ShopService(ShopSettingRepository repo, AuditService audit, Clock clock) {
     this.repo = repo;
     this.audit = audit;
@@ -37,17 +38,19 @@ public class ShopService implements ShopIdentity {
   @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
+  /** The shop settings, served from the cache when available because every bill and order reads them. */
   public ShopSetting get() {
     return caches == null ? repo.get() : caches.get(AppCaches.Name.SHOP, "1", repo::get);
   }
 
-  /** The shop's name, phone, address and number prefix, read from the settings each time so an edit shows at once. */
+  /** Tells open app screens when the shop details change; null in plain unit tests. */
   private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
   @Autowired(required = false)
   void setLive(LiveEvents live) { this.live = live; }
 
+  /** The shop's name, phone, address and number prefix, read from the settings each time so an edit shows at once. */
   @Override
   public Info identity() {
     ShopSetting s = get();
@@ -55,6 +58,12 @@ public class ShopService implements ShopIdentity {
         s.details() == null ? "" : s.details(), s.invoicePrefix());
   }
 
+  /**
+   * Validates and saves the shop settings, audits the change and tells open app screens.
+   *
+   * @throws ApiException 400 for a missing name, invalid GSTIN, state code, UPI id, invoice prefix, weighed prefix or
+   *     too long details text
+   */
   @Transactional
   public ShopSetting save(ShopSetting in, UUID actor) {
     if (in.shopName() == null || in.shopName().isBlank()) throw ApiException.validation("shopName", "shop name is required");

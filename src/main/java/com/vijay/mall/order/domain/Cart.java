@@ -11,10 +11,16 @@ import java.util.UUID;
 /** A customer's saved basket. Lines are pack ids, exactly what POST /cart/quote accepts. */
 @Schema(name = "Basket")
 public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coinMode, Integer percent, Instant updatedAt) {
+  /** The most distinct lines a saved basket may hold. */
   public static final int MAX_LINES = 100;
   /** The most units of one product in a basket; the same constant the quote and order calls use. */
   public static final int MAX_QTY = OrderLimits.MAX_LINE_QTY;
 
+  /**
+   * One basket line.
+   * @param productId the product (pack) id
+   * @param qty units
+   */
   @Schema(name = "BasketLine")
 
   public record Line(UUID productId, int qty) {}

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminPaymentAnomalyController {
   private final PaymentService payments;
 
+  /** Creates the controller. */
   public AdminPaymentAnomalyController(PaymentService payments) { this.payments = payments; }
 
   /** Newest first. kind is MISMATCH (wrong amount) or DUPLICATE (second payment on a paid order). */

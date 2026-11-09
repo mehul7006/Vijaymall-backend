@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Composite primary key (redemption, lot) of {@code coin_lot_use}. */
 class LotUseId implements Serializable {
   UUID redeemId;
   UUID lotId;

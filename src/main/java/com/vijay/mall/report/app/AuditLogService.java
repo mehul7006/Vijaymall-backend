@@ -30,6 +30,7 @@ public class AuditLogService {
   private final AuditQuery audit;
   private final UserRepository users;
 
+  /** Creates the service. */
   public AuditLogService(AuditQuery audit, UserRepository users) {
     this.audit = audit;
     this.users = users;

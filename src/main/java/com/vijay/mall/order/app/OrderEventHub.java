@@ -77,6 +77,7 @@ public class OrderEventHub {
   private Instant stockAt;
   private final Map<String, Instant> pendingAreas = new LinkedHashMap<>();
 
+  /** Creates the hub; each client is drained by a virtual thread. */
   public OrderEventHub() { this(Executors.newVirtualThreadPerTaskExecutor()); }
 
   /** Tests pass a direct executor so delivery is immediate. */

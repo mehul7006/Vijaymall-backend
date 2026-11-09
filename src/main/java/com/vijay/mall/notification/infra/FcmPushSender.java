@@ -45,6 +45,7 @@ public class FcmPushSender implements PushSender {
   private static final int PARALLEL = 8;
   private static final Duration REFRESH_MARGIN = Duration.ofMinutes(5);
 
+  /** The parsed Firebase service account: project, client e-mail, private key and token address. */
   private record Account(String raw, String projectId, String email, PrivateKey key, String tokenUri) {}
 
   private final RuntimeSettings settings;
@@ -61,6 +62,10 @@ public class FcmPushSender implements PushSender {
   /** guarded by this */
   private Instant refreshAt;
 
+  /**
+   * Creates the sender (wired by Spring).
+   * @param baseUrl base address of the FCM API; overridable so tests can point it at a fake server
+   */
   public FcmPushSender(RuntimeSettings settings, DeviceRepository devices, JsonMapper json, Clock clock,
                        @Value("${app.fcm.base-url:https://fcm.googleapis.com}") String baseUrl) {
     this.settings = settings;

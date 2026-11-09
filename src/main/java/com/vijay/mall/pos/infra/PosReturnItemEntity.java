@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import java.util.UUID;
 
+/** A row of {@code pos_return_item}: one returned line of a credit note. */
 @Entity
 @Table(name = "pos_return_item")
 class PosReturnItemEntity extends BaseEntity {
@@ -16,5 +17,6 @@ class PosReturnItemEntity extends BaseEntity {
   long cgstPaise;
   long sgstPaise;
 
+  /** Required by JPA; not for application code. */
   protected PosReturnItemEntity() {}
 }

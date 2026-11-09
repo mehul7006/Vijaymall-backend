@@ -9,5 +9,6 @@ public interface ShopIdentity {
   /** details is the longer "about the shop" text; orderPrefix starts every order and bill number. */
   record Info(String name, String phone, String address, String promise, String details, String orderPrefix) {}
 
+  /** The current shop details from the shop settings. */
   Info identity();
 }

@@ -14,5 +14,6 @@ class CouponCategoryEntity {
   @Id UUID couponId;
   @Id UUID categoryId;
 
+  /** Required by JPA; not for application code. */
   protected CouponCategoryEntity() {}
 }

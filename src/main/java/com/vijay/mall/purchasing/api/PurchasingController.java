@@ -32,13 +32,18 @@ public class PurchasingController {
   @Autowired
   void setOps(AdminOps ops) { this.ops = ops; }
 
+  /**
+   * Request body for receiving a delivery: supplier name (required), optional invoice number and note, and at least one product line.
+   */
   public record PurchaseBody(String supplierName, String invoiceNo, String note, @NotEmpty List<PurchaseService.ItemInput> items) {}
 
+  /** Request body for a stock take: an optional note and at least one counted product. */
   public record StockTakeBody(String note, @NotEmpty List<StockTakeService.Count> items) {}
 
   private final PurchaseService purchases;
   private final StockTakeService stockTakes;
 
+  /** Creates the controller. */
   public PurchasingController(PurchaseService purchases, StockTakeService stockTakes) {
     this.purchases = purchases;
     this.stockTakes = stockTakes;
@@ -51,11 +56,13 @@ public class PurchasingController {
     return purchases.receive(CurrentUser.id(), key, new PurchaseService.Input(b.supplierName(), b.invoiceNo(), b.note(), b.items()));
   }
 
+  /** Lists supplier deliveries, newest first. Admin only. */
   @GetMapping("/purchases")
   public Page<PurchaseView> list(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
     return purchases.list(page, size);
   }
 
+  /** Returns one delivery with its lines; 404 when unknown. Admin only. */
   @GetMapping("/purchases/{id}")
   public PurchaseView get(@PathVariable UUID id) { return purchases.get(id); }
 
