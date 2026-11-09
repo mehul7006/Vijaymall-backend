@@ -129,6 +129,18 @@ public final class Settings {
   /** How many days back each settlement sync reads. */
   public static final Def PAYTM_SETTLEMENT_SYNC_DAYS = number("paytm.settlement.syncDays", Group.PAYTM, "Settlement days to read each time",
       "Each sync asks Paytm for this many days back, so late settlements are caught.", "app.paytm.settlement.sync-days", "7", 1, 60);
+  /** The money account that receives online payments (blank = the active GATEWAY account whose provider matches the payment's provider). */
+  public static final Def PAYMENT_GATEWAY_ACCOUNT = text("payment.gatewayAccountId", Group.PAYMENT, "Account for online payments",
+      "Id of the money account online payments are received in. Blank = the active gateway account named after the provider (for example razorpay).",
+      "app.payment.gateway-account-id", "", 40);
+  /** Which configured gateway customers pay with (blank = the server's configured one). Several gateways may be set up at once. */
+  public static final Def ONLINE_PROVIDER = text("payment.onlineProvider", Group.PAYMENT, "Gateway used for online orders",
+      "Provider code of the gateway the customer app uses, for example razorpay. Blank = the server's default. Every set-up gateway keeps receiving webhooks.",
+      "app.payment.online-provider-choice", "", 40);
+  /** Days a provider normally takes to settle a captured payment. */
+  public static final Def SETTLEMENT_DAYS = number("payment.settlementDays", Group.PAYMENT, "Settlement cycle (days)",
+      "A captured payment still unsettled after this many days (plus one day of grace) is listed as overdue.",
+      "app.payment.settlement-days", "2", 0, 30);
 
   // ---- push (Firebase Cloud Messaging)
   /** Firebase service account JSON used for push notifications (encrypted). */
@@ -231,6 +243,19 @@ public final class Settings {
           + "minimum order. CLAWBACK_BELOW_MINIMUM: if what is left of the covered items falls below the coupon's minimum order, the "
           + "coupon discount on the items kept is taken back from the refund of the returned items (never below zero).",
       "app.returns.coupon-policy", "KEEP", "KEEP", "CLAWBACK_BELOW_MINIMUM");
+  /** Money account used when a cash line names none. */
+  public static final Def POS_DEFAULT_ACCOUNT_CASH = text("pos.defaultAccount.CASH", Group.COUNTER, "Default account for cash",
+      "Id of the money account cash goes to when the till does not say. Blank = the cash drawer.", "app.pos.default-account.cash", "", 40);
+  /** Money account used when a UPI line names none. */
+  public static final Def POS_DEFAULT_ACCOUNT_UPI = text("pos.defaultAccount.UPI", Group.COUNTER, "Default account for UPI",
+      "Id of the money account counter UPI goes to when the till does not say. Blank = not assigned.", "app.pos.default-account.upi", "", 40);
+  /** Money account used when a card line names none. */
+  public static final Def POS_DEFAULT_ACCOUNT_CARD = text("pos.defaultAccount.CARD", Group.COUNTER, "Default account for cards",
+      "Id of the money account card payments go to when the till does not say. Blank = not assigned.", "app.pos.default-account.card", "", 40);
+  /** Which card terminal adapter the till uses. */
+  public static final Def POS_TERMINAL_PROVIDER = text("pos.terminalProvider", Group.COUNTER, "Card terminal adapter",
+      "manual = the cashier completes the payment on the machine and types the approval code. A brand adapter name is added here when it is built.",
+      "app.pos.terminal-provider", "manual", 40);
 
   // ---- GST and bills
   /** Whether counter bill totals are rounded to the nearest rupee. */
@@ -295,6 +320,7 @@ public final class Settings {
       PAYTM_ENABLED, PAYTM_ENVIRONMENT, PAYTM_BASE_URL, PAYTM_MID, PAYTM_MERCHANT_KEY, PAYTM_CHANNEL_ID, PAYTM_POLL_SECONDS,
       PAYTM_WAIT_SECONDS, PAYTM_AUTO_ACCEPT, PAYTM_PAYMENT_MODE, PAYTM_TIMEOUT_CONFIG, PAYTM_SETTLEMENT_ENABLED, PAYTM_SETTLEMENT_AUTH,
       PAYTM_SETTLEMENT_TOKEN, PAYTM_SETTLEMENT_BASE_URL, PAYTM_SETTLEMENT_SYNC_DAYS,
+      PAYMENT_GATEWAY_ACCOUNT, ONLINE_PROVIDER, SETTLEMENT_DAYS, POS_DEFAULT_ACCOUNT_CASH, POS_DEFAULT_ACCOUNT_UPI, POS_DEFAULT_ACCOUNT_CARD, POS_TERMINAL_PROVIDER,
       FCM_SERVICE_ACCOUNT, SMS_CHANNEL, SMS_HTTP_URL, SMS_HTTP_METHOD, SMS_HTTP_HEADERS, SMS_HTTP_BODY, SMS_SENDER_ID, SMS_DLT_TEMPLATE_ID,
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,

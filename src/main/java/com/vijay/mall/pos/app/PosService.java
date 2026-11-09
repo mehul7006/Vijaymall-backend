@@ -22,6 +22,7 @@ import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.HoldView;
 import com.vijay.mall.pos.app.PosViews.Item;
 import com.vijay.mall.pos.app.PosViews.ManualDiscount;
+import com.vijay.mall.payment.app.MoneyAccountService;
 import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.Rung;
 import com.vijay.mall.pos.app.PosViews.RungLine;
@@ -232,6 +233,27 @@ public class PosService implements ReferenceLookup {
     return new Priced(lines, drafts);
   }
 
+  private MoneyAccountService moneyAccounts;
+
+  /** Optional (plain unit tests run without it): names the money account of every payment line. */
+  @Autowired(required = false)
+  void setMoneyAccounts(MoneyAccountService moneyAccounts) { this.moneyAccounts = moneyAccounts; }
+
+  /**
+   * Gives every payment line its money account: the one the till named (checked), else the shop's default for the mode. An offline bill
+   * keeps an account that was switched off after the sale was rung.
+   */
+  private List<Pay> tagged(List<Pay> pays, boolean offline) {
+    if (moneyAccounts == null) return pays;
+    List<Pay> out = new ArrayList<>();
+    for (int i = 0; i < pays.size(); i++) {
+      Pay p = pays.get(i);
+      out.add(new Pay(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId(), moneyAccounts.counterAccount(p.mode(), p.moneyAccountId(),
+          "payments[" + i + "].moneyAccountId", offline), p.terminalId()));
+    }
+    return out;
+  }
+
   private FlashPricing flash;
 
   /** Optional (plain unit tests run without it): flash sale prices at the counter (items sold by the piece only; returns do not give units back). */
@@ -427,7 +449,7 @@ public class PosService implements ReferenceLookup {
     Manual manual = resolveManual(cashierId, admin, in.manualDiscount(), subtotal,
         subtotal - q.couponDiscountPaise() - q.coinDiscountPaise());
     BillCalculator.Bill bill = bill(priced.drafts(), q, manual.amountPaise());
-    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
+    List<Pay> pays = tagged(PayModes.normalize(in.payments(), true, "payments"), in.offline());
     List<PaymentRules.Line> payLines = pays.stream().map(p -> new PaymentRules.Line(p.mode(), p.amountPaise(), p.reference())).toList();
     long roundOff = roundOff(bill.totalPaise());
     long payable = bill.totalPaise() + roundOff;
@@ -475,7 +497,7 @@ public class PosService implements ReferenceLookup {
     long[] couponShares = q.lines().size() == bill.lines().size()
         ? q.lines().stream().mapToLong(Quote.Line::couponDiscountPaise).toArray() : null; // the coupon's part of each line
     List<SaleItemRecord> items = saleItems(bill, itemIds, costs, couponShares);
-    List<PaymentRecord> payments = paid.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId())).toList();
+    List<PaymentRecord> payments = paid.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId(), p.moneyAccountId(), p.terminalId())).toList();
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), payable, bill.tax().taxable(), bill.tax().cgst(),
         bill.tax().sgst(), earned, in.cashTenderedPaise(), change, soldAt, items, payments, PaymentRules.classify(payLines),
@@ -519,7 +541,7 @@ public class PosService implements ReferenceLookup {
       if (terminalPayments == null) throw ApiException.validation(field, "the card machine is not available");
       TerminalPaymentService.Confirmed c = terminalPayments.attach(p.terminalPaymentId(), saleId, p.amountPaise(), p.mode(), field, cashierId);
       String ref = p.reference() == null || p.reference().isBlank() ? c.reference() : p.reference();
-      out.add(new Pay(p.mode(), p.amountPaise(), ref, p.terminalPaymentId()));
+      out.add(new Pay(p.mode(), p.amountPaise(), ref, p.terminalPaymentId(), p.moneyAccountId(), p.terminalId()));
     }
     return out;
   }
@@ -601,7 +623,7 @@ public class PosService implements ReferenceLookup {
     if (coupon || coins) {
       throw ApiException.validation("cart", "a coupon or coin redemption cannot be checked offline: ring this bill without it");
     }
-    List<Pay> pays = PayModes.normalize(in.payments(), true, "payments");
+    List<Pay> pays = tagged(PayModes.normalize(in.payments(), true, "payments"), true);
     for (int i = 0; i < pays.size(); i++) {
       if (pays.get(i).terminalPaymentId() != null) {
         throw ApiException.validation("payments[" + i + "].terminalPaymentId", "a card machine payment cannot be used on an offline bill");
@@ -672,7 +694,7 @@ public class PosService implements ReferenceLookup {
     String fy = InvoiceNumbers.financialYear(soldAt);
     String invoiceNo = InvoiceNumbers.format(shopInfo.invoicePrefix(), fy, counters.next("INVOICE", fy));
     List<SaleItemRecord> items = saleItems(bill, itemIds, offlineTake.costs(), null); // offline bills carry no coupon
-    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
+    List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), null, p.moneyAccountId(), p.terminalId())).toList();
     // the subtotal is what the lines cost after the till's own line discounts, so the receipt adds up: subtotal - discount +- round off = total
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, afterLineDiscounts, null, 0, 0, 0, payable,
         bill.tax().taxable(), bill.tax().cgst(), bill.tax().sgst(), 0, in.cashTenderedPaise(), change, soldAt, items, payments,

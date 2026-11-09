@@ -29,14 +29,25 @@ public final class PosViews {
 
   /**
    * One payment part: mode ({@code CASH}, {@code UPI}, {@code CARD} or {@code CREDIT} on a sale), amount in paise and
-   * an optional reference such as a UPI transaction id.
+   * an optional reference such as a UPI transaction id or a card approval code, the optional money account the money went to
+   * and, for a card machine, the terminal id.
    */
   public record Pay(@Size(max = 20) String mode,
                     @Min(value = 0, message = "must be at least 0") @Max(value = MAX_PAISE, message = "must be at most 100000000") long amountPaise,
                     @Size(max = 100) String reference,
-                    @Schema(description = "Optional: id of a SUCCESS card machine payment (mode CARD or UPI, same amount, not used before)") UUID terminalPaymentId) {
-    /** A payment part without a card machine payment (the shape older clients send). */
-    public Pay(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null); }
+                    @Schema(description = "Optional: id of a SUCCESS card machine payment (mode CARD or UPI, same amount, not used before)") UUID terminalPaymentId,
+                    @Schema(description = "Optional: the money account the money went to; blank = the shop's default account for the mode") UUID moneyAccountId,
+                    @Size(max = 60) String terminalId) {
+    /** A payment part with no card machine payment, money account or terminal (the shape older clients send). */
+    public Pay(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null, null, null); }
+
+    /** A payment part for a card machine payment, with the default account. */
+    public Pay(String mode, long amountPaise, String reference, UUID terminalPaymentId) { this(mode, amountPaise, reference, terminalPaymentId, null, null); }
+
+    /** A payment part with a money account and terminal but no card machine payment. */
+    public Pay(String mode, long amountPaise, String reference, UUID moneyAccountId, String terminalId) {
+      this(mode, amountPaise, reference, null, moneyAccountId, terminalId);
+    }
   }
 
   /** The largest amount any single money input accepts: 100,000,000 paise (10 lakh rupees). */

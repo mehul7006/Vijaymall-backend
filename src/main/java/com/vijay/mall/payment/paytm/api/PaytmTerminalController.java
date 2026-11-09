@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** The till's side of the card machine: list machines, start, read, cancel and void a card payment. Cashier or admin. */
 @RestController
 @RequestMapping("/api/v1/pos")
-public class PosTerminalController {
+public class PaytmTerminalController {
   /**
    * Body of a new card payment.
    * @param terminalId our id of the machine (from the terminal list)
@@ -40,7 +40,7 @@ public class PosTerminalController {
   private final TerminalPaymentService payments;
 
   /** Creates the controller. */
-  public PosTerminalController(PaymentTerminalService terminals, TerminalPaymentService payments) {
+  public PaytmTerminalController(PaymentTerminalService terminals, TerminalPaymentService payments) {
     this.terminals = terminals;
     this.payments = payments;
   }

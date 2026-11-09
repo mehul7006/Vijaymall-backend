@@ -25,7 +25,7 @@ final class PayModes {
       Pay p = pays.get(i);
       if (p == null) throw ApiException.validation(field + "[" + i + "]", "payment line is empty");
       try {
-        out.add(new Pay(PaymentRules.requireMode(p.mode(), allowCredit), p.amountPaise(), p.reference(), p.terminalPaymentId()));
+        out.add(new Pay(PaymentRules.requireMode(p.mode(), allowCredit), p.amountPaise(), p.reference(), p.terminalPaymentId(), p.moneyAccountId(), p.terminalId()));
       } catch (IllegalArgumentException e) {
         throw ApiException.validation(field + "[" + i + "].mode", e.getMessage());
       }

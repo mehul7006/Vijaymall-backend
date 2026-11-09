@@ -19,6 +19,9 @@ public sealed interface PaymentEvent {
    */
   record Failed(String eventId, String providerOrderId, String reason) implements PaymentEvent {}
 
+  /** The provider paid out a settlement; the shop pulls its details. */
+  record SettlementProcessed(String eventId, String settlementId) implements PaymentEvent {}
+
   /** An event type the shop does not act on. */
   record Ignored(String eventId) implements PaymentEvent {}
 }

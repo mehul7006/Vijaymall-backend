@@ -22,6 +22,10 @@ class PaymentEntity extends BaseEntity {
   String providerRef;
   String failureReason;
   Instant expiresAt;
+  /** The money account that received the payment; null on rows from before accounts existed. */
+  UUID moneyAccountId;
+  /** When the provider reported the capture. */
+  Instant capturedAt;
   Instant createdAt;
   Instant updatedAt;
 

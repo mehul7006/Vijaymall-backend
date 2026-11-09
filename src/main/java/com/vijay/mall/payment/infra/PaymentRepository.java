@@ -55,10 +55,17 @@ public class PaymentRepository {
     return new Payment(e.id, e.orderId, e.provider, e.amountPaise, e.status, e.providerOrderId, e.providerRef);
   }
 
-  /** Inserts a new payment (normally with status {@code CREATED}). */
+  /** Inserts a new payment (normally with status {@code CREATED}) that belongs to no money account. */
   @Transactional
   public void insert(UUID id, UUID orderId, String provider, String method, long amount, String status,
                      String providerOrderId, Instant now) {
+    insert(id, orderId, provider, method, amount, status, providerOrderId, now, null);
+  }
+
+  /** Inserts a new payment received in the given money account ({@code null} = unassigned). */
+  @Transactional
+  public void insert(UUID id, UUID orderId, String provider, String method, long amount, String status,
+                     String providerOrderId, Instant now, UUID moneyAccountId) {
     PaymentEntity e = new PaymentEntity();
     e.id = id;
     e.orderId = orderId;
@@ -67,6 +74,7 @@ public class PaymentRepository {
     e.amountPaise = amount;
     e.status = status;
     e.providerOrderId = providerOrderId;
+    e.moneyAccountId = moneyAccountId;
     e.createdAt = now;
     e.updatedAt = now;
     payments.save(e);
@@ -94,6 +102,7 @@ public class PaymentRepository {
   public void setStatus(UUID id, String status, String providerRef, String failure, Instant now) {
     payments.findById(id).ifPresent(e -> {
       e.status = status;
+      if ("CAPTURED".equals(status) && e.capturedAt == null) e.capturedAt = now;
       if (providerRef != null) e.providerRef = providerRef;
       e.failureReason = failure;
       e.updatedAt = now;
@@ -189,6 +198,7 @@ public class PaymentRepository {
     e.providerPaymentRef = providerPaymentRef;
     e.id = UUID.randomUUID();
     e.paymentId = paymentId;
+    e.moneyAccountId = payments.findById(paymentId).map(p -> p.moneyAccountId).orElse(null); // a refund follows its payment's account
     e.amountPaise = amount;
     e.status = status;
     e.providerRef = ref;

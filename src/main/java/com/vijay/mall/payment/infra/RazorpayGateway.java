@@ -68,9 +68,12 @@ public class RazorpayGateway implements PaymentGateway {
   }
 
   /** Signs the call with the current keys. A key id without a secret is left unauthenticated: configured() already says no. */
-  private void auth(HttpHeaders h) {
+  void auth(HttpHeaders h) {
     if (!keyId().isBlank() && !keySecret().isBlank()) h.setBasicAuth(keyId(), keySecret());
   }
+
+  /** The HTTP client (timeouts, base URL) the settlement adapter shares with this gateway. */
+  RestClient client() { return http; }
 
   @Override public String provider() { return "razorpay"; }
 
@@ -106,6 +109,11 @@ public class RazorpayGateway implements PaymentGateway {
       JsonNode root = json.readTree(rawBody);
       String type = root.path("event").asString("");
       JsonNode pay = root.path("payload").path("payment").path("entity");
+      if ("settlement.processed".equals(type)) {
+        String sid = root.path("payload").path("settlement").path("entity").path("id").asString(null);
+        if (eventId.isBlank()) eventId = type + ":" + sid;
+        return sid == null ? new PaymentEvent.Ignored(eventId) : new PaymentEvent.SettlementProcessed(eventId, sid);
+      }
       String orderId = pay.path("order_id").asString(null);
       if (eventId.isBlank()) eventId = type + ":" + pay.path("id").asString("");
       return switch (type) {

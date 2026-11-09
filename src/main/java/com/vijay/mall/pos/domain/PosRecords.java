@@ -55,10 +55,23 @@ public final class PosRecords {
         }
     }
 
-    /** One stored payment on a bill or refund: mode, amount in paise and reference. */
-    public record PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId) {
-        /** A payment without a card machine payment. */
-        public PaymentRecord(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null); }
+    /**
+     * One stored payment on a bill or refund: mode, amount in paise, reference, the card machine payment it came from, the money
+     * account it went to and the terminal id.
+     */
+    public record PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId, UUID moneyAccountId, String terminalId) {
+        /** A stored payment with no card machine payment, money account or terminal. */
+        public PaymentRecord(String mode, long amountPaise, String reference) { this(mode, amountPaise, reference, null, null, null); }
+
+        /** A stored payment from a card machine payment, with the default account. */
+        public PaymentRecord(String mode, long amountPaise, String reference, UUID terminalPaymentId) {
+            this(mode, amountPaise, reference, terminalPaymentId, null, null);
+        }
+
+        /** A stored payment with a money account and terminal but no card machine payment. */
+        public PaymentRecord(String mode, long amountPaise, String reference, UUID moneyAccountId, String terminalId) {
+            this(mode, amountPaise, reference, null, moneyAccountId, terminalId);
+        }
     }
 
     /**

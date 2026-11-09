@@ -7,6 +7,7 @@ import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
 import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.payment.app.MoneyAccountService;
 import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.ReturnInput;
 import com.vijay.mall.pos.app.PosViews.ReturnLine;
@@ -76,6 +77,19 @@ public class PosReturnService {
   }
 
   /** Cashiers may take back goods from bills this recent; older bills need an admin (0 = no limit). */
+  private MoneyAccountService moneyAccounts;
+
+  /** Optional (plain unit tests run without it): a refund goes back to the money account its bill was paid into. */
+  @Autowired(required = false)
+  void setMoneyAccounts(MoneyAccountService moneyAccounts) { this.moneyAccounts = moneyAccounts; }
+
+  /** The account a refund line follows: the one named, else the account of the bill's line of the same mode, else the mode's default. */
+  private UUID refundAccount(SaleRecord sale, Pay p) {
+    if (moneyAccounts == null) return p.moneyAccountId();
+    if (p.moneyAccountId() != null) return moneyAccounts.counterAccount(p.mode(), p.moneyAccountId(), "refunds.moneyAccountId", true);
+    return moneyAccounts.refundAccount(p.mode(), sale.payments().stream().filter(x -> p.mode().equals(x.mode())).map(PaymentRecord::moneyAccountId).toList());
+  }
+
   private int cashierReturnDays = 7;
   private RuntimeSettings settings;
   private DefectiveService defective;
@@ -288,7 +302,7 @@ public class PosReturnService {
     long taxable = items.stream().mapToLong(ReturnItemRecord::taxablePaise).sum();
     long cgst = items.stream().mapToLong(ReturnItemRecord::cgstPaise).sum();
     long sgst = items.stream().mapToLong(ReturnItemRecord::sgstPaise).sum();
-    List<PaymentRecord> refundRecords = refunds.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
+    List<PaymentRecord> refundRecords = refunds.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), refundAccount(sale, p), null)).toList();
     sales.insertReturn(new ReturnRecord(returnId, noteNo, saleId, cashierId, in.reason() == null ? "" : in.reason().strip(),
         refundTotal, taxable, cgst, sgst, clawed, restore, now, items, refundRecords, creditAdjust, clawbackTotal), idemKey);
     if (creditAdjust > 0) credit.recordReturn(sale.customerId(), saleId, returnId, noteNo, creditAdjust, cashierId, now);

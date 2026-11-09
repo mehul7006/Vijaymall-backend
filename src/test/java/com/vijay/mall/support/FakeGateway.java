@@ -40,6 +40,7 @@ public class FakeGateway implements PaymentGateway {
       String id = n.path("eventId").asString();
       return switch (n.path("type").asString()) {
         case "captured" -> new PaymentEvent.Captured(id, n.path("providerOrderId").asString(), "pay_" + id, n.path("amount").asLong());
+        case "settlement" -> new PaymentEvent.SettlementProcessed(id, n.path("settlementId").asString());
         case "failed" -> new PaymentEvent.Failed(id, n.path("providerOrderId").asString(), "declined");
         default -> new PaymentEvent.Ignored(id);
       };

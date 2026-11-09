@@ -104,6 +104,8 @@ public class PosSaleRepository {
       r.amountPaise = p.amountPaise();
       r.reference = p.reference();
       r.terminalPaymentId = p.terminalPaymentId();
+      r.moneyAccountId = p.moneyAccountId();
+      r.terminalId = p.terminalId();
       payments.save(r);
     });
     items.flush();
@@ -160,6 +162,7 @@ public class PosSaleRepository {
       x.mode = p.mode();
       x.amountPaise = p.amountPaise();
       x.reference = p.reference();
+      x.moneyAccountId = p.moneyAccountId();
       refunds.save(x);
     });
     returnItems.flush();
@@ -205,7 +208,7 @@ public class PosSaleRepository {
         .collect(Collectors.groupingBy(i -> i.saleId, Collectors.mapping(PosSaleRepository::toItem, Collectors.toList())));
     Map<UUID, List<PaymentRecord>> pays = payments.findBySaleIdIn(ids).stream()
         .collect(Collectors.groupingBy(p -> p.saleId,
-            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference, p.terminalPaymentId), Collectors.toList())));
+            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference, p.terminalPaymentId, p.moneyAccountId, p.terminalId), Collectors.toList())));
     return list.stream().map(s -> new SaleRecord(s.id, s.invoiceNo, s.cashierId, s.customerId, s.customerMobile,
         s.subtotalPaise, s.couponCode, s.couponDiscountPaise, s.coinsUsed, s.coinDiscountPaise, s.totalPaise,
         s.taxablePaise, s.cgstPaise, s.sgstPaise, s.coinsEarned, s.tenderedPaise, s.changePaise, s.createdAt,
@@ -246,7 +249,7 @@ public class PosSaleRepository {
             Collectors.toList())));
     Map<UUID, List<PaymentRecord>> rf = refunds.findByReturnIdIn(ids).stream()
         .collect(Collectors.groupingBy(p -> p.returnId,
-            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference), Collectors.toList())));
+            Collectors.mapping(p -> new PaymentRecord(p.mode, p.amountPaise, p.reference, p.moneyAccountId, null), Collectors.toList())));
     return list.stream().map(r -> new ReturnRecord(r.id, r.creditNoteNo, r.saleId, r.cashierId, r.reason, r.refundPaise,
         r.taxablePaise, r.cgstPaise, r.sgstPaise, r.coinsClawedBack, r.coinsRestored, r.createdAt,
         its.getOrDefault(r.id, List.of()), rf.getOrDefault(r.id, List.of()), r.creditAdjustPaise, r.couponClawbackPaise)).toList();
