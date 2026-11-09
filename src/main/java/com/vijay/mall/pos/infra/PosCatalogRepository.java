@@ -87,4 +87,16 @@ public class PosCatalogRepository {
     barcodes.flush();
     return Optional.empty();
   }
+
+  /** Adds one barcode to a product without touching its other barcodes; false when the code already belongs to a product. */
+  @Transactional
+  public boolean addBarcode(UUID productId, String code, Instant now) {
+    if (barcodes.existsById(code)) return false;
+    ProductBarcodeEntity b = new ProductBarcodeEntity();
+    b.code = code;
+    b.productId = productId;
+    b.createdAt = now;
+    barcodes.saveAndFlush(b);
+    return true;
+  }
 }

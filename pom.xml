@@ -22,6 +22,9 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <springdoc.version>3.2.0</springdoc.version>
     <jacoco.version>0.8.14</jacoco.version>
+    <!-- Barcode labels: ZXing core draws the barcodes (Apache-2.0), Apache PDFBox writes the vector PDF (Apache-2.0). -->
+    <zxing.version>3.5.4</zxing.version>
+    <pdfbox.version>3.0.6</pdfbox.version>
   </properties>
 
   <dependencies>
@@ -44,6 +47,10 @@
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
       <version>${springdoc.version}</version>
     </dependency>
+
+    <!-- barcode labels -->
+    <dependency><groupId>com.google.zxing</groupId><artifactId>core</artifactId><version>${zxing.version}</version></dependency>
+    <dependency><groupId>org.apache.pdfbox</groupId><artifactId>pdfbox</artifactId><version>${pdfbox.version}</version></dependency>
 
     <!-- tests -->
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>

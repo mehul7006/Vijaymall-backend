@@ -11,10 +11,12 @@ import com.vijay.mall.pos.app.PosViews.PosProduct;
 import com.vijay.mall.pos.app.PosViews.Scan;
 import com.vijay.mall.pos.domain.BarcodeParser;
 import com.vijay.mall.pos.domain.DisplayNames;
+import com.vijay.mall.pos.domain.Gtin;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.domain.ScannedCode;
 import com.vijay.mall.pos.domain.SoldBy;
+import com.vijay.mall.pos.domain.VariableMeasureBarcode;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.PosCatalogRepository;
 import java.time.Clock;
@@ -28,6 +30,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,17 +58,17 @@ public class PosCatalogService {
     this.clock = clock;
   }
 
+  private VariableMeasureBarcode variableMeasure;
+
+  /** Optional (plain unit tests run without it): the weighing-scale barcode reader, which only reads when its setting is on. */
+  @Autowired(required = false)
+  void setVariableMeasure(VariableMeasureBarcode variableMeasure) { this.variableMeasure = variableMeasure; }
+
   // ---------- counter ----------
   /** Resolves a scanned code. Unknown codes and inactive products are 404 so the cashier can search by name instead. */
   public Scan scan(String raw) {
     ShopSetting s = shop.get();
-    ScannedCode code;
-    try {
-      code = BarcodeParser.parse(raw, s.weighedPrefix(), s.weighedMode())
-          .orElseThrow(() -> ApiException.validation("code", "code is empty"));
-    } catch (IllegalArgumentException e) {
-      throw ApiException.validation("code", e.getMessage());
-    }
+    ScannedCode code = decode(raw, s);
     return switch (code) {
       case ScannedCode.Plain p -> {
         UUID id = repo.productByBarcode(p.code()).orElseThrow(() -> ApiException.notFound("Barcode"));
@@ -82,6 +85,26 @@ public class PosCatalogService {
         yield new Scan(product, (int) grams, product.soldBy().lineAmount(product.pricePaise(), (int) grams));
       }
     };
+  }
+
+  /**
+   * Reads a scanned string. A code that is a saved barcode is always an ordinary pack code, even when it starts with the scale
+   * prefix (store-generated barcodes may). The switched-on variable-measure reader is tried before the shop's weighed prefix.
+   */
+  private ScannedCode decode(String raw, ShopSetting s) {
+    String text = raw == null ? "" : raw.strip();
+    if (variableMeasure != null && variableMeasure.enabled()) {
+      Optional<VariableMeasureBarcode.Reading> reading = variableMeasure.parse(text);
+      if (reading.isPresent()) return new ScannedCode.Weighed(reading.get().itemCode(), reading.get().value(), s.weighedMode());
+    }
+    boolean scaleShaped = !s.weighedPrefix().isEmpty() && text.matches("\\d{13}") && text.startsWith(s.weighedPrefix());
+    if (scaleShaped && repo.productByBarcode(text).isPresent()) return new ScannedCode.Plain(text);
+    try {
+      return BarcodeParser.parse(text, s.weighedPrefix(), s.weighedMode())
+          .orElseThrow(() -> ApiException.validation("code", "code is empty"));
+    } catch (IllegalArgumentException e) {
+      throw ApiException.validation("code", e.getMessage());
+    }
   }
 
   /**
@@ -182,6 +205,9 @@ public class PosCatalogService {
     if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
       throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");
     }
+    codes.stream().map(Gtin::checkDigitProblem).flatMap(Optional::stream).findFirst().ifPresent(problem -> {
+      throw ApiException.validation("barcodes", problem);
+    });
     if (soldBy == SoldBy.WEIGHT && codes.stream().anyMatch(c -> c.length() == 13 && c.startsWith(shop.get().weighedPrefix()))) {
       throw ApiException.validation("barcodes", "a code starting with the scale prefix would be read as a weighed label");
     }
@@ -198,6 +224,9 @@ public class PosCatalogService {
 
   /** Scale labels pad the item code with zeros; the shop types it without them. Both sides are compared without. */
   static String normalizePlu(String digits) { return digits.replaceFirst("^0+(?!$)", ""); }
+
+  /** The barcodes of one product, in code order; empty when it has none. */
+  public List<String> barcodesOf(UUID productId) { return repo.barcodesOf(productId); }
 
   /** Product lookups by id for pricing. */
   public Map<UUID, ProductPos> attributesFor(Collection<UUID> ids) { return repo.forProducts(ids); }
