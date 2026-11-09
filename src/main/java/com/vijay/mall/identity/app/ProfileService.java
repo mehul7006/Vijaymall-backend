@@ -7,6 +7,8 @@ import com.vijay.mall.identity.infra.AddressRepository;
 import com.vijay.mall.identity.infra.DeviceRepository;
 import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,6 +41,7 @@ public class ProfileService {
     if (users.mobileLocked(id, newMobile)) {
       throw ApiException.conflict("MOBILE_VERIFIED", "A verified mobile number cannot be changed here", Map.of());
     }
+    // a missing name means "leave it as it is": the repository keeps the saved name when it is given null
     users.updateProfile(id, name == null ? null : name.trim(), newMobile, clock.instant());
     return get(id);
   }
@@ -58,14 +61,26 @@ public class ProfileService {
 
   @Transactional
   public Address updateAddress(UUID userId, UUID id, Address in) {
-    address(userId, id);
+    Address current = address(userId, id);
+    // The default only ever moves by marking another address as the default: leaving the flag out, or sending false on the
+    // current default, keeps it, so a customer who has addresses always has exactly one default.
     if (in.isDefault()) addresses.clearDefault(userId);
-    addresses.update(userId, id, in);
+    addresses.update(userId, id, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), current.isDefault() || in.isDefault()));
     return address(userId, id);
   }
 
   @Transactional
-  public void deleteAddress(UUID userId, UUID id) { addresses.delete(userId, id); }
+  public void deleteAddress(UUID userId, UUID id) {
+    boolean wasDefault = addresses.find(userId, id).map(Address::isDefault).orElse(false);
+    addresses.delete(userId, id);
+    if (wasDefault) {
+      // the customer always keeps a default address while they have any: the first one left takes over
+      addresses.list(userId).stream().findFirst().ifPresent(a -> {
+        addresses.clearDefault(userId);
+        addresses.update(userId, a.id(), new Address(a.id(), a.label(), a.line1(), a.area(), a.pincode(), true));
+      });
+    }
+  }
 
   @Transactional
   public void registerDevice(UUID userId, String token, String platform) {
@@ -80,8 +95,8 @@ public class ProfileService {
   public List<String> deviceTokens(UUID userId) { return devices.tokensOf(userId); }
 
   /** Many users at once (for admin order lists). */
-  public java.util.Map<UUID, User> users(java.util.Collection<UUID> ids) {
-    java.util.Map<UUID, User> out = new java.util.HashMap<>();
+  public Map<UUID, User> users(Collection<UUID> ids) {
+    Map<UUID, User> out = new HashMap<>();
     users.findAllByIds(ids).forEach(u -> out.put(u.id(), u));
     return out;
   }

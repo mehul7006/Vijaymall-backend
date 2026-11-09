@@ -3,9 +3,10 @@ package com.vijay.mall.pos.app;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.pos.domain.Money;
 import com.vijay.mall.pos.infra.PosReportRepository;
-import com.vijay.mall.pos.infra.PosShiftRepository;
 import com.vijay.mall.pos.infra.PosShiftRepository.Shift;
+import com.vijay.mall.pos.infra.PosShiftRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
@@ -22,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ShiftService {
   /** expectedCashPaise and variancePaise are live while the shift is open (variance then only counts once closed). */
-  public record ShiftView(UUID id, UUID cashierId, java.time.Instant openedAt, long openingFloatPaise, java.time.Instant closedAt,
+  public record ShiftView(UUID id, UUID cashierId, Instant openedAt, long openingFloatPaise, Instant closedAt,
                           long expectedCashPaise, Long countedCashPaise, Long variancePaise, String note, boolean open) {}
 
   static final int MAX_NOTE = 200;
@@ -96,7 +97,7 @@ public class ShiftService {
     long expected = expectedCash(s, now.plusSeconds(1));
     if (countedCashPaise != expected && text.isEmpty()) {
       throw ApiException.unprocessable("VARIANCE_NEEDS_NOTE", "The drawer is " + (countedCashPaise > expected ? "over" : "short")
-          + " by Rs " + com.vijay.mall.pos.domain.Money.plain(Math.abs(countedCashPaise - expected)) + ": write the reason",
+          + " by Rs " + Money.plain(Math.abs(countedCashPaise - expected)) + ": write the reason",
           Map.of("expectedCashPaise", expected, "countedCashPaise", countedCashPaise));
     }
     shifts.close(s.id(), now, expected, countedCashPaise, text);

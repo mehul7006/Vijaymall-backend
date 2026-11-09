@@ -11,6 +11,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.function.Supplier;
 import org.slf4j.ILoggerFactory;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -24,7 +25,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class LogSettingsApplier {
-  private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(LogSettingsApplier.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LogSettingsApplier.class);
   static final String APP_LOGGER = "com.vijay.mall";
   static final String SQL_LOGGER = "org.hibernate.SQL";
 
@@ -66,7 +67,7 @@ public class LogSettingsApplier {
       String root = settings.get(Settings.LOG_LEVEL_ROOT);
       String sql = settings.get(Settings.LOG_LEVEL_SQL);
       setLevel(ctx, APP_LOGGER, app);
-      setLevel(ctx, org.slf4j.Logger.ROOT_LOGGER_NAME, root);
+      setLevel(ctx, Logger.ROOT_LOGGER_NAME, root);
       setLevel(ctx, SQL_LOGGER, sql);
       int days = settings.getInt(Settings.LOG_RETENTION_DAYS);
       int files = setRetention(ctx, days);

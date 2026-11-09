@@ -2,10 +2,13 @@ package com.vijay.mall.order.app.quote;
 
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.PricedLine;
+import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.order.domain.QuoteContext;
 import com.vijay.mall.order.domain.QuoteStep;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -14,19 +17,19 @@ public class SubtotalStep implements QuoteStep {
 
   public SubtotalStep(CatalogService catalog) { this.catalog = catalog; }
 
-  private com.vijay.mall.common.FlashPricing flash;
+  private FlashPricing flash;
 
   /** Optional (plain unit tests run without it): flash sale prices for online carts. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  public void setFlash(com.vijay.mall.common.FlashPricing flash) { this.flash = flash; }
+  @Autowired(required = false)
+  public void setFlash(FlashPricing flash) { this.flash = flash; }
 
   @Override public int order() { return 100; }
 
   /** Units that fit in the sale go at the sale price (one line), the rest at the normal price (a second line). */
-  private List<PricedLine> withFlash(List<PricedLine> lines, java.util.UUID userId) {
+  private List<PricedLine> withFlash(List<PricedLine> lines, UUID userId) {
     List<PricedLine> out = new ArrayList<>();
     for (PricedLine l : lines) {
-      var applied = flash.apply(l.productId(), com.vijay.mall.common.FlashPricing.Channel.ONLINE, l.unitPricePaise(), userId, l.qty());
+      var applied = flash.apply(l.productId(), FlashPricing.Channel.ONLINE, l.unitPricePaise(), userId, l.qty());
       if (applied.isEmpty()) {
         out.add(l);
         continue;

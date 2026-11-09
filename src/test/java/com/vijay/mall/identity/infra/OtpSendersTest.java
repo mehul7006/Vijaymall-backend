@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import com.vijay.mall.config.Settings;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 
@@ -13,7 +15,7 @@ class OtpSendersTest {
   @Test
   void smtpSenderMailsTheCodeWithTheConfiguredFromAddress() {
     JavaMailSender mail = mock(JavaMailSender.class);
-    var fs = new FakeSettings().with(com.vijay.mall.config.Settings.OTP_FROM, "no-reply@shop.test");
+    var fs = new FakeSettings().with(Settings.OTP_FROM, "no-reply@shop.test");
     new SmtpEmailOtpSender(fs.settings) {
       @Override protected JavaMailSender createMailSender(String h, int p, String u, String pw) { return mail; }
     }.send("bob@x.com", "54321");
@@ -28,7 +30,7 @@ class OtpSendersTest {
 
   @Test
   void consoleSenderLogsTheCodeForDevelopment() {
-    var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ConsoleOtpSender.class);
+    var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ConsoleOtpSender.class);
     var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
     appender.start();
     logger.addAppender(appender);

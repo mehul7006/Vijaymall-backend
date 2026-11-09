@@ -7,10 +7,12 @@ import com.vijay.mall.payment.app.PaymentService;
 import com.vijay.mall.payment.infra.PaymentRepository;
 import com.vijay.mall.support.FakeGateway;
 import com.vijay.mall.support.IntegrationTestBase;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -19,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -40,7 +43,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Autowired PaymentService payments;
   @Autowired PaymentRepository paymentRepo;
 
-  @org.junit.jupiter.api.BeforeEach
+  @BeforeEach
   void enableOnlinePayment() {
     restock("Orange Juice", 20);
     // ONLINE ships switched off; the shop owner turns it on from the admin screen
@@ -66,12 +69,12 @@ class OnlinePaymentIT extends IntegrationTestBase {
   }
 
   @SuppressWarnings("rawtypes")
-  private org.springframework.http.ResponseEntity<Map> webhook(String signature, Map<String, Object> body) {
+  private ResponseEntity<Map> webhook(String signature, Map<String, Object> body) {
     return client().post().uri("/api/v1/payments/webhook/fake").contentType(MediaType.APPLICATION_JSON)
         .headers(h -> { if (signature != null) h.set("x-fake-signature", signature); }).body(body).retrieve().toEntity(Map.class);
   }
 
-  private org.springframework.http.ResponseEntity<Map> event(String id, String type, String orderId, long amount) {
+  private ResponseEntity<Map> event(String id, String type, String orderId, long amount) {
     return webhook("ok", Map.of("eventId", id, "type", type, "providerOrderId", "fake_" + orderId, "amount", amount));
   }
 
@@ -139,6 +142,95 @@ class OnlinePaymentIT extends IntegrationTestBase {
     assertThat(fake.refunds).as("the odd amount that did arrive is sent back").hasSize(refundsBefore + 1);
   }
 
+  private int anomalyEvents(String orderId, String kind) {
+    return jdbc.queryForObject("SELECT count(*) FROM outbox_event WHERE type = 'PAYMENT_ANOMALY' AND payload LIKE ? AND payload LIKE ?",
+        Integer.class, "%" + orderId + "%", "%\"kind\":\"" + kind + "\"%");
+  }
+
+  /** A wrong amount is refunded to the payment it came from; a later correct payment on the same provider order is honoured. */
+  @Test
+  void wrongAmountIsRefundedAndALaterCorrectPaymentStillPaysTheOrder() {
+    var p = placeOnline("Orange Juice", 1);
+    int before = fake.refunds.size();
+    String wrongEvent = "ev-" + UUID.randomUUID();
+    event(wrongEvent, "captured", p.orderId(), p.total() - 100);
+    assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
+    assertThat(fake.refunds).hasSize(before + 1);
+    assertThat(fake.refunds.get(before)).isEqualTo("pay_" + wrongEvent + ":" + (p.total() - 100));
+    assertThat(anomalyEvents(p.orderId(), "MISMATCH")).isEqualTo(1);
+
+    event(wrongEvent, "captured", p.orderId(), p.total() - 100);
+    assertThat(fake.refunds).as("a replayed event queues nothing").hasSize(before + 1);
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total() - 100);
+    assertThat(fake.refunds).as("another wrong payment is refunded on its own").hasSize(before + 2);
+
+    String rightEvent = "ev-" + UUID.randomUUID();
+    event(rightEvent, "captured", p.orderId(), p.total());
+    assertThat(order(p)).containsEntry("status", "PLACED").containsEntry("paymentStatus", "CAPTURED");
+    assertThat(fake.refunds).as("the correct payment is kept").hasSize(before + 2);
+
+    // the old refunds still point at the wrong payments although the row now carries the right reference
+    List<String> refs = jdbc.queryForList("SELECT r.provider_payment_ref FROM refund r JOIN payment p ON p.id = r.payment_id "
+        + "WHERE p.order_id = ?::uuid AND r.reason = 'amount mismatch'", String.class, p.orderId());
+    assertThat(refs).hasSize(2).doesNotContain("pay_" + rightEvent).contains("pay_" + wrongEvent);
+  }
+
+  @Test
+  void aSecondPaymentOnAPaidOrderIsRefundedAndTheOrderIsUnaffected() {
+    var p = placeOnline("Orange Juice", 1);
+    String first = "ev-" + UUID.randomUUID();
+    String second = "ev-" + UUID.randomUUID();
+    event(first, "captured", p.orderId(), p.total());
+    int before = fake.refunds.size();
+    event(second, "captured", p.orderId(), p.total());
+    assertThat(order(p)).containsEntry("status", "PLACED").containsEntry("paymentStatus", "CAPTURED");
+    assertThat(fake.refunds).hasSize(before + 1);
+    assertThat(fake.refunds.get(before)).isEqualTo("pay_" + second + ":" + p.total());
+    event(second, "captured", p.orderId(), p.total());
+    assertThat(fake.refunds).as("replay").hasSize(before + 1);
+    assertThat(anomalyEvents(p.orderId(), "DUPLICATE")).isEqualTo(1);
+
+    // cancelling later still refunds the first payment, once, and the duplicate does not count against it
+    var cancel = post("/api/v1/orders/" + p.orderId() + "/cancel", p.token(), null);
+    assertThat(cancel.getBody()).containsEntry("paymentStatus", "REFUNDED");
+    assertThat(fake.refunds).contains("pay_" + first + ":" + p.total());
+  }
+
+  /** A refund lost to a crash while being sent comes back as a retry, so the provider is asked about it before it is sent again. */
+  @Test
+  void aRefundStuckInProcessingIsRequeuedAsATry() {
+    var p = placeOnline("Orange Juice", 1);
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
+    UUID refund = UUID.randomUUID();
+    Instant old = Instant.now().minusSeconds(3600);
+    jdbc.update("INSERT INTO refund (id, payment_id, amount_paise, status, reason, created_at, attempts, updated_at) "
+        + "SELECT ?, id, 100, 'PROCESSING', 'crash', ?, 0, ? FROM payment WHERE order_id = ?::uuid",
+        refund, Timestamp.from(old), Timestamp.from(old), p.orderId());
+    assertThat(paymentRepo.requeueStuckRefunds(Instant.now().minusSeconds(600), Instant.now())).isGreaterThanOrEqualTo(1);
+    assertThat(jdbc.queryForMap("SELECT status, attempts FROM refund WHERE id = ?", refund))
+        .containsEntry("status", "PENDING").containsEntry("attempts", 1);
+    jdbc.update("DELETE FROM refund WHERE id = ?", refund); // keep it away from the sender job, other tests count refunds sent
+  }
+
+  @Test
+  void adminSeesTheAnomaliesAndOthersCannot() {
+    var p = placeOnline("Orange Juice", 1);
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total() - 1);
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
+
+    var res = get("/api/v1/admin/payments/anomalies?size=50", adminToken());
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    List<Map<String, Object>> mine = ((List<Map<String, Object>>) res.getBody().get("items")).stream()
+        .filter(a -> p.orderId().equals(a.get("orderId"))).toList();
+    assertThat(mine).extracting(a -> a.get("kind")).containsExactlyInAnyOrder("MISMATCH", "DUPLICATE");
+    assertThat(mine).extracting(a -> ((Number) a.get("receivedPaise")).longValue()).containsExactlyInAnyOrder(p.total() - 1, p.total());
+    assertThat(mine).allSatisfy(a -> assertThat(a).containsKeys("id", "paymentId", "expectedPaise", "providerRef", "createdAt"));
+
+    assertThat(get("/api/v1/admin/payments/anomalies", p.token()).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    assertThat(get("/api/v1/admin/payments/anomalies", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+  }
+
   @Test
   void badSignatureIsRejectedAndNothingChanges() {
     var p = placeOnline("Orange Juice", 1);
@@ -178,7 +270,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
     int before = stock(placeOnlineProductId());
     var p = placeOnline("Orange Juice", 3);
     assertThat(stock(p.productId())).isEqualTo(before);
-    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
     orders.expireUnpaid();
     assertThat(order(p)).containsEntry("status", "CANCELLED");
     assertThat(stock(p.productId())).isEqualTo(before);
@@ -187,7 +279,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Test
   void paymentArrivingAfterExpiryIsRefunded() {
     var p = placeOnline("Orange Juice", 1);
-    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
     orders.expireUnpaid();
     int refundsBefore = fake.refunds.size();
     event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
@@ -198,7 +290,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Test
   void reconcileLeavesPaymentsAloneWhenTheProviderHasNothingToReport() {
     var p = placeOnline("Orange Juice", 1);
-    jdbc.update("UPDATE payment SET created_at = ? WHERE order_id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(3600)), p.orderId());
+    jdbc.update("UPDATE payment SET created_at = ? WHERE order_id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(3600)), p.orderId());
     payments.reconcile();
     assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
   }

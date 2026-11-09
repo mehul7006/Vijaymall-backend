@@ -22,7 +22,9 @@ public final class CouponRules {
       c -> violation(c.subtotalPaise() < c.coupon().minOrderPaise(), "MIN_ORDER"),
       c -> violation(!c.coupon().allCategories()
           && c.lines().stream().noneMatch(l -> c.coupon().covers(l.categoryId())), "CATEGORY"),
-      // A category coupon's minimum counts only what is spent in its categories, not the whole cart.
+      /**
+       * A category coupon's minimum counts only what is spent in its categories, not the whole cart.
+       */
       c -> violation(!c.coupon().allCategories()
           && CouponMath.base(c.coupon(), c.lines(), c.subtotalPaise()) < c.coupon().minOrderPaise(), "MIN_ORDER"),
       c -> violation(c.coupon().perUserLimit() > 0 && c.userUses() >= c.coupon().perUserLimit(), "LIMIT_REACHED"),

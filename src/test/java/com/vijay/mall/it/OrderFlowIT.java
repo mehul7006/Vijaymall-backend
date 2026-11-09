@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -14,7 +15,7 @@ import org.springframework.http.HttpStatus;
 /** Happy path against real PostgreSQL: quote, price check, idempotent order, delivery, coins arrive. */
 class OrderFlowIT extends IntegrationTestBase {
 
-  @org.junit.jupiter.api.BeforeEach
+  @BeforeEach
   void stock() { restock("Basmati Rice", 20); }
 
   @Test
@@ -23,7 +24,7 @@ class OrderFlowIT extends IntegrationTestBase {
     String admin = adminToken();
     String cust = token(freshEmail());
     // the 1 kg pack: another test adds a 5 kg variant with the same name, which must not change this test's prices
-    var rice = ((java.util.List<Map<String, Object>>) get("/api/v1/products?size=50&includeOutOfStock=true", cust).getBody().get("items")).stream()
+    var rice = ((List<Map<String, Object>>) get("/api/v1/products?size=50&includeOutOfStock=true", cust).getBody().get("items")).stream()
         .filter(p -> "Basmati Rice".equals(p.get("nameEn")) && "1 kg".equals(p.get("packSize"))).findFirst().orElseThrow();
 
     Map<String, Object> address = post("/api/v1/me/addresses", cust,

@@ -7,7 +7,9 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.Settings;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class RoutingSendersTest {
   private final FakeSettings fs = new FakeSettings();
@@ -34,7 +36,7 @@ class RoutingSendersTest {
     var http = mock(HttpSmsSender.class);
     var r = new RoutingSmsOtpSender(fs.settings, console, http, new UnconfiguredSmsOtpSender());
     assertThatThrownBy(() -> r.send("9876543210", "1")).isInstanceOfSatisfying(ApiException.class,
-        e -> org.assertj.core.api.Assertions.assertThat(e.code()).isEqualTo("SMS_NOT_CONFIGURED"));
+        e -> Assertions.assertThat(e.code()).isEqualTo("SMS_NOT_CONFIGURED"));
     fs.with(Settings.SMS_CHANNEL, "console");
     r.send("9876543210", "2");
     verify(console).send("9876543210", "2");
@@ -48,7 +50,7 @@ class RoutingSendersTest {
 
   @Test
   void consoleSmsSenderLogsTheCodeForDevelopment() {
-    var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ConsoleSmsOtpSender.class);
+    var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ConsoleSmsOtpSender.class);
     var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
     appender.start();
     logger.addAppender(appender);
@@ -57,7 +59,7 @@ class RoutingSendersTest {
     } finally {
       logger.detachAppender(appender);
     }
-    org.assertj.core.api.Assertions.assertThat(appender.list).singleElement()
-        .satisfies(e -> org.assertj.core.api.Assertions.assertThat(e.getFormattedMessage()).contains("9876543210").contains("13579"));
+    Assertions.assertThat(appender.list).singleElement()
+        .satisfies(e -> Assertions.assertThat(e.getFormattedMessage()).contains("9876543210").contains("13579"));
   }
 }

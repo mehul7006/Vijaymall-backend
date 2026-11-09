@@ -7,6 +7,7 @@ import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -32,16 +35,23 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminCatalogController {
+  private AdminOps ops;
+
+  /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
+  @Autowired
+  void setOps(AdminOps ops) { this.ops = ops; }
+
   public record ProductBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu,
                             String description, @Min(0) long mrpPaise, @Min(0) long pricePaise, String unit,
                             String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
-                            Boolean earnsCoins, Boolean coinRedeemable, Integer qtyOnHand, Integer lowThreshold,
+                            Boolean earnsCoins, Boolean coinRedeemable, @Min(0) Integer qtyOnHand, @Min(0) Integer lowThreshold,
                             UUID productGroupId, String variantName, Integer variantOrder) {
     CatalogService.ProductInput toInput() {
       return new CatalogService.ProductInput(categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit,
           packSize, active == null || active, Boolean.TRUE.equals(hotSale), hotStart, hotEnd,
           earnsCoins == null || earnsCoins, coinRedeemable == null || coinRedeemable,
-          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold, productGroupId);
+          // left out (-1) means "keep what is there" on an edit; a new product then starts at 0 stock and the default alert level of 5
+          qtyOnHand == null ? -1 : qtyOnHand, lowThreshold == null ? -1 : lowThreshold, productGroupId);
     }
   }
   /** A new variant (size, flavour, colour) of an existing product; name, description and category are copied from it. */
@@ -49,7 +59,7 @@ public class AdminCatalogController {
                             Boolean active, Integer qtyOnHand, Integer lowThreshold, Integer variantOrder) {
     CatalogService.VariantInput toInput() {
       return new CatalogService.VariantInput(variantName, packSize, unit, mrpPaise, pricePaise, active,
-          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? 5 : lowThreshold, variantOrder);
+          qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? -1 : lowThreshold, variantOrder);
     }
   }
 
@@ -86,10 +96,12 @@ public class AdminCatalogController {
 
   @PostMapping("/products")
   @ResponseStatus(HttpStatus.CREATED)
-  public AdminProduct create(@Valid @RequestBody ProductBody b) {
-    AdminProduct created = catalog.create(b.toInput(), CurrentUser.id());
-    return b.variantName() == null && b.variantOrder() == null ? created
-        : catalog.setVariant(created.id(), b.variantName(), b.variantOrder(), CurrentUser.id());
+  public AdminProduct create(@Valid @RequestBody ProductBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.run(ops, key, "product-create", CurrentUser.id(), AdminOps.fingerprint(b), () -> {
+      AdminProduct created = catalog.create(b.toInput(), CurrentUser.id());
+      return b.variantName() == null && b.variantOrder() == null ? created
+          : catalog.setVariant(created.id(), b.variantName(), b.variantOrder(), CurrentUser.id());
+    }, p -> p.id().toString(), ref -> catalog.adminGet(UUID.fromString(ref)));
   }
 
   @GetMapping("/products/{id}")
@@ -120,8 +132,10 @@ public class AdminCatalogController {
   }
 
   @PostMapping("/products/{id}/stock")
-  public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b) {
-    return catalog.restock(id, b.delta(), b.reason(), CurrentUser.id());
+  public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    // a delta is relative, so a double tap on "+50" must not add 100: the same key applies it once
+    return AdminOps.run(ops, key, "stock-adjust:" + id, CurrentUser.id(), AdminOps.fingerprint(id, b),
+        () -> catalog.restock(id, b.delta(), b.reason(), CurrentUser.id()), p -> id.toString(), ref -> catalog.adminGet(id));
   }
 
   /** Stock history, newest first. Leave productId out for every product. */
@@ -140,8 +154,10 @@ public class AdminCatalogController {
 
   @PostMapping("/categories")
   @ResponseStatus(HttpStatus.CREATED)
-  public Category createCategory(@Valid @RequestBody CategoryBody b) {
-    return catalog.createCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active());
+  public Category createCategory(@Valid @RequestBody CategoryBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+    return AdminOps.run(ops, key, "category-create", CurrentUser.id(), AdminOps.fingerprint(b),
+        () -> catalog.createCategory(b.nameEn(), b.nameGu(), b.sortOrder() == null ? 0 : b.sortOrder(), b.active() == null || b.active()),
+        c -> c.id().toString(), ref -> catalog.categories().stream().filter(c -> c.id().toString().equals(ref)).findFirst().orElse(null));
   }
 
   @PutMapping("/categories/{id}")

@@ -15,9 +15,11 @@ import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class MobileAuthServiceTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -78,7 +80,7 @@ class MobileAuthServiceTest {
 
   @Test
   void aBadCodeStopsBeforeAnyAccountIsTouched() {
-    org.mockito.Mockito.doThrow(ApiException.unprocessable("OTP_INVALID", "bad", java.util.Map.of()))
+    Mockito.doThrow(ApiException.unprocessable("OTP_INVALID", "bad", Map.of()))
         .when(otp).verify(MOBILE, "0");
     assertThatThrownBy(() -> service.verify(MOBILE, "0", "d")).isInstanceOf(ApiException.class);
     verify(users, never()).findByVerifiedMobile(any());

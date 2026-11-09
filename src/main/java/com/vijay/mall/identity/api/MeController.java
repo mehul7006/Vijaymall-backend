@@ -1,6 +1,7 @@
 package com.vijay.mall.identity.api;
 
 import com.vijay.mall.common.security.CurrentUser;
+import com.vijay.mall.identity.app.AccountDeletionService;
 import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.identity.domain.Address;
 import com.vijay.mall.identity.domain.User;
@@ -30,9 +31,9 @@ public class MeController {
   public record DeviceInput(@NotBlank String fcmToken, @NotBlank String platform) {}
 
   private final ProfileService profile;
-  private final com.vijay.mall.identity.app.AccountDeletionService deletion;
+  private final AccountDeletionService deletion;
 
-  public MeController(ProfileService profile, com.vijay.mall.identity.app.AccountDeletionService deletion) {
+  public MeController(ProfileService profile, AccountDeletionService deletion) {
     this.profile = profile;
     this.deletion = deletion;
   }

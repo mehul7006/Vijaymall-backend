@@ -10,8 +10,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,13 +34,13 @@ public class OtpService {
   private int perEmailHour = 5;
 
   /** Codes one e-mail address may ask for per hour (production keeps 5; tests that sign in all day raise it). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setPerEmailHour(@org.springframework.beans.factory.annotation.Value("${app.rate-limit.otp-per-email-hour:5}") int n) {
+  @Autowired(required = false)
+  void setPerEmailHour(@Value("${app.rate-limit.otp-per-email-hour:5}") int n) {
     this.perEmailHour = n;
   }
 
   public OtpService(OtpRepository repo, OtpSender sender, AppProps props, Clock clock, RateLimiter limiter,
-                    @org.springframework.beans.factory.annotation.Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
+                    @Value("${app.rate-limit.otp-per-ip-hour:20}") int ipPerHour) {
     this.ipPerHour = ipPerHour;
     this.repo = repo;
     this.sender = sender;
@@ -52,8 +55,8 @@ public class OtpService {
   }
 
   /** The configured fixed code, trimmed; empty when none is set. */
-  private java.util.Optional<String> fixedCode() {
-    return java.util.Optional.ofNullable(props.otp()).map(AppProps.Otp::fixedCode).map(String::trim).filter(c -> !c.isEmpty());
+  private Optional<String> fixedCode() {
+    return Optional.ofNullable(props.otp()).map(AppProps.Otp::fixedCode).map(String::trim).filter(c -> !c.isEmpty());
   }
 
   public static String normalize(String email) { return email.trim().toLowerCase(); }

@@ -2,6 +2,7 @@ package com.vijay.mall.pos.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class SoldByTest {
@@ -20,7 +21,7 @@ class SoldByTest {
   }
   @Test void qtyForAmount_unit_wholePieces() { assertThat(SoldBy.UNIT.qtyForAmount(2500, 7600)).isEqualTo(3); }
   @Test void qtyForAmount_badPrice_throws() {
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> SoldBy.WEIGHT.qtyForAmount(0, 10))
+    Assertions.assertThatThrownBy(() -> SoldBy.WEIGHT.qtyForAmount(0, 10))
         .isInstanceOf(IllegalArgumentException.class);
   }
 }

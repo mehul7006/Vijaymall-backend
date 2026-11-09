@@ -3,9 +3,14 @@ package com.vijay.mall.catalog.app;
 import com.vijay.mall.catalog.domain.UnitOfMeasure;
 import com.vijay.mall.catalog.infra.UnitRepository;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.LiveEvents;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +22,13 @@ public class UnitService {
   private final UnitRepository units;
   private final AuditService audit;
 
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
-  private void changed() { if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.UNITS); }
+  private void changed() { if (live != null) live.area(CatalogChanged.UNITS); }
 
   public UnitService(UnitRepository units, AuditService audit) {
     this.units = units;
@@ -31,14 +36,14 @@ public class UnitService {
   }
 
   /** Units a product can be given (for the pickers and the customer app). */
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   public List<UnitOfMeasure> active() {
-    return caches == null ? units.allActive() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.UNITS, "active", units::allActive);
+    return caches == null ? units.allActive() : caches.get(AppCaches.Name.UNITS, "active", units::allActive);
   }
 
   /** Every unit, including switched-off ones, for the admin list. */
@@ -66,7 +71,7 @@ public class UnitService {
     UnitOfMeasure u = clean(in, in.code());
     if (u.code().isEmpty()) throw ApiException.validation("code", "required");
     if (u.code().length() > 20) throw ApiException.validation("code", "at most 20 characters");
-    if (units.findIgnoreCase(u.code()).isPresent()) throw ApiException.conflict("UNIT_EXISTS", "That unit already exists", java.util.Map.of());
+    if (units.findIgnoreCase(u.code()).isPresent()) throw ApiException.conflict("UNIT_EXISTS", "That unit already exists", Map.of());
     UnitOfMeasure saved = units.insert(u);
     audit.log(actor, "CREATE", "unit", saved.code(), saved.code() + " / " + saved.nameEn());
     changed();
@@ -88,7 +93,7 @@ public class UnitService {
     if (!u.code().equals(from)) {
       if (u.code().length() > 20) throw ApiException.validation("code", "at most 20 characters");
       units.findIgnoreCase(u.code()).filter(o -> !o.code().equals(from))
-          .ifPresent(o -> { throw ApiException.conflict("UNIT_EXISTS", "That unit already exists", java.util.Map.of()); });
+          .ifPresent(o -> { throw ApiException.conflict("UNIT_EXISTS", "That unit already exists", Map.of()); });
       units.rename(from, u.code());
     }
     UnitOfMeasure saved = units.update(u.code(), u).orElseThrow(() -> ApiException.notFound("Unit"));
@@ -104,7 +109,7 @@ public class UnitService {
     UnitOfMeasure u = units.findIgnoreCase(code).orElseThrow(() -> ApiException.notFound("Unit"));
     long used = units.productsUsing(u.code());
     if (used > 0) {
-      throw ApiException.conflict("UNIT_IN_USE", used + " products use this unit; switch it off instead", java.util.Map.of("products", used));
+      throw ApiException.conflict("UNIT_IN_USE", used + " products use this unit; switch it off instead", Map.of("products", used));
     }
     units.delete(u.code());
     audit.log(actor, "DELETE", "unit", u.code(), u.code());

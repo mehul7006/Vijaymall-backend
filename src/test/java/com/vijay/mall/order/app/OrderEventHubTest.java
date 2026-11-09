@@ -2,9 +2,15 @@ package com.vijay.mall.order.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.CreditChanged;
+import com.vijay.mall.common.live.StockChanged;
+import com.vijay.mall.common.live.WalletChanged;
 import com.vijay.mall.order.domain.OrderChanged;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class OrderEventHubTest {
@@ -46,13 +52,13 @@ class OrderEventHubTest {
 
   @Test
   void walletAndStockEventsReachOpenStreamsAndNoOneElse() {
-    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
-    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new StockChanged(List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
     hub.subscribeCustomer(alice);
     hub.subscribeCustomer(bob);
     hub.subscribeStaff();
-    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
-    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new WalletChanged(alice, "EARN", 10, Instant.parse("2027-03-01T10:00:00Z")));
+    hub.on(new StockChanged(List.of(UUID.randomUUID()), "ORDER", Instant.parse("2027-03-01T10:00:00Z")));
     assertThat(hub.customerStreams(alice)).isEqualTo(1);
     assertThat(hub.staffStreams()).isEqualTo(1);
   }
@@ -60,15 +66,15 @@ class OrderEventHubTest {
   @Test
   void walletCreditStockAndCatalogEventsAreSentWithoutFailing() {
     Instant at = Instant.parse("2027-03-01T10:00:00Z");
-    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, at));
+    hub.on(new WalletChanged(alice, "EARN", 10, at));
     hub.subscribeCustomer(alice);
     hub.subscribeCustomer(bob);
     hub.subscribeStaff();
-    hub.on(new com.vijay.mall.common.live.WalletChanged(alice, "EARN", 10, at));
-    hub.on(new com.vijay.mall.common.live.CreditChanged(alice, "SALE", 500, at));
-    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
-    hub.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
-    hub.on(new com.vijay.mall.common.live.CatalogChanged("CATALOG", at));
+    hub.on(new WalletChanged(alice, "EARN", 10, at));
+    hub.on(new CreditChanged(alice, "SALE", 500, at));
+    hub.on(new StockChanged(List.of(UUID.randomUUID()), "ORDER", at));
+    hub.on(new StockChanged(List.of(UUID.randomUUID()), "ORDER", at));
+    hub.on(new CatalogChanged("CATALOG", at));
     hub.flush();
     hub.flush();
     hub.heartbeat();
@@ -79,12 +85,12 @@ class OrderEventHubTest {
   @Test
   void stockAndCatalogChangesAreSentOncePerWindow() {
     Instant at = Instant.parse("2027-03-01T10:00:00Z");
-    java.util.concurrent.atomic.AtomicInteger runs = new java.util.concurrent.atomic.AtomicInteger();
+    AtomicInteger runs = new AtomicInteger();
     OrderEventHub counting = new OrderEventHub(r -> { runs.incrementAndGet(); r.run(); });
     counting.subscribeStaff();
     int afterReady = runs.get();
-    for (int i = 0; i < 50; i++) counting.on(new com.vijay.mall.common.live.StockChanged(java.util.List.of(UUID.randomUUID()), "ORDER", at));
-    for (int i = 0; i < 50; i++) counting.on(new com.vijay.mall.common.live.CatalogChanged("CATALOG", at));
+    for (int i = 0; i < 50; i++) counting.on(new StockChanged(List.of(UUID.randomUUID()), "ORDER", at));
+    for (int i = 0; i < 50; i++) counting.on(new CatalogChanged("CATALOG", at));
     assertThat(runs.get()).isEqualTo(afterReady);
     counting.flush();
     assertThat(runs.get()).as("one stock message and one catalog message, however many changes").isEqualTo(afterReady + 2);

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.vijay.mall.catalog.app.ImageStore;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.pos.app.ShopProfileService.DayHours;
@@ -26,6 +27,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import tools.jackson.databind.json.JsonMapper;
 
 class ShopProfileServiceTest {
@@ -208,7 +210,7 @@ class ShopProfileServiceTest {
 
     service.removeLogo(admin);
     verify(audit).log(admin, "UPDATE", "shop_profile", 1, "logo removed");
-    verify(live, org.mockito.Mockito.times(2)).area("SHOP");
+    verify(live, Mockito.times(2)).area("SHOP");
   }
 
   @Test
@@ -220,11 +222,11 @@ class ShopProfileServiceTest {
 
   @Test
   void theProfileIsCachedWhenACacheIsGiven() {
-    var caches = new com.vijay.mall.common.cache.AppCaches(Clock.systemUTC());
+    var caches = new AppCaches(Clock.systemUTC());
     service.setCaches(caches);
     service.get();
     service.get();
-    verify(repo, org.mockito.Mockito.times(1)).get();
+    verify(repo, Mockito.times(1)).get();
   }
 
   @Test

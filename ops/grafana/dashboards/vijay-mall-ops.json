@@ -763,6 +763,74 @@
      "legendFormat": "refused {{reason}}"
     }
    ]
+  },
+  {
+   "id": 25,
+   "type": "timeseries",
+   "title": "Wrong-amount and duplicate payments (refunded)",
+   "description": "Online payments that arrived in the wrong amount (MISMATCH) or twice (DUPLICATE) and are being refunded automatically. Details: GET /api/v1/admin/payments/anomalies.",
+   "gridPos": {
+    "x": 0,
+    "y": 56,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (kind) (increase(mall_payments_anomalies_total[1h]))",
+     "legendFormat": "{{kind}}"
+    }
+   ]
+  },
+  {
+   "id": 26,
+   "type": "timeseries",
+   "title": "Offline bills waiting for a manager",
+   "description": "Differences found in bills a till rang up offline (price, GST rate, discount, stock short, product switched off). Open = not yet reviewed in the admin app; older than a day = nobody has looked. New = differences recorded per hour, by kind.",
+   "gridPos": {
+    "x": 8,
+    "y": 56,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "mall_pos_offline_exceptions_open",
+     "legendFormat": "open"
+    },
+    {
+     "refId": "B",
+     "expr": "mall_pos_offline_exceptions_stale",
+     "legendFormat": "open, older than a day"
+    },
+    {
+     "refId": "C",
+     "expr": "sum by (kind) (increase(mall_pos_offline_exceptions_recorded_total[1h]))",
+     "legendFormat": "new per hour {{kind}}"
+    }
+   ]
   }
  ],
  "templating": {

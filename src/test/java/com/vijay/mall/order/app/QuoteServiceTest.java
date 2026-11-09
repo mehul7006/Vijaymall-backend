@@ -2,6 +2,7 @@ package com.vijay.mall.order.app;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.order.domain.Fulfilment;
 import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.order.domain.QuoteContext;
@@ -39,7 +40,7 @@ class QuoteServiceTest {
 
   @Test
   void quoteLinesUsesTheGivenLinesAndNeverChargesDelivery() {
-    var line = new com.vijay.mall.catalog.domain.PricedLine(UUID.randomUUID(), UUID.randomUUID(), "Rice", 2, 5000, 10000, true, true);
+    var line = new PricedLine(UUID.randomUUID(), UUID.randomUUID(), "Rice", 2, 5000, 10000, true, true);
     List<QuoteContext> seen = new ArrayList<>();
     QuoteStep capture = new QuoteStep() {
       @Override public int order() { return 100; }

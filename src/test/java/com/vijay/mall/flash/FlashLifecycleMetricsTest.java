@@ -14,11 +14,12 @@ import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.common.outbox.OutboxService;
 import com.vijay.mall.flash.app.FlashLifecycle;
 import com.vijay.mall.flash.app.FlashMetrics;
-import com.vijay.mall.flash.infra.FlashRepository;
 import com.vijay.mall.flash.infra.FlashRepository.Lifecycle;
+import com.vijay.mall.flash.infra.FlashRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -77,8 +78,8 @@ class FlashLifecycleMetricsTest {
     var registry = new SimpleMeterRegistry();
     var clock = new Clock() {
       long ms = NOW.toEpochMilli();
-      @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
-      @Override public Clock withZone(java.time.ZoneId z) { return this; }
+      @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+      @Override public Clock withZone(ZoneId z) { return this; }
       @Override public Instant instant() { return Instant.ofEpochMilli(ms); }
     };
     when(repo.stateCounts(any())).thenReturn(new FlashRepository.StateCounts(2, 1));

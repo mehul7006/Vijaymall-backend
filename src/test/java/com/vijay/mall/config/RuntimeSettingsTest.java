@@ -12,11 +12,13 @@ import static org.mockito.Mockito.when;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.RuntimeSettings.Change;
 import com.vijay.mall.config.RuntimeSettings.Source;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 class RuntimeSettingsTest {
   private final UUID admin = UUID.randomUUID();
@@ -114,7 +116,7 @@ class RuntimeSettingsTest {
   @Test
   void savingTheSameValueAgainChangesNothingAndSendsNoEvent() {
     s.save(List.of(c(RAZORPAY_KEY_SECRET, "topsecret"), c(DELIVERY_FEE, "4000")), admin);
-    org.mockito.Mockito.clearInvocations(f.events, f.audit);
+    Mockito.clearInvocations(f.events, f.audit);
     assertThat(s.save(List.of(c(RAZORPAY_KEY_SECRET, "topsecret"), c(DELIVERY_FEE, "4000")), admin)).isEmpty();
     verify(f.events, never()).publishEvent(any(Object.class));
     verify(f.audit, never()).log(any(), any(), any(), any(), any());
@@ -237,7 +239,7 @@ class RuntimeSettingsTest {
 
   @Test
   void theIssueCountIsAMetricForTheDashboard() {
-    var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    var registry = new SimpleMeterRegistry();
     s.bindTo(registry);
     assertThat(registry.get("mall.config.issues").gauge().value()).isZero();
     s.save(List.of(c(RAZORPAY_KEY_ID, "rzp_test_1")), admin);

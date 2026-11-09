@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -239,7 +240,7 @@ class CreditServiceTest {
     verify(repo).setLimit(eq(fresh), eq(20000L), any());
 
     service.setLimitByMobile(MOBILE, 100, cashier);
-    verify(users, org.mockito.Mockito.times(1)).insertCounterCustomer(anyString(), any());
+    verify(users, Mockito.times(1)).insertCounterCustomer(anyString(), any());
     assertThatThrownBy(() -> service.setLimitByMobile(MOBILE, -5, cashier)).isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> service.setLimitByMobile("12", 5, cashier)).isInstanceOf(ApiException.class);
   }

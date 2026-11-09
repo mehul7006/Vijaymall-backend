@@ -1,9 +1,12 @@
 package com.vijay.mall.config;
 
+import com.vijay.mall.common.cache.AppCaches;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Every setting the admin can change at run time. One list, so the admin screen, the validation and the code that uses a value
@@ -142,8 +145,8 @@ public final class Settings {
 
   /** How long each cache keeps its data, in seconds (0 = do not keep). One setting per cache, defaulting to the cache's own time. */
   private static List<Def> cacheTtls() {
-    List<Def> out = new java.util.ArrayList<>();
-    for (com.vijay.mall.common.cache.AppCaches.Name n : com.vijay.mall.common.cache.AppCaches.Name.values()) {
+    List<Def> out = new ArrayList<>();
+    for (AppCaches.Name n : AppCaches.Name.values()) {
       out.add(number("cache.ttl." + n.key, Group.CACHE, "Keep '" + n.key + "' for (seconds)", n.description + ". 0 = do not keep.",
           "app.cache.ttl." + n.key, Integer.toString(n.ttlSeconds), 0, 3600));
     }
@@ -153,7 +156,7 @@ public final class Settings {
   private static final List<Def> CACHE_TTLS = cacheTtls();
 
   /** The setting that says how long the given cache keeps its data. */
-  public static Def ttlOf(com.vijay.mall.common.cache.AppCaches.Name name) {
+  public static Def ttlOf(AppCaches.Name name) {
     return CACHE_TTLS.get(name.ordinal());
   }
 
@@ -163,7 +166,7 @@ public final class Settings {
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,
       GST_ROUND_OFF, CLIENT_IP_HEADER, CACHE_ENABLED);
 
-  public static final List<Def> ALL = java.util.stream.Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();
+  public static final List<Def> ALL = Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();
 
   private static final Map<String, Def> BY_KEY = ALL.stream().collect(Collectors.toMap(Def::key, Function.identity()));
 

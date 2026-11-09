@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.infra.OrderRepository;
 import com.vijay.mall.order.infra.OrderReturnRepository;
@@ -27,8 +28,10 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.support.TransactionCallback;
@@ -125,14 +128,14 @@ class OrderReturnServiceTest {
     stubFind();
     var stored = returns.find(UUID.randomUUID()).orElseThrow();
     when(returns.findByIdem("k1")).thenReturn(Optional.empty(), Optional.of(stored));
-    org.mockito.Mockito.doThrow(new DataIntegrityViolationException("dup")).when(tx).execute(any());
+    Mockito.doThrow(new DataIntegrityViolationException("dup")).when(tx).execute(any());
     assertThat(create(in("r")).orderNo()).isEqualTo("VSM-9");
   }
 
   @Test
   void raceWithoutAWinnerRethrows() {
     var boom = new DataIntegrityViolationException("dup");
-    org.mockito.Mockito.doThrow(boom).when(tx).execute(any());
+    Mockito.doThrow(boom).when(tx).execute(any());
     assertThatThrownBy(() -> create(in("r"))).isSameAs(boom);
   }
 
@@ -158,7 +161,7 @@ class OrderReturnServiceTest {
     rejects(in("x".repeat(201), item(prodA, 1, null)), "VALIDATION_FAILED");
     rejects(new OrderReturnService.Input("r", null), "VALIDATION_FAILED");
     rejects(in("r"), "VALIDATION_FAILED");
-    var many = java.util.stream.IntStream.range(0, 101).mapToObj(k -> item(prodA, 1, null)).toList();
+    var many = IntStream.range(0, 101).mapToObj(k -> item(prodA, 1, null)).toList();
     rejects(new OrderReturnService.Input("r", many), "VALIDATION_FAILED");
   }
 
@@ -191,9 +194,20 @@ class OrderReturnServiceTest {
     assertThat(v.items().get(1).productId()).isNull();
     verify(wallet, never()).clawback(any(), anyInt(), any());
     verify(wallet).restore(eq(user), anyInt(), any());
-    verify(inventory).release(anyList(), any(), eq("ORDER_RETURN"));
+    // no defective ledger wired here, so the item returned with restock=false is put back too (the units are never lost)
+    verify(inventory, Mockito.times(2)).release(anyList(), any(), eq("ORDER_RETURN"));
     verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(15000L), eq("CASH"), eq(0), anyInt(), eq(actor), anyList(), eq(now));
     verify(payments, never()).refundPartial(any(), anyLong(), anyString());
+  }
+
+  @Test
+  void goodsReturnedAsDefectiveGoToTheReviewQueueNotTheShelf() {
+    var defective = mock(DefectiveService.class);
+    service.setDefective(defective);
+    stubFind();
+    create(in("leaking", item(prodA, 2, true), item(prodB, 1, false)));
+    verify(inventory, Mockito.times(1)).release(anyList(), any(), eq("ORDER_RETURN")); // only the resellable item
+    verify(defective).record(anyList(), eq("ORDER_RETURN"), any(), eq(actor), eq("leaking"));
   }
 
   @Test
@@ -220,8 +234,11 @@ class OrderReturnServiceTest {
     items(1);
     when(orders.itemRows(orderId)).thenReturn(List.of(new OrderRepository.ItemRow(lineA, prodA, "Free", 2, 0, 0, 0, 0)));
     stubFind();
+    var defective = mock(DefectiveService.class);
+    service.setDefective(defective);
     create(in("r", item(prodA, 1, false)));
     verify(inventory, never()).release(anyList(), any(), anyString());
+    verify(defective).record(anyList(), eq("ORDER_RETURN"), any(), eq(actor), eq("r"));
     verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(0L), eq("NONE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now));
   }
 

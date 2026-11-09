@@ -20,6 +20,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 class ApprovalServiceTest {
@@ -70,8 +72,8 @@ class ApprovalServiceTest {
   void everyAttemptCountsTowardsTheCashiersTenMinuteLimitAndTooManyIsRefused() {
     service.approverFor(cashier, "1234");
     verify(limiter).check("approval-pin:" + cashier, 5, 600);
-    doThrow(ApiException.validation("x", "slow down")).when(limiter).check(anyString(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyLong());
+    doThrow(ApiException.validation("x", "slow down")).when(limiter).check(anyString(), ArgumentMatchers.anyInt(), ArgumentMatchers.anyLong());
     assertThatThrownBy(() -> service.approverFor(cashier, "1234")).isInstanceOf(ApiException.class);
-    verify(users, org.mockito.Mockito.times(1)).adminPins(); // the refused attempt never even looked at the PINs
+    verify(users, Mockito.times(1)).adminPins(); // the refused attempt never even looked at the PINs
   }
 }

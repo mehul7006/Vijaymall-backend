@@ -1,9 +1,9 @@
 package com.vijay.mall.pos.app;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.identity.domain.MobileNumbers;
 import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.UserRepository;
@@ -14,12 +14,14 @@ import com.vijay.mall.pos.domain.Money;
 import com.vijay.mall.pos.domain.PaymentRules;
 import com.vijay.mall.pos.infra.CreditRepository;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,11 +57,11 @@ public class CreditService {
   private final TransactionTemplate tx;
   private final Clock clock;
 
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
   private void changed(UUID customerId, String reason, long delta) { if (live != null) live.credit(customerId, reason, delta); }
 

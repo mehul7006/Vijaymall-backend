@@ -6,6 +6,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +38,7 @@ class ObservabilityFiltersTest {
   }
 
   private Map<String, Object> fields(ILoggingEvent e) {
-    var out = new java.util.HashMap<String, Object>();
+    var out = new HashMap<String, Object>();
     e.getKeyValuePairs().forEach(kv -> out.put(kv.key, kv.value));
     return out;
   }

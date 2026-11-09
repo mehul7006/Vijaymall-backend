@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -35,7 +36,7 @@ class CreditReportDebtorsCoverageTest {
     UUID asObject = UUID.randomUUID(), asText = UUID.randomUUID();
     Query count = query(2L, List.of());
     Query rows = query(null, List.of(
-        new Object[] {asObject, "Asha", "9000000001", 5000L, 10000L, java.sql.Timestamp.from(AT), null},
+        new Object[] {asObject, "Asha", "9000000001", 5000L, 10000L, Timestamp.from(AT), null},
         new Object[] {asText.toString(), "Bina", "9000000002", null, null, null, AT}));
     when(em.createNativeQuery(contains("COUNT(*)"))).thenReturn(count);
     when(em.createNativeQuery(contains("ORDER BY"))).thenReturn(rows);

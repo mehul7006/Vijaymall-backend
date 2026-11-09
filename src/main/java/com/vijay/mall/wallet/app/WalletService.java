@@ -2,7 +2,9 @@ package com.vijay.mall.wallet.app;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.WalletChanged;
 import com.vijay.mall.wallet.domain.CoinRule;
 import com.vijay.mall.wallet.domain.CoinSettings;
 import com.vijay.mall.wallet.domain.LotAllocator;
@@ -51,24 +53,24 @@ public class WalletService {
   /** Tells open screens the balance moved, once the surrounding transaction commits. */
   private void changed(UUID userId, String reason, int delta) {
     if (events != null && delta != 0) {
-      events.publishEvent(new com.vijay.mall.common.live.WalletChanged(userId, reason, delta, clock.instant()));
+      events.publishEvent(new WalletChanged(userId, reason, delta, clock.instant()));
     }
   }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): coin settings and rules are read on every quote, so they are cached. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
-  private void forget(com.vijay.mall.common.cache.AppCaches.Name name) { if (caches != null) caches.invalidate(name); }
+  private void forget(AppCaches.Name name) { if (caches != null) caches.invalidate(name); }
 
   public CoinSettings settings() {
-    return caches == null ? repo.settings() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COIN_SETTINGS, "1", repo::settings);
+    return caches == null ? repo.settings() : caches.get(AppCaches.Name.COIN_SETTINGS, "1", repo::settings);
   }
 
   private List<StoredRule> allRules() {
-    return caches == null ? repo.rules() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES, "all", repo::rules);
+    return caches == null ? repo.rules() : caches.get(AppCaches.Name.COIN_RULES, "all", repo::rules);
   }
 
   public int balance(UUID userId) { return repo.balance(userId); }
@@ -250,7 +252,7 @@ public class WalletService {
   public StoredRule createRule(StoredRule in, UUID actor) {
     UUID id = repo.insertRule(in);
     audit.log(actor, "CREATE", "coin_rule", id, in.rule().name());
-    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
+    forget(AppCaches.Name.COIN_RULES);
     return repo.rule(id).orElseThrow();
   }
 
@@ -259,7 +261,7 @@ public class WalletService {
     repo.rule(id).orElseThrow(() -> ApiException.notFound("Coin rule"));
     repo.updateRule(id, in);
     audit.log(actor, "UPDATE", "coin_rule", id, in.rule().name());
-    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
+    forget(AppCaches.Name.COIN_RULES);
     return repo.rule(id).orElseThrow();
   }
 
@@ -267,7 +269,7 @@ public class WalletService {
   public void deleteRule(UUID id, UUID actor) {
     repo.deleteRule(id);
     audit.log(actor, "DELETE", "coin_rule", id, null);
-    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_RULES);
+    forget(AppCaches.Name.COIN_RULES);
   }
 
   @Transactional
@@ -277,7 +279,7 @@ public class WalletService {
     if (s.expiryMonths() <= 0) throw ApiException.validation("expiryMonths", "must be positive");
     repo.saveSettings(s);
     audit.log(actor, "UPDATE", "coin_setting", 1, s.toString());
-    forget(com.vijay.mall.common.cache.AppCaches.Name.COIN_SETTINGS);
+    forget(AppCaches.Name.COIN_SETTINGS);
     return repo.settings();
   }
 }

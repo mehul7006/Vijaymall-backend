@@ -2,12 +2,16 @@ package com.vijay.mall.pos.app;
 
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
+import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.ReturnInput;
 import com.vijay.mall.pos.app.PosViews.ReturnLine;
 import com.vijay.mall.pos.domain.GstCalculator;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
+import com.vijay.mall.pos.domain.Money;
 import com.vijay.mall.pos.domain.PaymentRules;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ReturnItemRecord;
@@ -22,6 +26,9 @@ import com.vijay.mall.pos.infra.PosSaleRepository;
 import com.vijay.mall.wallet.app.WalletService;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +38,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -66,18 +75,23 @@ public class PosReturnService {
 
   /** Cashiers may take back goods from bills this recent; older bills need an admin (0 = no limit). */
   private int cashierReturnDays = 7;
-  private com.vijay.mall.config.RuntimeSettings settings;
+  private RuntimeSettings settings;
+  private DefectiveService defective;
+
+  /** Optional (plain unit tests run without it): where goods returned as defective are kept. */
+  @Autowired(required = false)
+  void setDefective(DefectiveService defective) { this.defective = defective; }
 
   /** Optional (plain unit tests run without it): the admin can change the return window from the config screen. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setSettings(com.vijay.mall.config.RuntimeSettings settings) { this.settings = settings; }
+  @Autowired(required = false)
+  void setSettings(RuntimeSettings settings) { this.settings = settings; }
 
   private int returnDays() {
-    return settings != null ? settings.getInt(com.vijay.mall.config.Settings.POS_CASHIER_RETURN_DAYS) : cashierReturnDays;
+    return settings != null ? settings.getInt(Settings.POS_CASHIER_RETURN_DAYS) : cashierReturnDays;
   }
 
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCashierReturnDays(@org.springframework.beans.factory.annotation.Value("${app.pos.cashier-return-days:7}") int days) {
+  @Autowired(required = false)
+  void setCashierReturnDays(@Value("${app.pos.cashier-return-days:7}") int days) {
     this.cashierReturnDays = days;
   }
 
@@ -103,7 +117,7 @@ public class PosReturnService {
   private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
     SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
     if (!admin && returnDays() > 0
-        && sale.createdAt().isBefore(clock.instant().minus(returnDays(), java.time.temporal.ChronoUnit.DAYS))) {
+        && sale.createdAt().isBefore(clock.instant().minus(returnDays(), ChronoUnit.DAYS))) {
       throw ApiException.unprocessable("RETURN_NEEDS_ADMIN", "This bill is older than " + returnDays()
           + " days: an admin must take the return", Map.of("days", returnDays()));
     }
@@ -147,7 +161,7 @@ public class PosReturnService {
           payOut);
     } catch (IllegalArgumentException e) {
       throw ApiException.validation("refunds", creditAdjust > 0
-          ? e.getMessage() + " (Rs " + com.vijay.mall.pos.domain.Money.plain(creditAdjust) + " of this return reduces the customer's credit)"
+          ? e.getMessage() + " (Rs " + Money.plain(creditAdjust) + " of this return reduces the customer's credit)"
           : e.getMessage());
     }
 
@@ -157,8 +171,22 @@ public class PosReturnService {
         throw ApiException.conflict("RETURN_EXCEEDS_SOLD", "More than what is left to return", Map.of("saleItemId", i.saleItemId().toString()));
       }
     });
-    inventory.release(items.stream().map(i -> new InventoryService.Item(byId.get(i.saleItemId()).productId(), i.qty())).toList(),
-        returnId, "POS_RETURN");
+    // units marked restock=false are damaged: kept apart as defective stock, the rest go back on the shelf
+    Map<UUID, Integer> defectiveQty = new HashMap<>();
+    if (in.items() != null) in.items().forEach(l -> {
+      if (l != null && l.saleItemId() != null && Boolean.FALSE.equals(l.restock())) defectiveQty.merge(l.saleItemId(), l.qty(), Integer::sum);
+    });
+    List<InventoryService.Item> backOnShelf = new ArrayList<>();
+    List<InventoryService.Item> damaged = new ArrayList<>();
+    for (ReturnItemRecord i : items) {
+      int bad = Math.min(i.qty(), defectiveQty.getOrDefault(i.saleItemId(), 0));
+      UUID product = byId.get(i.saleItemId()).productId();
+      if (i.qty() - bad > 0) backOnShelf.add(new InventoryService.Item(product, i.qty() - bad));
+      if (bad > 0) damaged.add(new InventoryService.Item(product, bad));
+    }
+    if (!backOnShelf.isEmpty()) inventory.release(backOnShelf, returnId, "POS_RETURN");
+    if (defective != null && !damaged.isEmpty()) defective.record(damaged, "POS_RETURN", returnId, cashierId, in.reason());
+    else if (!damaged.isEmpty()) inventory.release(damaged, returnId, "POS_RETURN"); // no defective ledger wired (plain unit tests): behave as before
     int clawed = sale.customerId() == null ? 0 : wallet.clawback(sale.customerId(), claw, returnId);
     if (sale.customerId() != null) wallet.restore(sale.customerId(), restore, returnId);
 

@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.error.GlobalExceptionHandler;
 import com.vijay.mall.order.api.AdminOrderController;
@@ -42,6 +43,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -70,7 +73,7 @@ class ControllerComponentTest {
     validator.afterPropertiesSet();
     mvc = MockMvcBuilders.standaloneSetup(new CartController(quotes), new OrderController(orders),
             new AdminOrderController(orders), new PaymentController(payments),
-            new WalletController(wallet, new com.vijay.mall.common.ReferenceNumbers(List.of()), Clock.fixed(Instant.parse("2026-11-01T10:00:00Z"), ZoneOffset.UTC)))
+            new WalletController(wallet, new ReferenceNumbers(List.of()), Clock.fixed(Instant.parse("2026-11-01T10:00:00Z"), ZoneOffset.UTC)))
         .setControllerAdvice(new GlobalExceptionHandler()).setValidator(validator).build();
     TestAuth.login(user, "CUSTOMER");
   }
@@ -205,7 +208,7 @@ class ControllerComponentTest {
 
   @Test
   void badSignatureIs400() throws Exception {
-    org.mockito.Mockito.doThrow(new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "BAD_SIGNATURE", "Invalid signature"))
+    Mockito.doThrow(new ApiException(HttpStatus.BAD_REQUEST, "BAD_SIGNATURE", "Invalid signature"))
         .when(payments).handleWebhook(any(), any(), any());
     mvc.perform(post("/api/v1/payments/webhook/razorpay").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("BAD_SIGNATURE"));

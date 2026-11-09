@@ -131,6 +131,8 @@ Cross-references (documented in the catalog document, not here): `POST /api/v1/a
 
 ## Offline mode
 
+> **Read the addendum at the end of this file first**: new apps send the bill **as rung** (`rung` snapshot of the prices the till charged) and the server records it as it was, listing differences as exceptions for the manager. The re-pricing behaviour described in steps 4-6 below is the **legacy path**, used only for bills sent without `rung` (old app versions).
+
 The backend supports a till that keeps selling when the internet is down. The flow is entirely client-driven:
 
 1. **While online**, keep a local copy of the product list. There is **no bulk catalog endpoint**: page through `GET /pos/products?page=N&size=50` (50 is the maximum) until `items` is empty or `page*size >= total`, and store each product with its barcodes, `plu`, `soldBy`, `pricePaise`, `gstPercent`, `qtyOnHand`. Also store `GET /pos/shop` (weighed prefix/mode, UPI id, footer). Save `catalogVersion` from `GET /pos/sync/status`.
@@ -146,7 +148,7 @@ The backend supports a till that keeps selling when the internet is down. The fl
    - **Prices are re-read from the server at upload time.** The server prices the cart at *current* prices and requires `payments` to add up exactly to its own total. If a price, GST rate or round-off setting changed while the till was offline, the bill is rejected with `VALIDATION_FAILED` ("payments add up to X but the bill is Y"). Manager must re-enter it as a new bill (a corrected bill may reuse the same key because nothing was stored; keep the original key to stay idempotent).
    - Coupons (`COUPON_INVALID`), coins (`VALIDATION_FAILED` "not enough coins"), and credit (`CREDIT_NOT_ALLOWED`, `CREDIT_LIMIT_EXCEEDED`) are checked against live data at upload. Recommended: disable coupons, coins and credit while offline.
    - `soldAt`: `VALIDATION_FAILED` with field `soldAt` if older than 7 days or in the future.
-   - `SHIFT_NOT_OPEN` if the shop requires shifts and the uploading cashier has no open shift at upload time. **(unsure: not specially handled for offline.)** Upload while the shift is open.
+   - `SHIFT_NOT_OPEN` if the shop requires shifts and the uploading cashier has no open shift at upload time. **Not applied to offline bills:** an offline bill was rung up in the till's own shift, so the uploader does not need an open shift at upload time (online `POST /pos/sales` still does).
    - `DISCOUNT_NEEDS_APPROVAL` if a cashier's manual discount is over the limit and no valid PIN was supplied (the PIN is verified at upload; store `approverPin` with the bill only if your security policy allows it).
 7. **Shifts and cash.** Expected drawer cash counts bills by their stored time (`soldAt`) against the shift's open time, so bills uploaded long after the sale and whose `soldAt` is before the current shift opened do not appear in the current shift's expected cash. Upload the queue **before** closing the shift.
 8. **Returns, holds, credit repayments and shift calls are online-only** (no offline endpoint).
@@ -646,7 +648,7 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 ```
 `status` = `CREATED` | `DUPLICATE` | `REJECTED`. For REJECTED, `errorCode` is the same code the single-sale endpoint would have returned (`VALIDATION_FAILED`, `OUT_OF_STOCK` is *not* possible for offline bills, `COUPON_INVALID`, `DISCOUNT_NEEDS_APPROVAL`, `SHIFT_NOT_OPEN`, `CREDIT_NOT_ALLOWED`, `CREDIT_LIMIT_EXCEEDED`, `INTERNAL_ERROR`) and `message` is human readable.
 - **Errors** (whole request): 400 `VALIDATION_FAILED` (empty list, over 50, malformed JSON); 401/403/429. An invalid single bill never turns the call into an error.
-- **UI notes**: see the Offline mode section. Process results by `idempotencyKey` (the order is the same as sent). Bills in a batch are processed in order, so put older bills first. A bill with a null `cart` is reported as REJECTED `INTERNAL_ERROR` **(unsure: not validated)**; do not send it.
+- **UI notes**: see the Offline mode section. Process results by `idempotencyKey` (the order is the same as sent). Bills in a batch are processed in order, so put older bills first. A bill with neither `rung` nor `cart` is reported as REJECTED `VALIDATION_FAILED`.
 
 ---
 
@@ -883,3 +885,94 @@ Sorted by `salesPaise` descending. Percentages are of that cashier's own sales, 
 - Offline upload when the shop requires open shifts: refused if the uploader has no open shift at that moment.
 - Cost per unit for weighed products in purchases is not defined by the code.
 - Staff create on an existing non-admin e-mail converts that account to CASHIER.
+
+
+---
+## Addendum: defective returns, safe retries, small validation changes
+
+### Returning goods claimed as defective (review flow)
+A customer saying "it is defective" is a claim, not a fact. Staff look at the goods and decide.
+
+1. **Taking the return.** `POST /api/v1/pos/sales/{id}/returns` lines accept an optional `restock` flag: `{ "saleItemId": "...", "qty": 2, "restock": false }`. `restock` null or `true` = the goods are fine: they go straight back on the shelf (as before). `false` = "claimed defective": the customer is refunded and the credit note is issued as usual, but those units are **not** added to sellable stock; they wait in a review queue with status `PENDING_REVIEW`. A line can be split by sending the same `saleItemId` twice with different flags. The online equivalent is `restock:false` on `POST /api/v1/admin/orders/{id}/returns` (file 20).
+2. **Review (staff or admin).** Someone looks at the goods and decides with `POST /api/v1/pos/stock/defective/{id}/review`:
+   - `CONFIRM_DEFECTIVE`: it really is defective. The batch moves to the defective list (status `HELD`).
+   - `RESTOCK`: it is fine after all. The units are added back to sellable inventory (status `RESTOCKED`).
+3. **Final decision (admin only)** on a confirmed-defective (`HELD`) batch: `POST /api/v1/admin/stock/defective/{id}/resolve` with `WRITE_OFF` or `RETURN_TO_SUPPLIER`. Confirmed-defective goods are never added back to sellable stock; if a confirmation was a mistake, correct the stock with the normal stock adjustment.
+
+Statuses: `PENDING_REVIEW` -> (`HELD` | `RESTOCKED`); `HELD` -> (`WRITTEN_OFF` | `RETURNED_TO_SUPPLIER`). Each step can be done once.
+
+### GET /api/v1/pos/stock/defective
+- **Who**: cashier or admin (the review queue). **Purpose**: the "returned goods to check" screen at the counter or back office.
+- **Request**: query `status` (default `PENDING_REVIEW`; one of `PENDING_REVIEW`, `HELD`, `WRITTEN_OFF`, `RETURNED_TO_SUPPLIER`, `RESTOCKED`; other = 400 `fields.status`), `productId` (optional uuid), `page` (default 0), `size` (default 20, max 50).
+- **Response**: `{ items: [ { id, productId, productName, qty, source ("ORDER_RETURN"|"POS_RETURN"), refId (the return it came from), note (reason given at the return), status, createdAt, createdBy, reviewedAt, reviewedBy, reviewNote, resolvedAt, resolvedBy, resolveNote } ], page, size, total }`, newest first.
+
+### POST /api/v1/pos/stock/defective/{id}/review
+- **Who**: cashier or admin. **Purpose**: decide a claim (see flow above). A counter staff member cannot `CONFIRM_DEFECTIVE` the batch they took back themselves: that answers `422 DEFECTIVE_SELF_REVIEW`; another person or the admin must confirm it (`RESTOCK` has no such limit).
+- **Request**: body `{ "decision": "CONFIRM_DEFECTIVE" | "RESTOCK", "note": string(optional, max 200) }` (decision is case-insensitive; anything else, including `WRITE_OFF`, is 400 `VALIDATION_FAILED` `fields.decision`; note longer than 200 is 400 `fields.note`).
+- **Response**: `200` the batch with its new `status` (`HELD` or `RESTOCKED`), `reviewedAt`, `reviewedBy`, `reviewNote`.
+- **Errors**: 404 `NOT_FOUND` unknown batch; 409 `DEFECTIVE_ALREADY_REVIEWED` the batch is no longer waiting for review.
+- **UI notes**: show the quantity, product, return reason and who took the return; two buttons "Defective" and "Fine, put back on sale"; refresh the queue afterwards.
+
+### GET /api/v1/admin/stock/defective
+- **Who**: admin only. **Purpose**: the full report of returned goods and what became of them. Same query and response as `GET /api/v1/pos/stock/defective` but `status` defaults to all.
+
+### GET /api/v1/admin/stock/defective/summary
+- **Who**: admin only. **Purpose**: dashboard tile and list of what is open right now.
+- **Response**: `[ { productId, productName, heldQty (confirmed defective, waiting for write-off or supplier), pendingReviewQty (claims not yet reviewed), batches } ]`, biggest first.
+
+### POST /api/v1/admin/stock/defective/{id}/resolve
+- **Who**: admin only. **Purpose**: the owner's final decision on a confirmed-defective batch.
+- **Request**: body `{ "action": "WRITE_OFF" | "RETURN_TO_SUPPLIER", "note": string(optional, max 200) }`. Any other value (including `RESTOCK`: confirmed-defective goods are never put back on sale) is 400 `VALIDATION_FAILED` `fields.action`.
+- **Response**: `200` the batch with status `WRITTEN_OFF` or `RETURNED_TO_SUPPLIER`, `resolvedAt`, `resolvedBy`, `resolveNote`.
+- **Errors**: 404 `NOT_FOUND`; 409 `DEFECTIVE_NOT_HELD` the batch is not a confirmed-defective one waiting for a decision (still pending review, or already decided).
+- Ops metrics: `mall_stock_defective_pending_units` (claims waiting for review) and `mall_stock_defective_units` (confirmed defective, held).
+
+### Optional Idempotency-Key on admin actions
+`POST /admin/credit/accounts/{customerId}/adjust` and `POST /admin/stock-takes` accept an optional `Idempotency-Key` header (see the addendum in file 10 for the rules). A repeat of a credit adjustment is not applied again; a repeat of a stock take returns the first call's result and changes nothing. Same key + different request (or different admin) = `409 IDEMPOTENCY_KEY_REUSED`.
+
+### Validation changes
+- `POST /pos/sales` without a `cart`, and a payment line without a `mode`, answer 400 `VALIDATION_FAILED` (they used to answer 500). In an offline upload a bill without a `cart` is reported as `REJECTED` with `errorCode` `VALIDATION_FAILED`.
+- An offline bill's invoice number uses the financial year of its `soldAt` date (not the upload day), so a bill sold on 31 March and uploaded on 2 April belongs to the old year.
+
+
+---
+## Addendum: offline bills recorded "as rung" (current standard)
+
+A customer who has already paid and left cannot be sent back to pay a different price. So an offline bill is recorded **exactly as the till rang it**; anything that differs from the server's current data becomes an **exception** that a manager reviews. The sale is never lost.
+
+### POST /api/v1/pos/sync/sales (extended)
+Each bill in `sales[]` may carry a `rung` snapshot:
+
+```json
+{ "idempotencyKey": "uuid", "soldAt": "2026-11-09T04:10:00Z",
+  "cart": { "customerMobile": "9000000001" },
+  "rung": { "lines": [ { "productId": "uuid", "qty": 2, "unitPricePaise": 12500, "gstPercent": 5, "discountPaise": 0, "name": "Basmati Rice", "linePaise": 25000 } ] },
+  "payments": [ { "mode": "CASH", "amountPaise": 25000 } ], "cashTenderedPaise": 30000,
+  "manualDiscount": { "amountPaise": 0, "reason": "" } }
+```
+
+| field | rules |
+|---|---|
+| `rung.lines[]` | at least one; each: `productId` (must exist), `qty` > 0 (pieces; **grams for weighed items**), `unitPricePaise` >= 0 (per piece, or per 1000 g for weighed items), `gstPercent` one of 0, 3, 5, 12, 18, 28, `discountPaise` >= 0 and not more than the line (default 0), `name` optional, `linePaise` optional but, if sent, must equal price x qty (weighed: the amount the till charged) |
+| `payments` | modes `CASH`, `UPI`, `CARD`; must add up **exactly** to the as-rung total (line amounts less discounts, with the shop's `gst.roundOff` applied). Anything else is refused |
+| `cart.customerMobile` | optional: the only part of `cart` that is read when `rung` is present (the customer is linked to the bill; **no coins are earned** on an as-rung bill) |
+| `manualDiscount` | optional fixed amount the till already applied; recorded without a manager PIN check and always raises a `DISCOUNT` exception |
+| not allowed with `rung` | coupons, coin redemption and CREDIT (udhar) payments cannot be checked offline: `REJECTED` `VALIDATION_FAILED` |
+
+The server stores the sale as an offline sale: `soldAt` is the sale time, the **financial year and invoice number come from `soldAt`** (not the upload day), no open shift is needed, stock is taken best-effort (never fails for short stock), tax (taxable/CGST/SGST) is computed from the till's own prices and GST rates. Without `rung` the old re-pricing path runs (legacy).
+
+**Hard rejections** (`REJECTED`, `errorCode` `VALIDATION_FAILED`, `message` names the field): missing idempotency key; no lines or a line without `productId`; qty missing or <= 0 or too large; unit price missing or negative; `gstPercent` missing or not an allowed rate; unknown product; discount negative or more than the line; `linePaise` not equal to price x qty; manual discount negative or more than the bill; payments not equal to the total or an empty payment line; `soldAt` outside the 7-day window; coupon/coins/credit with `rung`. A duplicate key is `DUPLICATE`. Keep a rejected bill on the device and show it in a "needs attention" list.
+
+**Per-bill result** (existing fields unchanged): `status` (`CREATED` | `DUPLICATE` | `REJECTED`), `saleId`, `invoiceNo`, `errorCode`, `message`, plus new `exceptions: [ { "kind": "...", "detail": "..." } ]` (empty for `REJECTED`; `DUPLICATE` returns the earlier bill's exceptions). Show "recorded, the manager will review" when `exceptions` is not empty.
+
+**Exception kinds** (the bill is still recorded and flagged `needsReview`): `PRICE_CHANGED` (the till's price differs from the current catalog price; a flash-sale price shows as this), `GST_CHANGED`, `PRODUCT_INACTIVE`, `DISCOUNT` (one per discounted line plus one for a manual discount: the manager PIN could not be checked offline), `OVERSOLD` (the shelf had less than was sold).
+
+### GET /api/v1/admin/pos/offline-exceptions
+- **Who**: admin only. **Purpose**: the manager's "offline bills to review" list.
+- **Request**: query `status` (`OPEN` default, or `REVIEWED`; other = 400), `page` (default 0), `size` (default 20, max 50).
+- **Response**: `{ items: [ { id, saleId, invoiceNo, cashierId, cashierName, soldAt, kind, detail, productId, productName, expected, actual, createdAt, reviewedBy, reviewedAt, reviewNote } ], page, size, total }`, newest first. `expected`/`actual` are plain strings: paise for prices and discounts, percent for GST, units for stock.
+
+### POST /api/v1/admin/pos/offline-exceptions/{id}/review
+- **Who**: admin only. **Request**: body `{ "note": string(optional, max 500) }`. **Response**: `200` the row with `reviewedBy`, `reviewedAt`, `reviewNote`.
+- **Errors**: 404 `NOT_FOUND`; 409 `ALREADY_REVIEWED` (each exception is reviewed once). Writes the audit entry `OFFLINE_EXCEPTION_REVIEWED`.
+- **Ops**: metrics `mall_pos_offline_exceptions_open`, `mall_pos_offline_exceptions_stale` (open for more than a day), `mall_pos_offline_exceptions_recorded_total{kind}`; alert `OfflineBillExceptionsUnreviewed`.

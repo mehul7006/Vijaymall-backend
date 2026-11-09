@@ -1,5 +1,7 @@
 package com.vijay.mall.it;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.vijay.mall.order.app.OrderService;
 import com.vijay.mall.payment.app.PaymentService;
 import com.vijay.mall.payment.infra.PaymentRepository;
@@ -9,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -17,9 +20,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import static org.assertj.core.api.Assertions.assertThat;
 
 /** Returns on delivered online orders and the admin's refund monitor, against real PostgreSQL with a fake payment provider. */
 @Import(OrderReturnIT.FakeProvider.class)
@@ -36,7 +39,7 @@ class OrderReturnIT extends IntegrationTestBase {
 
   @Autowired FakeGateway fake;
 
-  @org.junit.jupiter.api.BeforeEach
+  @BeforeEach
   void ready() {
     restock("Orange Juice", 40);
     call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken(), List.of(Map.of("code", "ONLINE", "enabled", true)), null);
@@ -73,7 +76,7 @@ class OrderReturnIT extends IntegrationTestBase {
     return new Delivered(token, id, total, pid);
   }
 
-  private org.springframework.http.ResponseEntity<Map> giveBack(String token, Delivered d, int qty, boolean restock, String key) {
+  private ResponseEntity<Map> giveBack(String token, Delivered d, int qty, boolean restock, String key) {
     return call(HttpMethod.POST, "/api/v1/admin/orders/" + d.orderId() + "/returns", token,
         Map.of("reason", "damaged on arrival", "items", List.of(Map.of("productId", d.productId(), "qty", qty, "restock", restock))), key);
   }

@@ -1,12 +1,14 @@
 package com.vijay.mall.report.app;
 
 import com.vijay.mall.catalog.app.CatalogService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.infra.InventoryRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.sql.Date;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -15,6 +17,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,16 +48,16 @@ public class ReportService {
     this.clock = clock;
   }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): the dashboard adds up the whole day, so it is kept for 30 seconds. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   @Transactional(readOnly = true)
   public Dashboard dashboard() {
     LocalDate today = clock.instant().atZone(SHOP).toLocalDate();
-    return caches == null ? compute(today) : caches.get(com.vijay.mall.common.cache.AppCaches.Name.DASHBOARD, today, () -> compute(today));
+    return caches == null ? compute(today) : caches.get(AppCaches.Name.DASHBOARD, today, () -> compute(today));
   }
 
   private Dashboard compute(LocalDate today) {
@@ -75,7 +78,7 @@ public class ReportService {
 
   /** Always seven entries, oldest first; days without orders show zero. */
   @SuppressWarnings("unchecked")
-  private List<Day> lastSevenDays(LocalDate today, java.time.Instant from) {
+  private List<Day> lastSevenDays(LocalDate today, Instant from) {
     List<Object[]> rows = em.createNativeQuery(
             "SELECT (placed_at AT TIME ZONE 'Asia/Kolkata')::date AS d, COALESCE(SUM(total_paise), 0) AS s FROM orders "
                 + "WHERE placed_at >= :f AND " + COUNTED + " GROUP BY 1")
@@ -106,7 +109,7 @@ public class ReportService {
     return low.stream().map(s -> new LowItem(s.productId(), names.getOrDefault(s.productId(), "?"), s.qty())).toList();
   }
 
-  private long scalar(String sql, java.time.Instant param) {
+  private long scalar(String sql, Instant param) {
     return ((Number) em.createNativeQuery(sql).setParameter("d", param).getSingleResult()).longValue();
   }
 }

@@ -19,23 +19,26 @@ import com.vijay.mall.flash.domain.FlashKind;
 import com.vijay.mall.flash.domain.FlashMath;
 import com.vijay.mall.flash.domain.FlashStatus;
 import com.vijay.mall.flash.domain.FlashWindow;
-import com.vijay.mall.flash.infra.FlashRepository;
 import com.vijay.mall.flash.infra.FlashRepository.Item;
 import com.vijay.mall.flash.infra.FlashRepository.Sale;
+import com.vijay.mall.flash.infra.FlashRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -266,8 +269,8 @@ public class FlashSaleService {
     Item built = buildItem(s, new ItemInput(old.productId(), in.discountKind(), in.discountValue(), in.maxQty(), in.perCustomerLimit()),
         productsById(Set.of(old.productId())).get(old.productId()), itemId);
     if (old.soldQty() > 0 || repo.hasHistory(itemId)) {
-      boolean sameRest = java.util.Objects.equals(old.discountKind(), built.discountKind()) && old.discountValue() == built.discountValue()
-          && java.util.Objects.equals(old.perCustomerLimit(), built.perCustomerLimit());
+      boolean sameRest = Objects.equals(old.discountKind(), built.discountKind()) && old.discountValue() == built.discountValue()
+          && Objects.equals(old.perCustomerLimit(), built.perCustomerLimit());
       if (!sameRest) {
         throw ApiException.conflict("FLASH_ITEM_SOLD", "Units of this item have already been sold: only the quantity can be raised", Map.of());
       }
@@ -477,7 +480,7 @@ public class FlashSaleService {
         s.perCustomerLimit(), s.cancelledAt(), s.createdBy(), s.createdAt(), now);
   }
 
-  private Map<UUID, ProductData> productsById(java.util.Collection<UUID> ids) {
+  private Map<UUID, ProductData> productsById(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
     return catalog.posProducts(ids).stream().collect(Collectors.toMap(ProductData::id, p -> p, (a, _) -> a));
   }
@@ -493,7 +496,7 @@ public class FlashSaleService {
 
   private void changed() { live.area(CatalogChanged.FLASH); }
 
-  private static org.slf4j.spi.LoggingEventBuilder logEvent(String event, Sale s, UUID actor) {
+  private static LoggingEventBuilder logEvent(String event, Sale s, UUID actor) {
     return log.atInfo().setMessage("Flash sale " + event.substring("flash-".length())).addKeyValue("event", event).addKeyValue("saleId", s.id())
         .addKeyValue("name", s.name()).addKeyValue("startsAt", s.startsAt()).addKeyValue("endsAt", s.endsAt()).addKeyValue("actor", actor);
   }

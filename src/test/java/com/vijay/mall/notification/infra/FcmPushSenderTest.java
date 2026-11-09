@@ -14,24 +14,33 @@ import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
 import com.vijay.mall.identity.infra.DeviceRepository;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Signature;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.RSAPrivateCrtKeySpec;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -42,8 +51,8 @@ class FcmPushSenderTest {
   /** A clock the test can move. */
   static class MutableClock extends Clock {
     volatile Instant now = Instant.parse("2026-01-01T00:00:00Z");
-    @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
-    @Override public Clock withZone(java.time.ZoneId z) { return this; }
+    @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+    @Override public Clock withZone(ZoneId z) { return this; }
     @Override public Instant instant() { return now; }
   }
 
@@ -51,8 +60,10 @@ class FcmPushSenderTest {
   MutableClock clock = new MutableClock();
   AtomicInteger tokenCalls = new AtomicInteger();
   List<String> assertions = new CopyOnWriteArrayList<>();
-  List<String[]> sendCalls = new CopyOnWriteArrayList<>(); // {authorization, body}
-  Map<String, Object[]> sendAnswers = new ConcurrentHashMap<>(); // device token -> {status, body}
+  /** {authorization, body} */
+  List<String[]> sendCalls = new CopyOnWriteArrayList<>();
+  /** device token -> {status, body} */
+  Map<String, Object[]> sendAnswers = new ConcurrentHashMap<>();
   volatile int tokenStatus = 200;
   volatile String tokenBody = "{\"access_token\":\"AT-1\",\"expires_in\":3600}";
   volatile String lastTokenRequest;
@@ -72,7 +83,7 @@ class FcmPushSenderTest {
       keys = g.generateKeyPair();
     }
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+    server.setExecutor(Executors.newCachedThreadPool());
     server.createContext("/token", x -> {
       tokenCalls.incrementAndGet();
       lastTokenRequest = new String(x.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -114,7 +125,7 @@ class FcmPushSenderTest {
   static String account(String tokenUri) {
     String pem = "-----BEGIN PRIVATE KEY-----\n"
         + Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(keys.getPrivate().getEncoded()) + "\n-----END PRIVATE KEY-----\n";
-    Map<String, Object> m = new java.util.LinkedHashMap<>();
+    Map<String, Object> m = new LinkedHashMap<>();
     m.put("type", "service_account");
     m.put("project_id", "demo-proj");
     m.put("client_email", "bot@demo-proj.iam.gserviceaccount.com");
@@ -135,7 +146,7 @@ class FcmPushSenderTest {
     // form body: grant_type + assertion, the assertion is an RS256 JWT verifiable with the public key
     String[] pairs = lastTokenRequest.split("&");
     assertThat(pairs[0]).isEqualTo("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer");
-    String jwt = java.net.URLDecoder.decode(pairs[1].substring("assertion=".length()), StandardCharsets.UTF_8);
+    String jwt = URLDecoder.decode(pairs[1].substring("assertion=".length()), StandardCharsets.UTF_8);
     String[] parts = jwt.split("\\.");
     assertThat(parts).hasSize(3);
     JsonNode header = JSON.readTree(Base64.getUrlDecoder().decode(parts[0]));
@@ -256,7 +267,7 @@ class FcmPushSenderTest {
   @Test
   void aFailingTokenDeleteDoesNotEscape() {
     sendAnswers.put("gone", new Object[] {404, "{}"});
-    org.mockito.Mockito.doThrow(new IllegalStateException("db down")).when(devices).deleteToken("gone");
+    Mockito.doThrow(new IllegalStateException("db down")).when(devices).deleteToken("gone");
     sender.send(List.of("gone", "next"), "a", "b");
     assertThat(sendCalls).hasSize(2);
   }
@@ -378,11 +389,11 @@ class FcmPushSenderTest {
   @Test
   void aKeyThatCannotSignIsSwallowedAndNeverReachesTheTokenEndpoint() throws Exception {
     // Same RSA key but with a damaged CRT parameter: it is readable, yet every signature attempt fails its own check.
-    var good = (java.security.interfaces.RSAPrivateCrtKey) keys.getPrivate();
-    var damaged = new java.security.spec.RSAPrivateCrtKeySpec(good.getModulus(), good.getPublicExponent(), good.getPrivateExponent(),
-        good.getPrimeP(), good.getPrimeQ(), good.getPrimeExponentP().add(java.math.BigInteger.TWO), good.getPrimeExponentQ(), good.getCrtCoefficient());
-    byte[] der = java.security.KeyFactory.getInstance("RSA").generatePrivate(damaged).getEncoded();
-    Map<String, Object> m = new java.util.LinkedHashMap<>();
+    var good = (RSAPrivateCrtKey) keys.getPrivate();
+    var damaged = new RSAPrivateCrtKeySpec(good.getModulus(), good.getPublicExponent(), good.getPrivateExponent(),
+        good.getPrimeP(), good.getPrimeQ(), good.getPrimeExponentP().add(BigInteger.TWO), good.getPrimeExponentQ(), good.getCrtCoefficient());
+    byte[] der = KeyFactory.getInstance("RSA").generatePrivate(damaged).getEncoded();
+    Map<String, Object> m = new LinkedHashMap<>();
     m.put("project_id", "demo-proj");
     m.put("client_email", "bot@demo-proj.iam.gserviceaccount.com");
     m.put("private_key", "-----BEGIN PRIVATE KEY-----\n" + Base64.getEncoder().encodeToString(der) + "\n-----END PRIVATE KEY-----\n");

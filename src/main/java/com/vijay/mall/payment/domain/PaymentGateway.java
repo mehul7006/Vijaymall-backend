@@ -27,6 +27,15 @@ public interface PaymentGateway {
   /** Returns the provider's refund reference. */
   String refund(String providerRef, long amountPaise, String reason);
 
+  /**
+   * Same, but tells the provider which of our refund rows this is, so a refund that went through while its answer was lost can
+   * be found again (see {@link #findRefund}). Providers that cannot do this just use the plain call.
+   */
+  default String refund(String providerRef, long amountPaise, String reason, String ourRefundId) { return refund(providerRef, amountPaise, reason); }
+
+  /** The provider's reference of a refund we sent earlier for {@code ourRefundId}, if it has one: stops a retry from refunding twice. */
+  default Optional<String> findRefund(String providerRef, String ourRefundId) { return Optional.empty(); }
+
   /** Asks the provider what happened, for orders whose webhook never arrived. */
   Optional<PaymentEvent> fetchStatus(String providerOrderId);
 }

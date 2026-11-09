@@ -96,9 +96,9 @@ class PaymentServiceTest {
   void capturedWithWrongAmountIsNotAccepted() {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     service.handleWebhook("fake", body("e2", "captured", "fake_" + orderId, 4999), Map.of("x-fake-signature", "ok"));
-    verify(repo).setStatus(eq(paymentId), eq("MISMATCH"), any(), eq("amount mismatch"), any());
-    verify(repo).insertRefund(eq(paymentId), eq(4999L), eq("PENDING"), any(), eq("amount mismatch"), any());
-    verify(events, never()).publishEvent(any(Object.class));
+    verify(repo, never()).setStatus(any(), any(), any(), any(), any());
+    verify(repo).insertRefund(eq(paymentId), eq(4999L), eq("PENDING"), any(), eq("amount mismatch"), eq("pay_e2"), any());
+    verify(events, never()).publishEvent(any(PaymentEvents.PaymentCaptured.class));
   }
 
   @Test
@@ -114,7 +114,8 @@ class PaymentServiceTest {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CAPTURED", 5000)));
     service.handleWebhook("fake", body("e4", "captured", "fake_" + orderId, 5000), Map.of("x-fake-signature", "ok"));
     verify(repo, never()).setStatus(any(), any(), any(), any(), any());
-    verify(events, never()).publishEvent(any(Object.class));
+    verify(events, never()).publishEvent(any(PaymentEvents.PaymentCaptured.class));
+    verify(repo).insertRefund(eq(paymentId), eq(5000L), eq("PENDING"), any(), eq("duplicate payment"), eq("pay_e4"), any());
   }
 
   @Test
@@ -137,9 +138,9 @@ class PaymentServiceTest {
   void aCaptureOfTheWrongAmountIsQueuedForRefund() {
     when(repo.byProviderOrder("fake", "fake_" + orderId)).thenReturn(Optional.of(payment("CREATED", 5000)));
     service.handleWebhook("fake", body("e7", "captured", "fake_" + orderId, 4900), Map.of("x-fake-signature", "ok"));
-    verify(repo).setStatus(eq(paymentId), eq("MISMATCH"), eq("pay_e7"), any(), any());
-    verify(repo).insertRefund(eq(paymentId), eq(4900L), eq("PENDING"), any(), eq("amount mismatch"), any());
-    verify(events, never()).publishEvent(any(Object.class));
+    verify(repo, never()).setStatus(any(), any(), any(), any(), any());
+    verify(repo).insertRefund(eq(paymentId), eq(4900L), eq("PENDING"), any(), eq("amount mismatch"), eq("pay_e7"), any());
+    verify(events, never()).publishEvent(any(PaymentEvents.PaymentCaptured.class));
   }
 
   @Test

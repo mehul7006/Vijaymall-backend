@@ -25,7 +25,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class ShopStaffReportServiceTest {
   private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -133,9 +135,9 @@ class ShopStaffReportServiceTest {
     var users = mock(UserRepository.class);
     var service = new StaffService(users, mock(AuditService.class), clock);
     UUID blocked = UUID.randomUUID();
-    org.mockito.Mockito.when(users.isBlocked(blocked)).thenReturn(true);
-    org.junit.jupiter.api.Assertions.assertFalse(service.isActive(blocked));
-    org.junit.jupiter.api.Assertions.assertTrue(service.isActive(UUID.randomUUID()));
+    Mockito.when(users.isBlocked(blocked)).thenReturn(true);
+    Assertions.assertFalse(service.isActive(blocked));
+    Assertions.assertTrue(service.isActive(UUID.randomUUID()));
   }
 
   @Test

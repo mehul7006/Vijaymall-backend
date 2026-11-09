@@ -3,7 +3,9 @@ package com.vijay.mall.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.security.GeneralSecurityException;
 import java.util.Base64;
+import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
 
 class ConfigCryptoTest {
@@ -54,8 +56,8 @@ class ConfigCryptoTest {
     // A key of an impossible size cannot come from the constructor (it insists on 32 bytes), so it is put in place directly.
     var field = ConfigCrypto.class.getDeclaredField("key");
     field.setAccessible(true);
-    field.set(crypto, new javax.crypto.spec.SecretKeySpec(new byte[5], "AES"));
+    field.set(crypto, new SecretKeySpec(new byte[5], "AES"));
     assertThatThrownBy(() -> crypto.encrypt("hello")).isInstanceOf(IllegalStateException.class).hasMessageContaining("could not encrypt")
-        .hasCauseInstanceOf(java.security.GeneralSecurityException.class);
+        .hasCauseInstanceOf(GeneralSecurityException.class);
   }
 }

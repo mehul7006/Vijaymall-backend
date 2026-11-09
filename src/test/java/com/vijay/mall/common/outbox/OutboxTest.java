@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -77,7 +78,7 @@ class OutboxTest {
     when(jpa.nextBatch(any())).thenReturn(List.of());
     var events = mock(ApplicationEventPublisher.class);
     new OutboxRelay(jpa, events, new TransactionTemplate(mock(PlatformTransactionManager.class)), clock).publishPending();
-    org.mockito.Mockito.verifyNoInteractions(events);
+    Mockito.verifyNoInteractions(events);
   }
 
   @Test

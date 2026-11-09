@@ -25,10 +25,12 @@ import com.vijay.mall.catalog.infra.BannerRepository;
 import com.vijay.mall.catalog.infra.CategoryRepository;
 import com.vijay.mall.catalog.infra.ProductRepository;
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.infra.InventoryRepository.Stock;
+import com.vijay.mall.inventory.infra.InventoryRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -37,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 class CatalogServiceTest {
   private static final Instant NOW = Instant.parse("2026-11-01T10:00:00Z");
@@ -67,7 +71,7 @@ class CatalogServiceTest {
     inventory = mock(InventoryService.class);
     audit = mock(AuditService.class);
     service = new CatalogService(products, categories, banners, inventory, audit, Clock.fixed(NOW, ZoneOffset.UTC),
-        mock(com.vijay.mall.common.ReferenceNumbers.class));
+        mock(ReferenceNumbers.class));
     when(inventory.stocks(any())).thenAnswer(inv -> {
       Map<UUID, Stock> out = new HashMap<>();
       for (UUID id : (Collection<UUID>) inv.getArgument(0)) out.put(id, stock.getOrDefault(id, new Stock(id, 0, 5)));
@@ -242,11 +246,13 @@ class CatalogServiceTest {
   }
 
   @Test
-  void eachLineQuantityIsCheckedBeforeMerging() {
-    // 60 + 60 would merge to 120, but each request line is checked on its own; merging itself is not capped
+  void theQuantityLimitAppliesToTheMergedTotalOfAProduct() {
+    // 60 + 60 merge to 120, which is over the limit of 99 for one product
     when(products.findAll(any())).thenReturn(List.of(data(pid)));
-    assertThat(service.price(List.of(new CatalogService.ItemRequest(pid, 60), new CatalogService.ItemRequest(pid, 60)))
-        .get(0).qty()).isEqualTo(120);
+    assertThatThrownBy(() -> service.price(List.of(new CatalogService.ItemRequest(pid, 60), new CatalogService.ItemRequest(pid, 60))))
+        .satisfies(t -> assertApi(t, 400, "VALIDATION_FAILED"));
+    assertThat(service.price(List.of(new CatalogService.ItemRequest(pid, 50), new CatalogService.ItemRequest(pid, 49)))
+        .get(0).qty()).isEqualTo(99);
   }
 
   @Test
@@ -306,11 +312,11 @@ class CatalogServiceTest {
         anyBoolean(), anyBoolean(), any())).thenReturn(id);
     when(products.find(id)).thenReturn(Optional.of(data(id)));
 
-    AdminProduct out = service.create(input(6000, 5000, null, null, 12, 0), actor);
+    AdminProduct out = service.create(input(6000, 5000, null, null, 12, -1), actor);
 
     verify(products).insert(eq(cat), eq("Atta"), eq("આટો"), eq(""), eq(6000L), eq(5000L), eq("pc"), eq(""), eq(true),
         eq(false), isNull(), isNull(), eq(true), eq(true), eq(NOW));
-    verify(inventory).create(id, 12, 5); // zero threshold falls back to 5
+    verify(inventory).create(id, 12, 5); // no threshold given (-1) falls back to 5
     verify(audit).log(actor, "CREATE", "product", id, "Atta @ 5000");
     assertThat(out.id()).isEqualTo(id);
   }
@@ -403,9 +409,23 @@ class CatalogServiceTest {
   void updateWithUnchangedStockAndNoThresholdLeavesInventoryAlone() {
     when(products.find(pid)).thenReturn(Optional.of(data(pid)));
     stock.put(pid, new Stock(pid, 10, 5));
-    service.update(pid, input(100, 100, null, null, 10, 0), actor);
+    service.update(pid, input(100, 100, null, null, 10, -1), actor);
     verify(inventory, never()).adjust(any(), anyInt(), anyString(), any());
     verify(inventory, never()).setLowThreshold(any(), anyInt());
+  }
+
+  @Test
+  void anAlertLevelOfZeroIsAValidChoiceOnCreateAndEdit() {
+    UUID id = UUID.randomUUID();
+    when(products.insert(any(), any(), any(), any(), anyLong(), anyLong(), any(), any(), anyBoolean(), anyBoolean(), any(), any(),
+        anyBoolean(), anyBoolean(), any())).thenReturn(id);
+    when(products.find(id)).thenReturn(Optional.of(data(id)));
+    service.create(input(6000, 5000, null, null, 12, 0), actor);
+    verify(inventory).create(id, 12, 0);
+    when(products.find(pid)).thenReturn(Optional.of(data(pid)));
+    stock.put(pid, new Stock(pid, 10, 5));
+    service.update(pid, input(100, 100, null, null, 10, 0), actor);
+    verify(inventory).setLowThreshold(pid, 0);
   }
 
   @Test
@@ -530,7 +550,7 @@ class CatalogServiceTest {
     verify(products).setGroup(pid, group);
 
     service.update(pid, input(6000, 5000, null, null, 0, 5), actor);
-    verify(products, org.mockito.Mockito.times(1)).setGroup(any(), any());
+    verify(products, Mockito.times(1)).setGroup(any(), any());
   }
 
   @Test
@@ -564,12 +584,12 @@ class CatalogServiceTest {
     UUID missing = UUID.randomUUID();
     List<UUID> ids = List.of(counterOnly, y, missing, inactive, pid);
     when(products.findAll(ids)).thenReturn(List.of(data(pid), data(y), data(inactive, false, false, null, null), data(counterOnly)));
-    when(products.posOnlyAmong(ids)).thenReturn(java.util.Set.of(counterOnly));
+    when(products.posOnlyAmong(ids)).thenReturn(Set.of(counterOnly));
     stock.put(pid, new Stock(pid, 3, 5));
 
     var out = service.visible(ids);
 
-    assertThat(out).extracting(com.vijay.mall.catalog.domain.Product::id).containsExactly(y, pid);
+    assertThat(out).extracting(Product::id).containsExactly(y, pid);
     assertThat(out.get(1).inStock()).isTrue();
     assertThat(out.get(0).inStock()).isFalse();
   }
@@ -590,8 +610,8 @@ class CatalogServiceTest {
   void stockMovementsShowProductNameAndPackLabel() {
     UUID gone = UUID.randomUUID();
     var moves = List.of(
-        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), pid, -2, "ORDER", null, null, NOW),
-        new com.vijay.mall.inventory.infra.InventoryRepository.Movement(UUID.randomUUID(), gone, 5, "RESTOCK", null, actor, NOW));
+        new InventoryRepository.Movement(UUID.randomUUID(), pid, -2, "ORDER", null, null, NOW),
+        new InventoryRepository.Movement(UUID.randomUUID(), gone, 5, "RESTOCK", null, actor, NOW));
     when(inventory.movements(null, 0, 20)).thenReturn(new Page<>(moves, 0, 20, 2));
     when(products.findAll(any())).thenReturn(List.of(data(pid)));
 

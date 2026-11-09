@@ -12,12 +12,14 @@ import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.ConnectionTester.Result;
 import com.vijay.mall.config.Settings;
+import java.net.ConnectException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
@@ -112,7 +114,7 @@ class SmtpAndTestersTest {
     verify(mail).send(cap.capture());
     assertThat(cap.getValue().getTo()).containsExactly("me@x.com");
     assertThat(cap.getValue().getSubject()).contains("test");
-    doThrow(new MailSendException("boom", new java.net.ConnectException("refused"))).when(mail).send(any(SimpleMailMessage.class));
+    doThrow(new MailSendException("boom", new ConnectException("refused"))).when(mail).send(any(SimpleMailMessage.class));
     Result bad = t.test(Map.of("to", "me@x.com"));
     assertThat(bad.ok()).isFalse();
     assertThat(bad.message()).contains("MailSendException").contains("ConnectException");
@@ -144,7 +146,7 @@ class SmtpAndTestersTest {
     assertThat(ok.ok()).isTrue();
     assertThat(ok.message()).contains("98******10").doesNotContain("9876543210");
     var code = ArgumentCaptor.forClass(String.class);
-    verify(http).send(org.mockito.ArgumentMatchers.eq("9876543210"), code.capture());
+    verify(http).send(ArgumentMatchers.eq("9876543210"), code.capture());
     assertThat(code.getValue()).matches("[0-9]{6}");
 
     doThrow(new ApiException(HttpStatus.BAD_GATEWAY, "SMS_PROVIDER_ERROR", "x")).when(http).send(any(), any());

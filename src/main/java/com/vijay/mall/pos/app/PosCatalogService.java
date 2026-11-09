@@ -17,6 +17,7 @@ import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.pos.infra.PosCatalogRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 /** Finds products at the counter (scan or search) and keeps their counter attributes and barcodes. */
 @Service
 public class PosCatalogService {
+  /** The GST percentages the system accepts for a product (also what an offline till may send). */
+  public static final List<Integer> GST_RATES = List.of(0, 3, 5, 12, 18, 28);
+
   private final CatalogService catalog;
   private final PosCatalogRepository repo;
   private final ShopService shop;
@@ -80,10 +84,10 @@ public class PosCatalogService {
    * A version stamp for the product list as the counter sees it: the time of the latest change to any product or its counter
    * details. An offline till keeps its own copy and downloads again when this is newer than the stamp it saved.
    */
-  public java.time.Instant catalogVersion() {
-    java.time.Instant a = catalog.lastChange();
-    java.time.Instant b = repo.lastChange();
-    if (a == null) return b == null ? java.time.Instant.EPOCH : b;
+  public Instant catalogVersion() {
+    Instant a = catalog.lastChange();
+    Instant b = repo.lastChange();
+    if (a == null) return b == null ? Instant.EPOCH : b;
     return b != null && b.isAfter(a) ? b : a;
   }
 
@@ -130,7 +134,7 @@ public class PosCatalogService {
     }
     if (code != null && !digits) throw ApiException.validation("plu", "digits only, up to 6");
     if (code != null) code = normalizePlu(code);
-    if (!List.of(0, 3, 5, 12, 18, 28).contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
+    if (!GST_RATES.contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
     List<String> codes = barcodes == null ? List.of() : barcodes.stream().map(String::strip).filter(c -> !c.isEmpty()).distinct().toList();
     if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
       throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");

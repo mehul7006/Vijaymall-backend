@@ -9,14 +9,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vijay.mall.common.error.ApiException;
-import com.vijay.mall.pos.app.ShopProfileService;
 import com.vijay.mall.pos.app.ShopProfileService.Profile;
+import com.vijay.mall.pos.app.ShopProfileService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -51,13 +54,13 @@ class AdminShopProfileControllerTest {
     when(service.save(any(), any())).thenReturn(profile);
     var body = new AdminShopProfileController.ProfileBody("a@b.in", "", "", "", "", "", List.of(), "", null, null);
     assertThat(controller.save(body)).isSameAs(profile);
-    var captured = org.mockito.ArgumentCaptor.forClass(Profile.class);
-    verify(service).save(captured.capture(), org.mockito.ArgumentMatchers.eq(admin));
+    var captured = ArgumentCaptor.forClass(Profile.class);
+    verify(service).save(captured.capture(), ArgumentMatchers.eq(admin));
     assertThat(captured.getValue().onlineOrdersEnabled()).isTrue();
     var off = new AdminShopProfileController.ProfileBody("a@b.in", "", "", "", "", "", List.of(), "", false, "Closed");
     controller.save(off);
     controller.save(new AdminShopProfileController.ProfileBody("a@b.in", "", "", "", "", "", List.of(), "", true, null));
-    verify(service, org.mockito.Mockito.times(3)).save(captured.capture(), org.mockito.ArgumentMatchers.eq(admin));
+    verify(service, Mockito.times(3)).save(captured.capture(), ArgumentMatchers.eq(admin));
     assertThat(captured.getAllValues()).extracting(Profile::onlineOrdersEnabled).containsExactly(true, true, false, true);
   }
 

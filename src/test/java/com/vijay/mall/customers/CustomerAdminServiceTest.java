@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class CustomerAdminServiceTest {
   private static final Instant NOW = Instant.parse("2026-11-01T10:00:00Z");
@@ -91,7 +92,7 @@ class CustomerAdminServiceTest {
     verify(tokens).revokeAll(id, NOW);
     verify(audit).log(actor, "CUSTOMER_BLOCK", "users", id, null);
 
-    org.mockito.Mockito.clearInvocations(tokens);
+    Mockito.clearInvocations(tokens);
     service.setActive(id, true, actor);
     verify(users).setStatus(id, "ACTIVE");
     verify(tokens, never()).revokeAll(any(), any());

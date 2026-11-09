@@ -11,12 +11,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /** Credit (udhar) and hybrid payment at the shop counter, against real PostgreSQL. Credit never exists online. */
 @SuppressWarnings({"unchecked", "rawtypes"})
 class CreditFlowIT extends IntegrationTestBase {
   private static final String CASHIER = "cashier@vijaysupermall.local";
-  private static final long RICE = 12500; // price of one Basmati Rice
+  /** price of one Basmati Rice */
+  private static final long RICE = 12500;
 
   @BeforeEach
   void stock() { restock("Basmati Rice", 100); }
@@ -37,7 +39,7 @@ class CreditFlowIT extends IntegrationTestBase {
     assertThat(res.getStatusCode()).as(String.valueOf(res.getBody())).isEqualTo(HttpStatus.OK);
   }
 
-  private org.springframework.http.ResponseEntity<Map> sell(String mobile, int rice, List<Map<String, Object>> payments) {
+  private ResponseEntity<Map> sell(String mobile, int rice, List<Map<String, Object>> payments) {
     Map<String, Object> cart = new HashMap<>(Map.of("items", List.of(Map.of("productId", riceId(), "qty", rice))));
     if (mobile != null) cart.put("customerMobile", mobile);
     return call(HttpMethod.POST, "/api/v1/pos/sales", cashier(), Map.of("cart", cart, "payments", payments), UUID.randomUUID().toString());

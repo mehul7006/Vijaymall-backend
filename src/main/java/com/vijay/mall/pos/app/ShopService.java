@@ -1,18 +1,23 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.infra.ShopSettingRepository;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** The shop's own details printed on every bill. */
 @Service
-public class ShopService implements com.vijay.mall.common.ShopIdentity {
+public class ShopService implements ShopIdentity {
   private static final Pattern GSTIN = Pattern.compile("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$");
   private static final Pattern PREFIX = Pattern.compile("^[A-Z0-9]{2,6}$");
 
@@ -26,22 +31,22 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
     this.clock = clock;
   }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it): the shop details are read on every bill and order, so they are cached. */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   public ShopSetting get() {
-    return caches == null ? repo.get() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.SHOP, "1", repo::get);
+    return caches == null ? repo.get() : caches.get(AppCaches.Name.SHOP, "1", repo::get);
   }
 
   /** The shop's name, phone, address and number prefix, read from the settings each time so an edit shows at once. */
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
   @Override
   public Info identity() {
@@ -61,7 +66,7 @@ public class ShopService implements com.vijay.mall.common.ShopIdentity {
     if (in.details() != null && in.details().length() > 500) throw ApiException.validation("details", "at most 500 characters");
     repo.save(in, clock.instant());
     audit.log(actor, "UPDATE", "shop_setting", 1, in.shopName());
-    if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.SHOP);
+    if (live != null) live.area(CatalogChanged.SHOP);
     return repo.get();
   }
 }

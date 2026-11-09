@@ -27,6 +27,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -73,7 +75,7 @@ class OrderReturnSplitLinesTest {
   void unitsComeBackFromTheSaleLineFirstAndSpillOverToTheNormalLine() {
     giveBack(4); // 3 from the sale line, 1 from the normal line
     ArgumentCaptor<List<OrderReturnRepository.Line>> stored = ArgumentCaptor.forClass(List.class);
-    verify(returns).insert(any(), eq(orderId), anyString(), anyString(), org.mockito.ArgumentMatchers.anyLong(), anyString(), anyInt(), anyInt(), eq(actor),
+    verify(returns).insert(any(), eq(orderId), anyString(), anyString(), ArgumentMatchers.anyLong(), anyString(), anyInt(), anyInt(), eq(actor),
         stored.capture(), any());
     assertThat(stored.getValue()).extracting(OrderReturnRepository.Line::orderItemId).containsExactly(saleLine, normalLine);
     assertThat(stored.getValue()).extracting(OrderReturnRepository.Line::qty).containsExactly(3, 1);
@@ -89,7 +91,7 @@ class OrderReturnSplitLinesTest {
   void aSmallReturnTouchesOnlyTheFirstLine() {
     giveBack(2);
     verify(returns).addReturned(saleLine, 2);
-    verify(returns, org.mockito.Mockito.never()).addReturned(eq(normalLine), anyInt());
+    verify(returns, Mockito.never()).addReturned(eq(normalLine), anyInt());
   }
 
   @Test

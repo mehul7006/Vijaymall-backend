@@ -6,6 +6,7 @@ import com.vijay.mall.payment.infra.PaymentRepository;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,7 +32,7 @@ public class PaymentController {
   @PostMapping("/payments/webhook/{provider}")
   public ResponseEntity<Void> webhook(@PathVariable String provider, @RequestBody String body,
                                       @RequestHeader HttpHeaders headers) {
-    Map<String, String> flat = headers.asMultiValueMap().entrySet().stream().collect(java.util.stream.Collectors.toMap(
+    Map<String, String> flat = headers.asMultiValueMap().entrySet().stream().collect(Collectors.toMap(
         e -> e.getKey().toLowerCase(), e -> e.getValue().stream().findFirst().orElse(""), (a, _) -> a));
     payments.handleWebhook(provider, body, flat);
     return ResponseEntity.ok().build();

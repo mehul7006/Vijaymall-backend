@@ -13,6 +13,8 @@ class RefundEntity extends BaseEntity {
   long amountPaise;
   String status;
   String providerRef;
+  /** The provider payment this refund gives back; null means the payment row's own reference. */
+  String providerPaymentRef;
   String reason;
   Instant createdAt;
   int attempts;

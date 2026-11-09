@@ -2,6 +2,8 @@ package com.vijay.mall.common.cache;
 
 import com.vijay.mall.common.cache.AppCaches.Name;
 import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.config.SettingsChanged;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -18,8 +20,8 @@ public class CacheInvalidator {
   public CacheInvalidator(AppCaches caches) { this.caches = caches; }
 
   /** A new expiry time or switching caching on/off applies to everything at once, so start from empty. */
-  @org.springframework.context.event.EventListener
-  public void on(com.vijay.mall.config.SettingsChanged e) {
+  @EventListener
+  public void on(SettingsChanged e) {
     if (e.keys().stream().anyMatch(k -> k.startsWith("cache."))) caches.invalidateAll();
   }
 

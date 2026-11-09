@@ -3,6 +3,7 @@ package com.vijay.mall.identity.app;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 class ProfileServiceTest {
   private static final Instant NOW = Instant.parse("2027-03-01T10:00:00Z");
@@ -53,10 +56,10 @@ class ProfileServiceTest {
   }
 
   @Test
-  void updateTurnsBlankMobileAndNullNameIntoNull() {
+  void updateTurnsBlankMobileIntoNullAndKeepsTheNameWhenNoneIsSent() {
     when(users.findById(uid)).thenReturn(Optional.of(user));
     service.update(uid, null, "  ");
-    verify(users).updateProfile(uid, null, null, NOW);
+    verify(users).updateProfile(uid, null, null, NOW); // null name = the repository keeps the saved one
     service.update(uid, "N", null);
     verify(users).updateProfile(uid, "N", null, NOW);
   }
@@ -109,7 +112,34 @@ class ProfileServiceTest {
     verify(addresses, never()).clearDefault(uid);
     service.updateAddress(uid, id, addr(true));
     verify(addresses).clearDefault(uid);
-    verify(addresses, org.mockito.Mockito.times(2)).update(any(), any(), any());
+    verify(addresses, Mockito.times(2)).update(any(), any(), any());
+  }
+
+  @Test
+  void editingTheDefaultAddressNeverDropsItsDefaultFlag() {
+    UUID id = UUID.randomUUID();
+    when(addresses.find(uid, id)).thenReturn(Optional.of(new Address(id, "H", "l", "a", "390001", true)));
+    service.updateAddress(uid, id, addr(false));
+    verify(addresses, never()).clearDefault(uid);
+    verify(addresses).update(eq(uid), eq(id), ArgumentMatchers.argThat(a -> a.isDefault()));
+  }
+
+  @Test
+  void deletingTheDefaultHandsItToTheNextAddress() {
+    UUID id = UUID.randomUUID();
+    UUID next = UUID.randomUUID();
+    when(addresses.find(uid, id)).thenReturn(Optional.of(new Address(id, "H", "l", "a", "390001", true)));
+    when(addresses.list(uid)).thenReturn(List.of(new Address(next, "O", "l2", "a2", "390002", false)));
+    service.deleteAddress(uid, id);
+    verify(addresses).clearDefault(uid);
+    verify(addresses).update(eq(uid), eq(next), ArgumentMatchers.argThat(a -> a.isDefault() && a.label().equals("O")));
+    UUID other = UUID.randomUUID();
+    when(addresses.find(uid, other)).thenReturn(Optional.of(new Address(other, "X", "l", "a", "390001", false)));
+    service.deleteAddress(uid, other);
+    verify(addresses, Mockito.times(1)).clearDefault(uid);
+    when(addresses.find(uid, id)).thenReturn(Optional.of(new Address(id, "H", "l", "a", "390001", true)));
+    when(addresses.list(uid)).thenReturn(List.of());
+    service.deleteAddress(uid, id);
   }
 
   @Test

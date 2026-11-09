@@ -32,6 +32,8 @@ Prometheus has no login. In production the server refuses to start if it would s
 | `mall_flash_units_sold_total{channel}`, `mall_flash_revenue_paise_total{channel}`, `mall_flash_discount_paise_total{channel}` | units, revenue and discount of flash sale lines, `ONLINE` or `POS` |
 | `mall_flash_refused_total{reason}` | checkouts refused by a flash sale (`LIMIT_REACHED`, `CUSTOMER_LIMIT`, `ENDED`) |
 | `mall_flash_sales{state}` | flash sales `active` / `scheduled` now |
+| `mall_payments_anomalies_total{kind}` | online payments received in the wrong amount (`MISMATCH`) or twice (`DUPLICATE`); refunded automatically, listed at `GET /api/v1/admin/payments/anomalies` (alert `PaymentAnomaly`) |
+| `mall_pos_offline_exceptions_open`, `mall_pos_offline_exceptions_stale`, `mall_pos_offline_exceptions_recorded_total{kind}` | differences in offline counter bills not yet reviewed by a manager / unreviewed for more than a day / new ones by kind (`PRICE_CHANGED`, `GST_CHANGED`, `OVERSOLD`, `DISCOUNT`, `PRODUCT_INACTIVE`); log line `event=offline-bill-recorded` (alert `OfflineBillExceptionsUnreviewed`) |
 | `mall_flash_price_lookup_seconds_*` | time to look up the flash sale price of a product (on every quote and shop list) |
 | `hikaricp_*`, `jvm_*`, `process_*`, `tomcat_*` | database pool, memory, GC, CPU, threads |
 
@@ -41,7 +43,7 @@ Gauges that read the database are cached for 15 s, so scraping never hammers it.
 ```
 docker compose -f ops/docker-compose.observability.yml up -d     # Prometheus :9091, Grafana :3000 (admin/admin, change it)
 ```
-Grafana loads the dashboard **Vijay Super Mall - Operations** (24 panels) from `ops/grafana/dashboards/`. Alert rules
+Grafana loads the dashboard **Vijay Super Mall - Operations** (26 panels) from `ops/grafana/dashboards/`. Alert rules
 (`ops/prometheus/alerts.yml`) each say what to do. Point `ops/prometheus/prometheus.yml` at your server's management port first.
 These files are syntax-checked but were not run against a live Prometheus/Grafana in this environment: open the dashboard once and
 confirm the panels fill; adjust the scrape target if needed.

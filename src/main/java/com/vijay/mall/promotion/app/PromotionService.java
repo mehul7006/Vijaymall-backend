@@ -2,7 +2,10 @@ package com.vijay.mall.promotion.app;
 
 import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.promotion.domain.Coupon;
 import com.vijay.mall.promotion.domain.CouponContext;
 import com.vijay.mall.promotion.domain.CouponMath;
@@ -10,9 +13,12 @@ import com.vijay.mall.promotion.domain.CouponRules;
 import com.vijay.mall.promotion.domain.PublicCoupon;
 import com.vijay.mall.promotion.infra.CouponRepository;
 import java.time.Clock;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.IntSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,19 +29,19 @@ public class PromotionService {
   private final AuditService audit;
   private final Clock clock;
 
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   /** Optional: tells open app screens about changes (not provided in plain unit tests). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
-  private void changed() { if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.COUPONS); }
+  private void changed() { if (live != null) live.area(CatalogChanged.COUPONS); }
 
-  private com.vijay.mall.common.cache.AppCaches caches;
+  private AppCaches caches;
 
   /** Optional (plain unit tests run without it). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+  @Autowired(required = false)
+  void setCaches(AppCaches caches) { this.caches = caches; }
 
   public PromotionService(CouponRepository coupons, AuditService audit, Clock clock) {
     this.coupons = coupons;
@@ -68,14 +74,14 @@ public class PromotionService {
    * only called when the coupon is for the first order, so other coupons cost no extra query.
    */
   public Applied apply(String code, UUID userId, List<PricedLine> lines, long subtotalPaise,
-                       java.util.function.IntSupplier priorOrders) {
+                       IntSupplier priorOrders) {
     Coupon c = coupons.findByCode(normalize(code)).orElseThrow(() -> invalid("NOT_FOUND"));
     int uses = coupons.userUses(c.id(), userId);
     int prior = c.firstOrderOnly() ? priorOrders.getAsInt() : 0;
     var ctx = new CouponContext(c, clock.instant(), subtotalPaise, lines, uses, prior);
     CouponRules.firstViolation(CouponRules.STANDARD, ctx).ifPresent(r -> { throw invalid(r); });
     long discount = CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise));
-    List<Long> perLine = java.util.Arrays.stream(CouponMath.perLine(c, lines, discount)).boxed().toList();
+    List<Long> perLine = Arrays.stream(CouponMath.perLine(c, lines, discount)).boxed().toList();
     return new Applied(discount, c.worksWithCoins(), perLine);
   }
 
@@ -106,7 +112,7 @@ public class PromotionService {
   public List<PublicCoupon> listOffered() {
     var now = clock.instant();
     // the active coupons are cached for a minute; which are on offer right now (dates, uses left) is decided on every call
-    var active = caches == null ? coupons.allActive() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COUPONS, "active", coupons::allActive);
+    var active = caches == null ? coupons.allActive() : caches.get(AppCaches.Name.COUPONS, "active", coupons::allActive);
     return active.stream().filter(c -> c.offeredAt(now)).map(PublicCoupon::from).toList();
   }
 

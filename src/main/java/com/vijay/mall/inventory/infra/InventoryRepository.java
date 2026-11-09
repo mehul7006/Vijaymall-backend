@@ -1,10 +1,12 @@
 package com.vijay.mall.inventory.infra;
 
+import com.vijay.mall.common.Page;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,13 +71,13 @@ public class InventoryRepository {
   }
 
   /** Stock history, newest first; one product, or every product when productId is null. */
-  public com.vijay.mall.common.Page<Movement> movementPage(UUID productId, int page, int size) {
-    PageRequest req = PageRequest.of(page, size, org.springframework.data.domain.Sort.by(
-        org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+  public Page<Movement> movementPage(UUID productId, int page, int size) {
+    PageRequest req = PageRequest.of(page, size, Sort.by(
+        Sort.Direction.DESC, "createdAt"));
     var result = productId == null ? movements.findAll(req) : movements.findByProductId(productId, req);
     List<Movement> rows = result.getContent().stream()
         .map(m -> new Movement(m.id, m.productId, m.delta, m.reason, m.refId, m.actorId, m.createdAt)).toList();
-    return new com.vijay.mall.common.Page<>(rows, page, size, result.getTotalElements());
+    return new Page<>(rows, page, size, result.getTotalElements());
   }
 
   /** How many products are at or below their own alert level. */

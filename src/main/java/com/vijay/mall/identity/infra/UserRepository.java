@@ -1,10 +1,14 @@
 package com.vijay.mall.identity.infra;
 
+import com.vijay.mall.common.Page;
 import com.vijay.mall.identity.domain.User;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +22,7 @@ public class UserRepository {
 
   public Optional<User> findById(UUID id) { return jpa.findById(id).map(UserRepository::toDomain); }
 
-  public List<User> findAllByIds(java.util.Collection<UUID> ids) {
+  public List<User> findAllByIds(Collection<UUID> ids) {
     return ids.isEmpty() ? List.of() : jpa.findAllById(ids).stream().map(UserRepository::toDomain).toList();
   }
 
@@ -39,11 +43,11 @@ public class UserRepository {
   @Transactional
   public void updateProfile(UUID id, String name, String mobile, Instant now) {
     jpa.findById(id).ifPresent(e -> {
-      e.name = name;
+      if (name != null) e.name = name; // a null name leaves the saved one as it is
       // A verified number is only ever replaced by another number, never blanked by a name-only update. An account with no
       // e-mail keeps its number too: blanking it would leave the account with no way to sign in (and break the contact rule).
       if (!((e.mobileVerified || e.email == null) && mobile == null)) {
-        if (!java.util.Objects.equals(e.mobile, mobile)) e.mobileVerified = false;
+        if (!Objects.equals(e.mobile, mobile)) e.mobileVerified = false;
         e.mobile = mobile;
       }
       e.updatedAt = now;
@@ -159,10 +163,10 @@ public class UserRepository {
   }
 
   /** Customers (not staff, not deleted accounts), newest first; q matches part of the name, e-mail or mobile number. */
-  public com.vijay.mall.common.Page<Detail> searchCustomers(String q, int page, int size) {
+  public Page<Detail> searchCustomers(String q, int page, int size) {
     String text = q == null ? "" : q.strip().toLowerCase();
-    var found = jpa.searchCustomers(text, "%" + text.replace("%", "").replace("_", "") + "%", org.springframework.data.domain.PageRequest.of(page, size));
-    return new com.vijay.mall.common.Page<>(found.getContent().stream()
+    var found = jpa.searchCustomers(text, "%" + text.replace("%", "").replace("_", "") + "%", PageRequest.of(page, size));
+    return new Page<>(found.getContent().stream()
         .map(e -> new Detail(toDomain(e), e.status, e.mobileVerified, e.source, e.createdAt)).toList(), page, size, found.getTotalElements());
   }
 

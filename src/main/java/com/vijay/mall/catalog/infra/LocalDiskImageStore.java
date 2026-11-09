@@ -3,6 +3,7 @@ package com.vijay.mall.catalog.infra;
 import com.vijay.mall.catalog.app.ImageStore;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.error.ApiException;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -47,7 +48,7 @@ public class LocalDiskImageStore implements ImageStore {
     BufferedImage out = new BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB);
     Graphics2D g = out.createGraphics();
     g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-    g.setColor(java.awt.Color.WHITE);
+    g.setColor(Color.WHITE);
     g.fillRect(0, 0, nw, nh);
     g.drawImage(src, 0, 0, nw, nh, null);
     g.dispose();

@@ -4,6 +4,9 @@ import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.Settings.Def;
 import com.vijay.mall.config.Settings.Type;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
  * encrypted in the database and are never returned to any screen: the screen only learns whether one is set.
  */
 @Service
-public class RuntimeSettings implements io.micrometer.core.instrument.binder.MeterBinder {
+public class RuntimeSettings implements MeterBinder {
   private static final Logger log = LoggerFactory.getLogger(RuntimeSettings.class);
 
   public enum Source { DATABASE, ENVIRONMENT, DEFAULT }
@@ -51,13 +55,13 @@ public class RuntimeSettings implements io.micrometer.core.instrument.binder.Met
   private final ApplicationEventPublisher events;
   private final JsonMapper json;
 
-  private volatile io.micrometer.core.instrument.MeterRegistry registry;
+  private volatile MeterRegistry registry;
 
   /** Gauge of half-finished set-ups, so a dashboard and an alert can say "someone left the payment keys half entered". */
   @Override
-  public void bindTo(io.micrometer.core.instrument.MeterRegistry registry) {
+  public void bindTo(MeterRegistry registry) {
     this.registry = registry;
-    io.micrometer.core.instrument.Gauge.builder("mall.config.issues", this, s -> s.issues().size())
+    Gauge.builder("mall.config.issues", this, s -> s.issues().size())
         .description("Configuration problems shown at the top of the admin config screen").register(registry);
   }
 
@@ -180,7 +184,7 @@ public class RuntimeSettings implements io.micrometer.core.instrument.binder.Met
       out.add("E-mail login codes are on but the SMTP server is still localhost: no e-mail will arrive.");
     }
     if (!undecryptable.isEmpty()) {
-      out.add("These saved secrets could not be read (the encryption key changed?): " + String.join(", ", new java.util.TreeSet<>(undecryptable))
+      out.add("These saved secrets could not be read (the encryption key changed?): " + String.join(", ", new TreeSet<>(undecryptable))
           + ". Enter them again.");
     }
     if (!crypto.available()) out.add("CONFIG_ENCRYPTION_KEY is not set on the server: secrets (keys, passwords) cannot be saved from this screen.");
@@ -244,7 +248,7 @@ public class RuntimeSettings implements io.micrometer.core.instrument.binder.Met
         log.atInfo().setMessage("Config changed: {}{}").addArgument(key).addArgument(d.secret() ? " (secret)" : "")
             .addKeyValue("event", "config-change").addKeyValue("key", key).addKeyValue("group", d.group().name())
             .addKeyValue("secret", d.secret()).addKeyValue("actor", String.valueOf(actor)).log();
-        io.micrometer.core.instrument.MeterRegistry r = registry;
+        MeterRegistry r = registry;
         if (r != null) r.counter("mall.config.changes", "group", d.group().name()).increment();
       }
       refresh();

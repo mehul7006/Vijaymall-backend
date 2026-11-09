@@ -11,18 +11,20 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.FileAppender;
+import ch.qos.logback.core.read.ListAppender;
 import ch.qos.logback.core.rolling.DefaultTimeBasedFileNamingAndTriggeringPolicy;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
-import ch.qos.logback.core.read.ListAppender;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.NOPLoggerFactory;
 
 class LogSettingsApplierTest {
@@ -31,14 +33,15 @@ class LogSettingsApplierTest {
   private LoggerContext ctx;
   private RuntimeSettings settings;
   private LogSettingsApplier applier;
-  private ListAppender<ILoggingEvent> own; // sees what the applier itself logs
+  /** sees what the applier itself logs */
+  private ListAppender<ILoggingEvent> own;
   private Level realApp;
   private Level realRoot;
 
   @BeforeEach
   void setUp() {
     // The applier logs through the JVM-wide logger; remember its levels so the suite is not affected.
-    var real = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
+    var real = (LoggerContext) LoggerFactory.getILoggerFactory();
     realApp = real.getLogger("com.vijay.mall").getLevel();
     realRoot = real.getLogger("ROOT").getLevel();
     ctx = LogTestSupport.context();
@@ -47,13 +50,13 @@ class LogSettingsApplierTest {
     applier = new LogSettingsApplier(settings, () -> ctx);
     own = new ListAppender<>();
     own.start();
-    ((ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(LogSettingsApplier.class)).addAppender(own);
+    ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(LogSettingsApplier.class)).addAppender(own);
   }
 
   @AfterEach
   void tearDown() {
-    var real = (LoggerContext) org.slf4j.LoggerFactory.getILoggerFactory();
-    ((ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(LogSettingsApplier.class)).detachAppender(own);
+    var real = (LoggerContext) LoggerFactory.getILoggerFactory();
+    ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(LogSettingsApplier.class)).detachAppender(own);
     real.getLogger("com.vijay.mall").setLevel(realApp);
     real.getLogger("ROOT").setLevel(realRoot);
     ctx.stop();
@@ -200,7 +203,7 @@ class LogSettingsApplierTest {
 
   @Test
   void defaultConstructorUsesTheRealLoggingSystem() {
-    assertThat(new LogSettingsApplier(settings).context()).isSameAs(org.slf4j.LoggerFactory.getILoggerFactory());
+    assertThat(new LogSettingsApplier(settings).context()).isSameAs(LoggerFactory.getILoggerFactory());
   }
 
   /** Proof on a real rolling appender: after the change the next roll-over deletes by the NEW number of days. */
@@ -229,7 +232,7 @@ class LogSettingsApplierTest {
     var naming = ((TimeBasedRollingPolicy<ILoggingEvent>) a.getRollingPolicy()).getTimeBasedFileNamingAndTriggeringPolicy();
     var f = naming.getClass().getSuperclass().getDeclaredField("atomicNextCheck");
     f.setAccessible(true);
-    ((java.util.concurrent.atomic.AtomicLong) f.get(naming)).set(0L);
+    ((AtomicLong) f.get(naming)).set(0L);
     // Logback cleans once per elapsed day: pretend the last clean-up was yesterday.
     var remover = naming.getArchiveRemover();
     var h = ch.qos.logback.core.rolling.helper.TimeBasedArchiveRemover.class.getDeclaredField("lastHeartBeat");

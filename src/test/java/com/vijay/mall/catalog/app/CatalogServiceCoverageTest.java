@@ -12,11 +12,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.catalog.infra.BannerRepository;
 import com.vijay.mall.catalog.infra.CategoryRepository;
-import com.vijay.mall.catalog.infra.ProductRepository;
 import com.vijay.mall.catalog.infra.ProductRepository.VariantInfo;
+import com.vijay.mall.catalog.infra.ProductRepository;
+import com.vijay.mall.common.FlashPricing;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ReferenceNumbers;
 import com.vijay.mall.common.audit.AuditService;
@@ -37,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.Mockito;
 
 class CatalogServiceCoverageTest {
   private static final Instant NOW = Instant.parse("2026-11-01T10:00:00Z");
@@ -123,7 +126,7 @@ class CatalogServiceCoverageTest {
     when(products.allMembersOf(g)).thenReturn(List.of(x, y));
     when(products.variantInfo(any())).thenReturn(Map.of());
     // the inventory knows neither product at all
-    org.mockito.Mockito.doAnswer(inv -> new HashMap<UUID, Stock>()).when(inventory).stocks(any());
+    Mockito.doAnswer(inv -> new HashMap<UUID, Stock>()).when(inventory).stocks(any());
 
     var out = service.group(g);
 
@@ -261,7 +264,7 @@ class CatalogServiceCoverageTest {
     when(products.variantInfo(any())).thenReturn(Map.of(baseId, new VariantInfo("Std", 3), other, new VariantInfo("Mini", 1)));
     stubInsert(created, g);
 
-    var out = service.addVariant(baseId, new CatalogService.VariantInput(" Big ", " 2 kg ", null, 300, 250, null, 8, 0, null), actor);
+    var out = service.addVariant(baseId, new CatalogService.VariantInput(" Big ", " 2 kg ", null, 300, 250, null, 8, -1, null), actor);
 
     assertThat(out.id()).isEqualTo(created);
     verify(products).insert(eq(cat), eq("Mango"), eq("કેરી"), eq("desc"), eq(300L), eq(250L), eq("kg"), eq("2 kg"), eq(true),
@@ -314,7 +317,7 @@ class CatalogServiceCoverageTest {
     stubInsert(created, g);
     service.addVariant(baseId, new CatalogService.VariantInput("Other", "1 kg", null, 100, 100, null, 0, 0, null), actor);
     service.addVariant(baseId, new CatalogService.VariantInput("Std", "2 kg", null, 100, 100, null, 0, 0, null), actor);
-    verify(products, org.mockito.Mockito.times(2)).setGroup(created, g);
+    verify(products, Mockito.times(2)).setGroup(created, g);
   }
 
   @Test
@@ -413,12 +416,12 @@ class CatalogServiceCoverageTest {
     stock.put(b, new Stock(b, 50, 5));
     when(products.allMembersOf(g)).thenReturn(List.of(x, y));
     when(products.variantInfo(any())).thenReturn(Map.of());
-    var flash = mock(com.vijay.mall.common.FlashPricing.class);
+    var flash = mock(FlashPricing.class);
     // only the variant listed last is on sale, so the first one is skipped when picking the group's flash
     when(flash.offers(any())).thenAnswer(inv -> {
       Map<UUID, Long> prices = inv.getArgument(0);
       UUID last = prices.keySet().stream().reduce((p, q) -> q).orElseThrow();
-      return Map.of(last, new com.vijay.mall.common.FlashPricing.Offer(UUID.randomUUID(), "Sale", 100, 50, 50, null, 0, PAST, FUTURE));
+      return Map.of(last, new FlashPricing.Offer(UUID.randomUUID(), "Sale", 100, 50, 50, null, 0, PAST, FUTURE));
     });
     service.setFlash(flash);
 
@@ -434,14 +437,14 @@ class CatalogServiceCoverageTest {
     var banners = mock(BannerRepository.class);
     var svc = new CatalogService(products, mock(CategoryRepository.class), banners, inventory, audit, Clock.fixed(NOW, ZoneOffset.UTC), references);
     UUID i = UUID.randomUUID();
-    var off = new com.vijay.mall.catalog.domain.HotBanner(i, "off", "", null, null, null, false);
-    var open = new com.vijay.mall.catalog.domain.HotBanner(i, "open", "", null, null, null, true);
-    var future = new com.vijay.mall.catalog.domain.HotBanner(i, "future", "", null, FUTURE, null, true);
-    var past = new com.vijay.mall.catalog.domain.HotBanner(i, "past", "", null, PAST, null, true);
-    var ended = new com.vijay.mall.catalog.domain.HotBanner(i, "ended", "", null, null, PAST, true);
-    var running = new com.vijay.mall.catalog.domain.HotBanner(i, "running", "", null, PAST, FUTURE, true);
-    var startsNow = new com.vijay.mall.catalog.domain.HotBanner(i, "startsNow", "", null, NOW, NOW, true);
-    var endsFuture = new com.vijay.mall.catalog.domain.HotBanner(i, "endsFuture", "", null, null, FUTURE, true);
+    var off = new HotBanner(i, "off", "", null, null, null, false);
+    var open = new HotBanner(i, "open", "", null, null, null, true);
+    var future = new HotBanner(i, "future", "", null, FUTURE, null, true);
+    var past = new HotBanner(i, "past", "", null, PAST, null, true);
+    var ended = new HotBanner(i, "ended", "", null, null, PAST, true);
+    var running = new HotBanner(i, "running", "", null, PAST, FUTURE, true);
+    var startsNow = new HotBanner(i, "startsNow", "", null, NOW, NOW, true);
+    var endsFuture = new HotBanner(i, "endsFuture", "", null, null, FUTURE, true);
     when(banners.all()).thenReturn(List.of(off, open, future, past, ended, running, startsNow, endsFuture));
     when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
 

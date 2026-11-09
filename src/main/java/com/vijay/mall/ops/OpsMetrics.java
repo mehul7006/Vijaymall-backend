@@ -1,6 +1,7 @@
 package com.vijay.mall.ops;
 
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.order.domain.OrderStatus;
 import com.vijay.mall.order.infra.OrderRepository;
@@ -10,8 +11,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.util.Map;
+import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -42,6 +45,39 @@ public class OpsMetrics implements MeterBinder {
     this.clock = clock;
   }
 
+  private volatile DefectiveService defective;
+
+  /** Optional (plain unit tests run without it): lets the gauge below count defective goods waiting for the owner's decision. */
+  @Autowired(required = false)
+  void setDefective(DefectiveService defective) { this.defective = defective; }
+
+  private volatile long defectiveHeldUnits;
+  private volatile long defectivePendingUnits;
+  private volatile long defectiveTakenAt = Long.MIN_VALUE;
+
+  /** Reads the defective-goods counts at most once per cache period, however many gauges and scrapes ask; a failure is logged and the last values stay. */
+  private void refreshDefective() {
+    long now = clock.millis();
+    if (defective == null || (defectiveTakenAt != Long.MIN_VALUE && now - defectiveTakenAt < CACHE_MS)) return;
+    defectiveTakenAt = now;
+    try {
+      defectiveHeldUnits = defective.heldUnits();
+      defectivePendingUnits = defective.pendingReviewUnits();
+    } catch (RuntimeException e) {
+      log.warn("Could not read the defective goods counts for the metrics: {}", e.getMessage());
+    }
+  }
+
+  private long defectiveHeld() {
+    refreshDefective();
+    return defectiveHeldUnits;
+  }
+
+  private long defectivePending() {
+    refreshDefective();
+    return defectivePendingUnits;
+  }
+
   Snapshot snapshot() {
     long now = clock.millis();
     if (takenAt == Long.MIN_VALUE || now - takenAt >= CACHE_MS) {
@@ -63,13 +99,15 @@ public class OpsMetrics implements MeterBinder {
     gauge(registry, "mall.refunds.failed", "Refunds the provider refused after all tries: a person must look", () -> snapshot().refundsFailed());
     gauge(registry, "mall.outbox.pending", "Events written but not yet delivered (notifications, alerts)", () -> snapshot().outboxPending());
     gauge(registry, "mall.stock.low.products", "Products at or below their stock alert level", () -> snapshot().lowStock());
+    gauge(registry, "mall.stock.defective.units", "Returned goods confirmed defective, kept apart and waiting for the owner to write off or return", this::defectiveHeld);
+    gauge(registry, "mall.stock.defective.pending.units", "Returned goods claimed defective and waiting for staff to review", this::defectivePending);
     for (OrderStatus s : OrderStatus.values()) {
       Gauge.builder("mall.orders.by.status", this, m -> m.snapshot().ordersByStatus().getOrDefault(s.name(), 0L))
           .description("Online orders currently in each status").tag("status", s.name()).strongReference(true).register(registry);
     }
   }
 
-  private void gauge(MeterRegistry registry, String name, String description, java.util.function.LongSupplier value) {
+  private void gauge(MeterRegistry registry, String name, String description, LongSupplier value) {
     Gauge.builder(name, value, v -> v.getAsLong()).description(description).strongReference(true).register(registry);
   }
 }

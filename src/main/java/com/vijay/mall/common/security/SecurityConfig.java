@@ -4,13 +4,16 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.error.ErrorBody;
 import com.vijay.mall.common.web.TraceIdFilter;
+import com.vijay.mall.identity.infra.UserRepository;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.MDC;
@@ -18,8 +21,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
@@ -77,17 +81,17 @@ public class SecurityConfig {
   }
 
   /** Staff tokens are checked against the account on every call; customers' tokens are not (they are short-lived). */
-  static boolean isBlockedStaff(String role, String subject, com.vijay.mall.identity.infra.UserRepository users) {
+  static boolean isBlockedStaff(String role, String subject, UserRepository users) {
     if (!"CASHIER".equals(role) && !"ADMIN".equals(role)) return false;
     try {
-      return users.isBlocked(java.util.UUID.fromString(subject));
+      return users.isBlocked(UUID.fromString(subject));
     } catch (IllegalArgumentException e) {
       return false;
     }
   }
 
   private static void write(HttpServletResponse res, JsonMapper om, HttpStatus s, String code, String msg)
-      throws java.io.IOException {
+      throws IOException {
     res.setStatus(s.value());
     res.setContentType("application/json");
     om.writeValue(res.getOutputStream(), new ErrorBody(code, msg, MDC.get(TraceIdFilter.KEY), Map.of()));
@@ -95,7 +99,7 @@ public class SecurityConfig {
 
   @Bean
   SecurityFilterChain filterChain(HttpSecurity http, JsonMapper om,
-                                  com.vijay.mall.identity.infra.UserRepository users) throws Exception {
+                                  UserRepository users) throws Exception {
     AuthenticationEntryPoint entry =
         (req, res, ex) -> write(res, om, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Please sign in again");
     AccessDeniedHandler denied =
@@ -105,7 +109,7 @@ public class SecurityConfig {
     converter.setJwtGrantedAuthoritiesConverter(jwt -> {
       if (isBlockedStaff(jwt.getClaimAsString("role"), jwt.getSubject(), users)) {
         // A blocked cashier or admin loses access at once, not when the 15-minute token runs out.
-        throw new org.springframework.security.authentication.DisabledException("account blocked");
+        throw new DisabledException("account blocked");
       }
       Collection<GrantedAuthority> list =
           List.<GrantedAuthority>of(new SimpleGrantedAuthority("ROLE_" + jwt.getClaimAsString("role")));

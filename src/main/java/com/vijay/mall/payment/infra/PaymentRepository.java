@@ -1,5 +1,6 @@
 package com.vijay.mall.payment.infra;
 
+import com.vijay.mall.common.Page;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +14,10 @@ public class PaymentRepository {
   public record Payment(UUID id, UUID orderId, String provider, long amountPaise, String status,
                         String providerOrderId, String providerRef) {}
 
+  /** A wrong-amount or duplicate payment, as the admin sees it. kind is MISMATCH or DUPLICATE. */
+  public record AnomalyRow(UUID id, UUID paymentId, UUID orderId, String kind, long expectedPaise, long receivedPaise,
+                           String providerRef, Instant createdAt) {}
+
   public record Setting(String code, boolean enabled) {}
 
   /** A refund waiting to be sent to the provider. */
@@ -23,8 +28,11 @@ public class PaymentRepository {
   private final PaymentEventJpa events;
   private final RefundJpa refunds;
   private final PaymentSettingJpa settings;
+  private final PaymentAnomalyJpa anomalies;
 
-  PaymentRepository(PaymentJpa payments, PaymentEventJpa events, RefundJpa refunds, PaymentSettingJpa settings) {
+  PaymentRepository(PaymentJpa payments, PaymentEventJpa events, RefundJpa refunds, PaymentSettingJpa settings,
+                    PaymentAnomalyJpa anomalies) {
+    this.anomalies = anomalies;
     this.payments = payments;
     this.events = events;
     this.refunds = refunds;
@@ -96,13 +104,13 @@ public class PaymentRepository {
   public long refundedSoFar(UUID paymentId) { return refunds.committedTo(paymentId); }
 
   /** Newest first; status null means every refund. */
-  public com.vijay.mall.common.Page<RefundRow> refundPage(String status, int page, int size) {
+  public Page<RefundRow> refundPage(String status, int page, int size) {
     PageRequest req = PageRequest.of(page, size);
     var r = status == null ? refunds.findAllByOrderByCreatedAtDesc(req) : refunds.findByStatusOrderByCreatedAtDesc(status, req);
     List<RefundRow> rows = r.getContent().stream().map(x -> new RefundRow(x.id, x.paymentId,
         payments.findById(x.paymentId).map(p -> p.orderId).orElse(null), x.amountPaise, x.status, x.attempts, x.lastError, x.reason,
         x.createdAt)).toList();
-    return new com.vijay.mall.common.Page<>(rows, page, size, r.getTotalElements());
+    return new Page<>(rows, page, size, r.getTotalElements());
   }
 
   /** How many refunds are in this state (PENDING, PROCESSING, ISSUED, FAILED). */
@@ -114,7 +122,7 @@ public class PaymentRepository {
   /** Refunds queued by an order cancel or a bad payment, oldest first. */
   public List<PendingRefund> pendingRefunds(int limit) {
     return refunds.pending(PageRequest.of(0, limit)).stream().flatMap(r -> payments.findById(r.paymentId).stream()
-        .map(p -> new PendingRefund(r.id, p.id, p.provider, p.providerRef, r.amountPaise, r.reason, r.attempts))).toList();
+        .map(p -> new PendingRefund(r.id, p.id, p.provider, r.providerPaymentRef != null ? r.providerPaymentRef : p.providerRef, r.amountPaise, r.reason, r.attempts))).toList();
   }
 
   @Transactional
@@ -146,7 +154,15 @@ public class PaymentRepository {
 
   @Transactional
   public void insertRefund(UUID paymentId, long amount, String status, String ref, String reason, Instant now) {
+    insertRefund(paymentId, amount, status, ref, reason, null, now);
+  }
+
+  /** Same, for a refund of one specific provider payment (a wrong or duplicate capture) instead of the payment row's own. */
+  @Transactional
+  public void insertRefund(UUID paymentId, long amount, String status, String ref, String reason, String providerPaymentRef,
+                           Instant now) {
     RefundEntity e = new RefundEntity();
+    e.providerPaymentRef = providerPaymentRef;
     e.id = UUID.randomUUID();
     e.paymentId = paymentId;
     e.amountPaise = amount;
@@ -166,4 +182,33 @@ public class PaymentRepository {
 
   @Transactional
   public void setEnabled(String code, boolean enabled) { settings.findById(code).ifPresent(s -> s.enabled = enabled); }
+
+  /** True when this provider payment already has an automatic refund for this reason (a replayed webhook). */
+  public boolean anomalyRefundExists(String providerPaymentRef, String reason) {
+    return refunds.existsByProviderPaymentRefAndReason(providerPaymentRef, reason);
+  }
+
+  /** Records a wrong-amount or duplicate payment. */
+  @Transactional
+  public void insertAnomaly(UUID paymentId, UUID orderId, String kind, long expectedPaise, long receivedPaise, String providerRef,
+                            Instant now) {
+    PaymentAnomalyEntity e = new PaymentAnomalyEntity();
+    e.id = UUID.randomUUID();
+    e.paymentId = paymentId;
+    e.orderId = orderId;
+    e.kind = kind;
+    e.expectedPaise = expectedPaise;
+    e.receivedPaise = receivedPaise;
+    e.providerRef = providerRef;
+    e.createdAt = now;
+    anomalies.save(e);
+  }
+
+  /** Newest first. */
+  public Page<AnomalyRow> anomalyPage(int page, int size) {
+    var r = anomalies.findAllByOrderByCreatedAtDesc(PageRequest.of(page, size));
+    List<AnomalyRow> rows = r.getContent().stream().map(x -> new AnomalyRow(x.id, x.paymentId, x.orderId, x.kind, x.expectedPaise,
+        x.receivedPaise, x.providerRef, x.createdAt)).toList();
+    return new Page<>(rows, page, size, r.getTotalElements());
+  }
 }

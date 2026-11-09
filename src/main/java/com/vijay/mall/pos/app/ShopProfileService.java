@@ -6,6 +6,7 @@ import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.live.CatalogChanged;
+import com.vijay.mall.common.live.LiveEvents;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.pos.infra.ShopProfileRepository;
 import java.time.Clock;
@@ -13,12 +14,14 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
@@ -52,7 +55,7 @@ public class ShopProfileService implements OnlineOrdering {
   private final JsonMapper json;
 
   private AppCaches caches;
-  private com.vijay.mall.common.live.LiveEvents live;
+  private LiveEvents live;
 
   public ShopProfileService(ShopProfileRepository repo, ImageStore images, AuditService audit, Clock clock, JsonMapper json) {
     this.repo = repo;
@@ -63,11 +66,11 @@ public class ShopProfileService implements OnlineOrdering {
   }
 
   /** Optional (plain unit tests run without them). */
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  @Autowired(required = false)
   void setCaches(AppCaches caches) { this.caches = caches; }
 
-  @org.springframework.beans.factory.annotation.Autowired(required = false)
-  void setLive(com.vijay.mall.common.live.LiveEvents live) { this.live = live; }
+  @Autowired(required = false)
+  void setLive(LiveEvents live) { this.live = live; }
 
   // ---------- reading ----------
   private Profile load() {
@@ -184,7 +187,7 @@ public class ShopProfileService implements OnlineOrdering {
       if (!LocalTime.parse(h.open()).isBefore(LocalTime.parse(h.close()))) throw ApiException.validation("hours", day + ": opening must be before closing");
       out.add(new DayHours(day, h.open(), h.close(), false));
     }
-    out.sort(java.util.Comparator.comparingInt(h -> DAYS.indexOf(h.day())));
+    out.sort(Comparator.comparingInt(h -> DAYS.indexOf(h.day())));
     return json.writeValueAsString(out);
   }
 }

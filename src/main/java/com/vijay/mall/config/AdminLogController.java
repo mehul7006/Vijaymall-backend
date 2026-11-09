@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,7 +40,7 @@ public class AdminLogController {
     int days = settings.getInt(Settings.LOG_RETENTION_DAYS);
     if (ctx != null) {
       app = ctx.getLogger(LogSettingsApplier.APP_LOGGER).getEffectiveLevel().toString();
-      root = ctx.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).getEffectiveLevel().toString();
+      root = ctx.getLogger(Logger.ROOT_LOGGER_NAME).getEffectiveLevel().toString();
       sql = ctx.getLogger(LogSettingsApplier.SQL_LOGGER).getEffectiveLevel().toString();
       List<RollingFileAppender<?>> all = LogSettingsApplier.fileAppenders(ctx);
       file = all.isEmpty() ? null : all.get(0);

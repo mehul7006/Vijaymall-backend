@@ -4,16 +4,21 @@ import com.vijay.mall.MallApplication;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Shared set-up for integration tests: one real PostgreSQL for the whole test run (needs Docker), the dev profile
@@ -42,9 +47,9 @@ public abstract class IntegrationTestBase {
 
   @LocalServerPort int port;
 
-  @org.springframework.boot.test.web.server.LocalManagementPort protected int managementPort;
+  @LocalManagementPort protected int managementPort;
 
-  @org.springframework.beans.factory.annotation.Autowired protected org.springframework.jdbc.core.JdbcTemplate jdbc;
+  @Autowired protected JdbcTemplate jdbc;
 
   private RestClient client;
 
@@ -64,12 +69,12 @@ public abstract class IntegrationTestBase {
       if (token != null) h.setBearerAuth(token);
       if (idempotencyKey != null) h.set("Idempotency-Key", idempotencyKey);
     });
-    var raw = (body == null ? spec : spec.contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body))
+    var raw = (body == null ? spec : spec.contentType(MediaType.APPLICATION_JSON).body(body))
         .retrieve().toEntity(String.class);
     return new ResponseEntity<>(parse(raw.getBody()), raw.getHeaders(), raw.getStatusCode());
   }
 
-  private static final tools.jackson.databind.json.JsonMapper MAPPER = tools.jackson.databind.json.JsonMapper.builder().build();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   /** A JSON object becomes a Map, a JSON array becomes {"_array": [...]} (so status checks work on list endpoints), anything else null. */
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -119,11 +124,14 @@ public abstract class IntegrationTestBase {
         .retrieve().body(List.class);
   }
 
-  /** Adds stock to a seeded product so one test cannot starve another that runs later against the shared database. */
-  @SuppressWarnings("rawtypes")
+  /**
+   * Adds stock to a seeded product so one test cannot starve another that runs later against the shared database. Every product with
+   * that name gets it (a test may have added a second pack size, and the name alone does not say which one a test sells).
+   */
   protected void restock(String productName, int quantity) {
     String admin = adminToken();
-    Object id = productByName(admin, productName).get("id");
-    post("/api/v1/admin/products/" + id + "/stock", admin, Map.of("delta", quantity, "reason", "RESTOCK"));
+    for (String id : jdbc.queryForList("select id::text from product where name_en = ?", String.class, productName)) {
+      post("/api/v1/admin/products/" + id + "/stock", admin, Map.of("delta", quantity, "reason", "RESTOCK"));
+    }
   }
 }

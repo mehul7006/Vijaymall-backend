@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 class CoinRedemptionTest {
-  // 1 coin = 100 paise, coins may pay at most 50% of the eligible amount
+  /**
+   * 1 coin = 100 paise, coins may pay at most 50% of the eligible amount
+   */
   private static final CoinSettings S = new CoinSettings(100, 50, 12);
 
   @Test

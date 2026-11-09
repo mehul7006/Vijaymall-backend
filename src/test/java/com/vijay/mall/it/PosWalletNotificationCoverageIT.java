@@ -6,6 +6,9 @@ import com.vijay.mall.notification.infra.NotificationRepository;
 import com.vijay.mall.support.IntegrationTestBase;
 import com.vijay.mall.wallet.infra.WalletRepository;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,7 +39,7 @@ class PosWalletNotificationCoverageIT extends IntegrationTestBase {
     Object rice = riceId(admin);
     Map before = get("/api/v1/admin/products/" + rice + "/pos", admin).getBody();
     assertThat(before.get("soldBy")).isEqualTo("UNIT");
-    Map body = new java.util.HashMap();
+    Map body = new HashMap();
     body.put("soldBy", before.get("soldBy"));
     body.put("plu", before.get("plu"));
     body.put("gstPercent", before.get("gstPercent"));
@@ -84,7 +87,7 @@ class PosWalletNotificationCoverageIT extends IntegrationTestBase {
     // the same bill is found by the customer's mobile and by today's date; an unknown mobile finds nothing
     List<Map<String, Object>> byMobile = getList("/api/v1/pos/sales?mobile=" + m, cashier);
     assertThat(byMobile).extracting(s -> s.get("id")).containsExactly(sale.getBody().get("id"));
-    String today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).toString();
+    String today = LocalDate.now(ZoneId.of("Asia/Kolkata")).toString();
     assertThat(getList("/api/v1/pos/sales?date=" + today, cashier)).anyMatch(s -> sale.getBody().get("id").equals(s.get("id")));
     assertThat(getList("/api/v1/pos/sales?mobile=" + mobile(), cashier)).isEmpty();
     assertThat(get("/api/v1/admin/credit/accounts/" + customer, cashier).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);

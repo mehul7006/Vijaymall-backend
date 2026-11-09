@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpServer;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.Settings;
@@ -21,7 +22,7 @@ import org.springframework.http.HttpStatus;
 import tools.jackson.databind.json.JsonMapper;
 
 class HttpSmsSenderTest {
-  record Captured(String method, String uri, String body, com.sun.net.httpserver.Headers headers) {}
+  record Captured(String method, String uri, String body, Headers headers) {}
 
   private HttpServer server;
   private final List<Captured> seen = new CopyOnWriteArrayList<>();

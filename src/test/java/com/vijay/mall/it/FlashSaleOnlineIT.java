@@ -3,8 +3,10 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.order.app.OrderService;
+import com.vijay.mall.payment.domain.PaymentEvents;
 import com.vijay.mall.support.FakeGateway;
 import com.vijay.mall.support.FlashTestBase;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
@@ -48,7 +51,7 @@ class FlashSaleOnlineIT extends FlashTestBase {
     return (String) res.getBody().get("id");
   }
 
-  @Autowired org.springframework.context.ApplicationEventPublisher events;
+  @Autowired ApplicationEventPublisher events;
 
   @Test
   void anUnpaidOrderThatTimesOutGivesItsSaleUnitsBack() {
@@ -59,7 +62,7 @@ class FlashSaleOnlineIT extends FlashTestBase {
     String id = placeOnline(token, pid, 2);
     assertThat(soldQty(itemId)).isEqualTo(2);
     assertThat(quote(token(freshEmail()), pid, 1).get("subtotalPaise")).as("sold out while the payment is pending").isEqualTo(10000);
-    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), id);
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), id);
     orders.expireUnpaid();
     assertThat(get("/api/v1/orders/" + id, token).getBody().get("status")).isEqualTo("CANCELLED");
     assertThat(soldQty(itemId)).isZero();
@@ -76,7 +79,7 @@ class FlashSaleOnlineIT extends FlashTestBase {
     String token = token(freshEmail());
     String id = placeOnline(token, pid, 1);
     assertThat(soldQty(itemId)).isEqualTo(1);
-    events.publishEvent(new com.vijay.mall.payment.domain.PaymentEvents.PaymentFailed(java.util.UUID.fromString(id), "declined"));
+    events.publishEvent(new PaymentEvents.PaymentFailed(UUID.fromString(id), "declined"));
     assertThat(get("/api/v1/orders/" + id, token).getBody().get("status")).isEqualTo("CANCELLED");
     assertThat(soldQty(itemId)).isZero();
     cancelSale(sale.get("id"));

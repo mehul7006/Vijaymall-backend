@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.Settings;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
@@ -17,7 +18,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 class SenderCoverageTest {
   private final JavaMailSender mail = mock(JavaMailSender.class);
   private final ShopIdentity shop = mock(ShopIdentity.class);
-  private final FakeSettings fs = new FakeSettings().with(com.vijay.mall.config.Settings.OTP_FROM, "no-reply@shop.test");
+  private final FakeSettings fs = new FakeSettings().with(Settings.OTP_FROM, "no-reply@shop.test");
 
   private SmtpEmailOtpSender sender(ShopIdentity s) {
     return new SmtpEmailOtpSender(fs.settings, s) {

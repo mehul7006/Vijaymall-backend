@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
@@ -31,7 +32,8 @@ public class CouponRepository {
 
   private static Coupon toDomain(CouponEntity e, Map<UUID, List<UUID>> categoriesByCoupon) {
     List<UUID> ids = new ArrayList<>(categoriesByCoupon.getOrDefault(e.id, List.of()));
-    ids.sort(Comparator.naturalOrder());
+    // the database's own order for ids (UUID.compareTo compares signed numbers and would disagree with it)
+    ids.sort(Comparator.comparing(UUID::toString));
     if (e.categoryId != null && ids.remove(e.categoryId)) ids.add(0, e.categoryId); // keep the first category first
     return new Coupon(e.id, e.code, e.kind, e.amount, e.minOrderPaise, e.maxDiscountPaise, e.categoryId, e.perUserLimit,
         e.totalLimit, e.usedCount, e.startAt, e.endAt, e.active, e.worksWithCoins, e.firstOrderOnly, ids);
@@ -110,7 +112,7 @@ public class CouponRepository {
    * Makes orders of the same customer and coupon wait for each other until their transaction ends, so the per-customer
    * limit cannot be beaten by two orders placed at once. Other customers and other coupons are not held up.
    */
-  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+  @Transactional(propagation = Propagation.MANDATORY)
   public void lockCustomerUse(UUID couponId, UUID userId) {
     em.createNativeQuery("select count(*) from (select pg_advisory_xact_lock(hashtextextended(:k, 0))) as locked")
         .setParameter("k", "coupon-use:" + couponId + ":" + userId).getSingleResult();

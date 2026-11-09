@@ -1,9 +1,12 @@
 package com.vijay.mall.order.app;
 
+import com.vijay.mall.catalog.domain.PricedLine;
+import com.vijay.mall.order.domain.Fulfilment;
 import com.vijay.mall.order.domain.Quote;
 import com.vijay.mall.order.domain.QuoteContext;
 import com.vijay.mall.order.domain.QuoteRequest;
 import com.vijay.mall.order.domain.QuoteStep;
+import com.vijay.mall.wallet.domain.CoinRedemption;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -21,9 +24,9 @@ public class QuoteService {
 
   /** Quote for lines the caller already priced (counter sales). Never charges delivery. */
   @Transactional(readOnly = true)
-  public Quote quoteLines(UUID userId, List<com.vijay.mall.catalog.domain.PricedLine> lines, String couponCode,
-                          com.vijay.mall.wallet.domain.CoinRedemption.Mode mode, Integer percent) {
-    var req = new QuoteRequest(List.of(), couponCode, mode, percent, com.vijay.mall.order.domain.Fulfilment.PICKUP);
+  public Quote quoteLines(UUID userId, List<PricedLine> lines, String couponCode,
+                          CoinRedemption.Mode mode, Integer percent) {
+    var req = new QuoteRequest(List.of(), couponCode, mode, percent, Fulfilment.PICKUP);
     QuoteContext ctx = new QuoteContext(userId, req, lines);
     for (QuoteStep s : steps) s.apply(ctx);
     return ctx.toQuote();
