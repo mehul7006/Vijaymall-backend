@@ -31,6 +31,7 @@ import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.CreditNoteData;
 import com.vijay.mall.pos.domain.PaymentRules;
+import com.vijay.mall.pos.domain.PosRecords;
 import com.vijay.mall.pos.domain.PosRecords.HoldRecord;
 import com.vijay.mall.payment.paytm.app.TerminalPaymentService;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
@@ -223,7 +224,8 @@ public class PosService implements ReferenceLookup {
       if (qty > max) throw ApiException.validation("qty", "quantity too large for " + p.nameEn());
       BillCalculator.Draft d = new BillCalculator.Draft(id, p.nameEn(), a.soldBy(), qty, p.pricePaise(), a.gstPercent(), a.hsn());
       drafts.add(d);
-      lines.add(new PricedLine(id, p.categoryId(), p.nameEn(), qty, p.pricePaise(), d.linePaise(), p.coinRedeemable(), p.earnsCoins()));
+      lines.add(new PricedLine(id, p.categoryId(), p.nameEn(), qty, p.pricePaise(), d.linePaise(), p.coinRedeemable(), p.earnsCoins(),
+          p.nameEn(), "", null, 0, p.productGroupId()));
     });
     return new Priced(lines, drafts);
   }
@@ -428,14 +430,19 @@ public class PosService implements ReferenceLookup {
     ShopSetting shopInfo = shop.get();
     String fy = InvoiceNumbers.financialYear(soldAt); // an offline bill belongs to the year it was sold in, not the day it was uploaded
     String invoiceNo = InvoiceNumbers.format(shopInfo.invoicePrefix(), fy, counters.next("INVOICE", fy));
-    List<SaleItemRecord> items = bill.lines().stream().map(l -> new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(),
-        l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(),
-        l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0)).toList();
+    List<SaleItemRecord> items = new ArrayList<>();
+    for (int i = 0; i < bill.lines().size(); i++) {
+      BillCalculator.Line l = bill.lines().get(i);
+      long couponShare = q.lines().size() == bill.lines().size() ? q.lines().get(i).couponDiscountPaise() : 0;
+      items.add(new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(), l.soldBy(), l.qty(), l.unitPricePaise(),
+          l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(), l.tax().taxable(), l.tax().cgst(),
+          l.tax().sgst(), 0, couponShare));
+    }
     List<PaymentRecord> payments = paid.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference(), p.terminalPaymentId())).toList();
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, bill.subtotalPaise(), q.couponCode(),
         q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), payable, bill.tax().taxable(), bill.tax().cgst(),
         bill.tax().sgst(), earned, in.cashTenderedPaise(), change, soldAt, items, payments, PaymentRules.classify(payLines),
-        manual.amountPaise(), manual.reason(), manual.approver(), roundOff), idemKey);
+        manual.amountPaise(), manual.reason(), manual.approver(), roundOff, q.couponMinOrderPaise()), idemKey);
     if (manual.amountPaise() > 0) {
       audit.log(cashierId, "MANUAL_DISCOUNT", "pos_sale", saleId, invoiceNo + " amount=" + manual.amountPaise() + " reason="
           + manual.reason() + " approvedBy=" + manual.approver());
@@ -600,9 +607,14 @@ public class PosService implements ReferenceLookup {
     ShopSetting shopInfo = shop.get();
     String fy = InvoiceNumbers.financialYear(soldAt);
     String invoiceNo = InvoiceNumbers.format(shopInfo.invoicePrefix(), fy, counters.next("INVOICE", fy));
-    List<SaleItemRecord> items = bill.lines().stream().map(l -> new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(),
-        l.soldBy(), l.qty(), l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(),
-        l.tax().taxable(), l.tax().cgst(), l.tax().sgst(), 0)).toList();
+    List<SaleItemRecord> items = new ArrayList<>();
+    for (int i = 0; i < bill.lines().size(); i++) {
+      BillCalculator.Line l = bill.lines().get(i);
+      long couponShare = 0; // offline bills carry no coupon
+      items.add(new SaleItemRecord(UUID.randomUUID(), l.productId(), l.name(), l.soldBy(), l.qty(), l.unitPricePaise(),
+          l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.hsn(), l.tax().taxable(), l.tax().cgst(),
+          l.tax().sgst(), 0, couponShare));
+    }
     List<PaymentRecord> payments = pays.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
     // the subtotal is what the lines cost after the till's own line discounts, so the receipt adds up: subtotal - discount +- round off = total
     sales.insert(new SaleRecord(saleId, invoiceNo, cashierId, customerId, mobile, afterLineDiscounts, null, 0, 0, 0, payable,
@@ -728,7 +740,8 @@ public class PosService implements ReferenceLookup {
     CreditNoteData data = new CreditNoteData(shopInfo.shopName(), shopInfo.address(), shopInfo.phone(), shopInfo.gstin(),
         r.creditNoteNo(), s.invoiceNo(), STAMP.format(r.createdAt().atZone(InvoiceNumbers.SHOP_ZONE)), cashierName(r.cashierId()),
         s.customerMobile() == null ? "" : s.customerMobile(), r.reason() == null ? "" : r.reason(), lines, r.taxablePaise(),
-        r.cgstPaise(), r.sgstPaise(), r.refundPaise(), refunds, r.creditAdjustedPaise(), shopInfo.receiptFooter());
+        r.cgstPaise(), r.sgstPaise(), r.refundPaise(), refunds, r.creditAdjustedPaise(), shopInfo.receiptFooter(),
+        r.items().stream().mapToLong(PosRecords.ReturnItemRecord::couponSharePaise).sum(), r.couponClawbackPaise());
     try {
       return ReceiptText.renderCreditNote(data, width);
     } catch (IllegalArgumentException e) {

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.CouponReturnMath;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.RuntimeSettings;
@@ -130,28 +131,104 @@ public class PosReturnService {
   /** The returns already made against a bill, oldest first. */
   public List<ReturnRecord> returnsOf(UUID saleId) { return sales.returnsOf(saleId); }
 
-  private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
-    SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
+  private void checkWindow(SaleRecord sale, boolean admin) {
     if (!admin && returnDays() > 0
         && sale.createdAt().isBefore(clock.instant().minus(returnDays(), ChronoUnit.DAYS))) {
       throw ApiException.unprocessable("RETURN_NEEDS_ADMIN", "This bill is older than " + returnDays()
           + " days: an admin must take the return", Map.of("days", returnDays()));
     }
-    Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
-    Map<UUID, Integer> wanted = merge(in.items(), byId);
-    ReturnedSoFar prior = sales.returnedSoFar(saleId, sale.items());
+  }
 
-    List<ReturnItemRecord> items = wanted.entrySet().stream().map(e -> {
-      SaleItemRecord i = byId.get(e.getKey());
-      int qty = e.getValue();
+  /** What the coupon policy setting says; {@code KEEP} when settings are not wired (plain unit tests). */
+  private String policy() { return settings == null ? CouponReturnMath.KEEP : settings.get(Settings.RETURNS_COUPON_POLICY); }
+
+  /** The refund of a return worked out for every returned line, before anything is changed. */
+  private record Worked(List<ReturnItemRecord> items, CouponReturnMath.Plan math, List<SaleItemRecord> lines, String policy) {}
+
+  private Worked work(SaleRecord sale, Map<UUID, SaleItemRecord> byId, Map<UUID, Integer> wanted) {
+    List<SaleItemRecord> lines = sale.items();
+    Map<UUID, Integer> index = new HashMap<>();
+    for (int k = 0; k < lines.size(); k++) index.put(lines.get(k).id(), k);
+    int[] returning = new int[lines.size()];
+    wanted.forEach((id, qty) -> {
+      SaleItemRecord i = byId.get(id);
       if (qty > i.returnableQty()) {
         throw ApiException.conflict("RETURN_EXCEEDS_SOLD", "More than what is left to return",
             Map.of("saleItemId", i.id().toString(), "returnable", i.returnableQty()));
       }
-      long refund = ReturnMath.shareOfReturn(i.netPaise(), i.qty(), i.returnedQty(), qty);
+      returning[index.get(id)] = qty;
+    });
+    List<CouponReturnMath.Line> sold = lines.stream()
+        .map(i -> new CouponReturnMath.Line(i.qty(), i.linePaise(), Math.min(i.couponSharePaise(), i.linePaise()), i.netPaise())).toList();
+    List<CouponReturnMath.Earlier> earlier = new ArrayList<>();
+    for (ReturnRecord r : sales.returnsOf(sale.id())) {
+      int[] back = new int[lines.size()];
+      r.items().forEach(ri -> back[index.get(ri.saleItemId())] += ri.qty());
+      earlier.add(new CouponReturnMath.Earlier(back, r.couponClawbackPaise()));
+    }
+    String policy = policy();
+    CouponReturnMath.Plan math = CouponReturnMath.plan(sold, lines.stream().mapToInt(SaleItemRecord::returnedQty).toArray(), earlier, returning, policy, sale.couponMinOrderPaise());
+    List<ReturnItemRecord> items = wanted.keySet().stream().map(id -> {
+      int k = index.get(id);
+      SaleItemRecord i = lines.get(k);
+      long refund = math.refundPaise()[k];
       TaxSplit tax = GstCalculator.split(refund, i.gstPercent());
-      return new ReturnItemRecord(i.id(), qty, refund, tax.taxable(), tax.cgst(), tax.sgst());
+      return new ReturnItemRecord(i.id(), wanted.get(id), refund, tax.taxable(), tax.cgst(), tax.sgst(), math.couponSharePaise()[k]);
     }).toList();
+    return new Worked(items, math, lines, policy);
+  }
+
+  /**
+   * One line of a return preview: for the returned units {@code grossPaise} (their price), less {@code couponSharePaise}, less
+   * {@code otherSharePaise} (coins and counter discount), less {@code clawbackPaise} (coupon discount taken back under the
+   * CLAWBACK_BELOW_MINIMUM policy) is the {@code refundPaise}; the GST of the refund is split in the last three fields.
+   */
+  public record PreviewLine(UUID saleItemId, UUID productId, String name, int qty, long grossPaise, long couponSharePaise,
+                            long otherSharePaise, long clawbackPaise, long refundPaise, long taxablePaise, long cgstPaise,
+                            long sgstPaise) {}
+
+  /** What a return would refund and reverse for GST, without recording it. */
+  public record Preview(UUID saleId, String invoiceNo, String couponPolicy, long refundPaise, long couponShareRemovedPaise,
+                        long otherShareRemovedPaise, long couponClawbackPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                        List<PreviewLine> lines) {}
+
+  /**
+   * Shows the exact refund of a return, per line, with the coupon share that leaves with the units, coins and counter discount
+   * share, any coupon taken back and the GST reversed. The same checks and maths as {@link #refund}; nothing is stored or moved.
+   *
+   * @param admin true for a manager, who is not held to the cashier return window
+   * @param saleId the bill
+   * @param in the lines (only {@code items} is used)
+   */
+  public Preview preview(boolean admin, UUID saleId, ReturnInput in) {
+    SaleRecord sale = sales.find(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
+    checkWindow(sale, admin);
+    Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
+    Worked w = work(sale, byId, merge(in.items(), byId));
+    CouponReturnMath.Plan m = w.math();
+    List<PreviewLine> lines = new ArrayList<>();
+    for (ReturnItemRecord r : w.items()) {
+      int k = w.lines().indexOf(byId.get(r.saleItemId()));
+      SaleItemRecord i = w.lines().get(k);
+      lines.add(new PreviewLine(i.id(), i.productId(), i.name(), r.qty(), m.grossPaise()[k], m.couponSharePaise()[k], m.otherSharePaise()[k],
+          m.clawbackPaise()[k], r.refundPaise(), r.taxablePaise(), r.cgstPaise(), r.sgstPaise()));
+    }
+    return new Preview(saleId, sale.invoiceNo(), w.policy(), lines.stream().mapToLong(PreviewLine::refundPaise).sum(),
+        lines.stream().mapToLong(PreviewLine::couponSharePaise).sum(), lines.stream().mapToLong(PreviewLine::otherSharePaise).sum(),
+        m.clawbackTotalPaise(), lines.stream().mapToLong(PreviewLine::taxablePaise).sum(),
+        lines.stream().mapToLong(PreviewLine::cgstPaise).sum(), lines.stream().mapToLong(PreviewLine::sgstPaise).sum(), lines);
+  }
+
+  private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
+    SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
+    checkWindow(sale, admin);
+    Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
+    Map<UUID, Integer> wanted = merge(in.items(), byId);
+    ReturnedSoFar prior = sales.returnedSoFar(saleId, sale.items());
+
+    Worked worked = work(sale, byId, wanted);
+    List<ReturnItemRecord> items = worked.items();
+    long clawbackTotal = worked.math().clawbackTotalPaise();
 
     long refundTotal = items.stream().mapToLong(ReturnItemRecord::refundPaise).sum();
     long grossReturned = wanted.entrySet().stream()
@@ -213,9 +290,10 @@ public class PosReturnService {
     long sgst = items.stream().mapToLong(ReturnItemRecord::sgstPaise).sum();
     List<PaymentRecord> refundRecords = refunds.stream().map(p -> new PaymentRecord(p.mode(), p.amountPaise(), p.reference())).toList();
     sales.insertReturn(new ReturnRecord(returnId, noteNo, saleId, cashierId, in.reason() == null ? "" : in.reason().strip(),
-        refundTotal, taxable, cgst, sgst, clawed, restore, now, items, refundRecords, creditAdjust), idemKey);
+        refundTotal, taxable, cgst, sgst, clawed, restore, now, items, refundRecords, creditAdjust, clawbackTotal), idemKey);
     if (creditAdjust > 0) credit.recordReturn(sale.customerId(), saleId, returnId, noteNo, creditAdjust, cashierId, now);
-    audit.log(cashierId, "RETURN", "pos_return", returnId, noteNo + " bill=" + sale.invoiceNo() + " refund=" + refundTotal);
+    audit.log(cashierId, "RETURN", "pos_return", returnId, noteNo + " bill=" + sale.invoiceNo() + " refund=" + refundTotal
+        + (clawbackTotal > 0 ? " couponClawback=" + clawbackTotal : ""));
     log.info("POS return note={} bill={} cashier={} refund={} creditReduced={} coinsClawed={} coinsRestored={}", noteNo,
         sale.invoiceNo(), cashierId, refundTotal, creditAdjust, clawed, restore);
     return returnId;

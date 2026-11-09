@@ -592,3 +592,7 @@ Because status changes at the exact second (computed), but the `FLASH` event for
 - `GET /flash-sales/*` has no per-customer view (no personal "remaining" for the signed-in customer); that only shows in the quote.
 - Server side cache: sale definitions are cached up to 15 seconds and the cache is emptied on every `FLASH` event on the same server instance; with several backend instances a customer could see a stale definition for up to 15 seconds.
 - A sale can be left with zero items after removals; the code does not block it (it would not show up in the public lists).
+
+## Hot sale vs flash sale
+
+Hot sale (`hotSale`, `hotStart`, `hotEnd`) is only advertising: the product shows in the featured list and banners and its price does not change. A flash sale is the occasion sale: a timed discount with its own sale price, quantity caps and reports. Do not merge them in the UI. Coupons may be used on flash sale lines or not, depending on the admin setting `coupon.allowOnFlashItems` (default yes); see Addendum 7 in `20-orders-payments-admin-config.md`.

@@ -65,6 +65,7 @@ class PosReturnServiceCoverageTest {
     when(sales.addReturned(eq(itemId), anyInt())).thenReturn(true);
     when(counters.next("CREDIT_NOTE", "2026-27")).thenReturn(3L);
     when(sales.returnsOf(saleId)).thenAnswer(inv -> {
+      if (org.mockito.Mockito.mockingDetails(sales).getInvocations().stream().noneMatch(i -> i.getMethod().getName().equals("insertReturn"))) return List.of();
       ArgumentCaptor<ReturnRecord> c = ArgumentCaptor.forClass(ReturnRecord.class);
       verify(sales).insertReturn(c.capture(), anyString());
       return List.of(c.getValue());

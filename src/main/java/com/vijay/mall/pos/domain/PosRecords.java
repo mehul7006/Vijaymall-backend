@@ -62,11 +62,20 @@ public final class PosRecords {
 
     /**
      * One stored line of a bill, money in paise: gross, discount, net and the GST split, plus how many units have
-     * been returned so far. {@code qty} is pieces, or grams for a weighed item.
+     * been returned so far. {@code qty} is pieces, or grams for a weighed item. {@code couponSharePaise} is the part of the coupon
+     * discount that fell on this line (0 when the coupon did not cover it); it is already inside {@code discountPaise}.
      */
     public record SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
                                  long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
-                                 long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty) {
+                                 long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise) {
+        /** A line with no coupon share (no coupon, or one that did not cover it). */
+        public SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
+                              long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
+                              long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty) {
+            this(id, productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, hsn,
+                taxablePaise, cgstPaise, sgstPaise, returnedQty, 0);
+        }
+
         /** Units that can still be returned: sold minus already returned. */
         public int returnableQty() {
             return qty - returnedQty;
@@ -84,7 +93,21 @@ public final class PosRecords {
                              int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
                              List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType,
                              long manualDiscountPaise, String manualDiscountReason, UUID manualDiscountApprover,
-                             long roundOffPaise) {
+                             long roundOffPaise, long couponMinOrderPaise) {
+        /** A bill that does not say what minimum order its coupon had. */
+        public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
+                          long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
+                          long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                          int coinsEarned, Long tenderedPaise, long changePaise, Instant createdAt,
+                          List<SaleItemRecord> items, List<PaymentRecord> payments, String paymentType,
+                          long manualDiscountPaise, String manualDiscountReason, UUID manualDiscountApprover,
+                          long roundOffPaise) {
+            this(id, invoiceNo, cashierId, customerId, customerMobile, subtotalPaise, couponCode, couponDiscountPaise,
+                coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise, coinsEarned,
+                tenderedPaise, changePaise, createdAt, items, payments, paymentType, manualDiscountPaise, manualDiscountReason,
+                manualDiscountApprover, roundOffPaise, 0);
+        }
+
         /** A bill that was not rounded. */
         public SaleRecord(UUID id, String invoiceNo, UUID cashierId, UUID customerId, String customerMobile,
                           long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed,
@@ -133,20 +156,36 @@ public final class PosRecords {
 
     /**
      * One returned line of a credit note: which sold line, how many units, the refund for it and that refund's GST
-     * split, in paise.
+     * split, in paise, and the coupon share that left with the returned units (not refunded).
      */
     public record ReturnItemRecord(UUID saleItemId, int qty, long refundPaise, long taxablePaise, long cgstPaise,
-                                   long sgstPaise) { }
+                                   long sgstPaise, long couponSharePaise) {
+        /** A line that carries no coupon share. */
+        public ReturnItemRecord(UUID saleItemId, int qty, long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise) {
+            this(saleItemId, qty, refundPaise, taxablePaise, cgstPaise, sgstPaise, 0);
+        }
+    }
 
     /**
      * A stored credit note for goods taken back from a bill: its number, reason, refund total and GST split in paise,
      * coins clawed back or restored, the lines, how the refund was paid out and how much of it only reduced the
-     * customer's credit balance.
+     * customer's credit balance. {@code couponClawbackPaise} is coupon discount the CLAWBACK_BELOW_MINIMUM policy took back out of
+     * the refund (already deducted from {@code refundPaise}).
      */
     public record ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
                                long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,
                                int coinsClawedBack, int coinsRestored, Instant createdAt,
-                               List<ReturnItemRecord> items, List<PaymentRecord> refunds, long creditAdjustedPaise) {
+                               List<ReturnItemRecord> items, List<PaymentRecord> refunds, long creditAdjustedPaise,
+                               long couponClawbackPaise) {
+        /** A return that took no coupon discount back. */
+        public ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
+                            long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,
+                            int coinsClawedBack, int coinsRestored, Instant createdAt,
+                            List<ReturnItemRecord> items, List<PaymentRecord> refunds, long creditAdjustedPaise) {
+            this(id, creditNoteNo, saleId, cashierId, reason, refundPaise, taxablePaise, cgstPaise, sgstPaise,
+                coinsClawedBack, coinsRestored, createdAt, items, refunds, creditAdjustedPaise, 0);
+        }
+
         /** A return that did not touch customer credit. */
         public ReturnRecord(UUID id, String creditNoteNo, UUID saleId, UUID cashierId, String reason,
                             long refundPaise, long taxablePaise, long cgstPaise, long sgstPaise,

@@ -218,6 +218,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
         q.couponCode(), q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(), q.deliveryFeePaise(),
         q.totalPaise(), (int) q.coinsToEarn(), method, needsPayment ? "INITIATED" : "NONE", addressJson, expires, now,
         slot));
+    repo.recordCouponMinimum(orderId, q.couponMinOrderPaise());
 
     Map<UUID, String> images = productImages(q);
     for (Quote.Line l : q.lines()) {

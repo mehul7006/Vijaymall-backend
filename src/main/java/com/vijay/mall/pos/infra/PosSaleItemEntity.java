@@ -24,6 +24,7 @@ class PosSaleItemEntity extends BaseEntity {
   long cgstPaise;
   long sgstPaise;
   int returnedQty;
+  long couponSharePaise;
 
   /** Required by JPA; not for application code. */
   protected PosSaleItemEntity() {}

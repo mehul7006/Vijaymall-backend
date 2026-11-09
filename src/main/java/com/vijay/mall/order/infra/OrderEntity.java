@@ -21,6 +21,7 @@ class OrderEntity extends BaseEntity {
   long subtotalPaise;
   String couponCode;
   long couponDiscountPaise;
+  long couponMinOrderPaise;
   int coinsUsed;
   long coinDiscountPaise;
   long deliveryFeePaise;

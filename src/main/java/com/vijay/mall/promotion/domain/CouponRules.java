@@ -12,8 +12,24 @@ public final class CouponRules {
   }
 
   /**
+   * Why no line of the cart is covered: {@code ITEM} for a coupon that lists products or product groups, {@code CATEGORY}
+   * for a category coupon, {@code FLASH_ITEMS} when the lines it is for are all on a flash sale the coupon may not touch.
+   * The value is only used when no line is covered.
+   */
+  /** A coupon for everything is not refused for an empty cart; a restricted one, or one that leaves out flash lines, can be. */
+  private static boolean mayBeUncovered(CouponContext c) {
+    return !c.coupon().unrestricted() || (!c.allowOnFlash() && !c.lines().isEmpty());
+  }
+
+  static String uncoveredReason(CouponContext c) {
+    Coupon x = c.coupon();
+    if (c.lines().stream().anyMatch(x::covers)) return "FLASH_ITEMS";
+    return x.productIds().isEmpty() && x.productGroupIds().isEmpty() ? "CATEGORY" : "ITEM";
+  }
+
+  /**
    * The coupon conditions in the order they are checked; the first one broken is the reason shown. The reason codes are
-   * {@code EXPIRED}, {@code MIN_ORDER}, {@code CATEGORY}, {@code LIMIT_REACHED} and {@code FIRST_ORDER_ONLY}.
+   * {@code EXPIRED}, {@code MIN_ORDER}, {@code CATEGORY}, {@code ITEM}, {@code FLASH_ITEMS}, {@code LIMIT_REACHED} and {@code FIRST_ORDER_ONLY}.
    */
   public static final List<CouponRule> STANDARD = List.of(
       c -> violation(!c.coupon().active(), "EXPIRED"),
@@ -24,13 +40,12 @@ public final class CouponRules {
         return violation(before || after, "EXPIRED");
       },
       c -> violation(c.subtotalPaise() < c.coupon().minOrderPaise(), "MIN_ORDER"),
-      c -> violation(!c.coupon().allCategories()
-          && c.lines().stream().noneMatch(l -> c.coupon().covers(l.categoryId())), "CATEGORY"),
+      c -> mayBeUncovered(c) && c.lines().stream().noneMatch(c::covered) ? Optional.of(uncoveredReason(c)) : Optional.<String>empty(),
       /**
-       * A category coupon's minimum counts only what is spent in its categories, not the whole cart.
+       * The minimum counts only what is spent on the lines the coupon covers (its categories and items, and not flash sale
+       * lines when the admin excluded them), not the whole cart.
        */
-      c -> violation(!c.coupon().allCategories()
-          && CouponMath.base(c.coupon(), c.lines(), c.subtotalPaise()) < c.coupon().minOrderPaise(), "MIN_ORDER"),
+      c -> violation(c.coveredPaise() < c.coupon().minOrderPaise(), "MIN_ORDER"),
       c -> violation(c.coupon().perUserLimit() > 0 && c.userUses() >= c.coupon().perUserLimit(), "LIMIT_REACHED"),
       c -> violation(c.coupon().totalLimit() > 0 && c.coupon().usedCount() >= c.coupon().totalLimit(), "LIMIT_REACHED"),
       c -> violation(c.coupon().firstOrderOnly() && c.priorOrders() > 0, "FIRST_ORDER_ONLY"));

@@ -4,12 +4,17 @@ Audience: the Flutter app team, the web app team, and the LLM coding assistants 
 
 | File | Covers |
 |---|---|
+| `01-implementation-guide.md` | **Start here for the plan:** what to build per app, what changed, what to configure, build order |
 | `00-overview.md` (this file) | Roles, authentication, request/response conventions, errors, idempotency, money, pagination, live events, images, rate limits |
 | `10-customer-and-catalog.md` | Sign-in, profile, addresses, devices, wallet and coins, notifications, wishlist, catalog, reviews, coupons, units, admin catalog and customer tools |
 | `20-orders-payments-admin-config.md` | Cart quote, orders, returns, online payment and refunds, public shop details, shop profile, admin configuration screen, caches, logs, live events |
 | `30-pos-reports-purchasing.md` | Shop-counter POS, shifts, credit (udhar), offline sync, purchasing, stock takes, reports, audit log |
 | `40-flash-sales.md` | Flash sale module (added after it is merged) |
 | `60-admin-push-notifications.md` | Admin push notifications: broadcasts to users, role groups or condition-based customer segments, segment builder, previews, inbox kind `ANNOUNCEMENT` |
+| `70-purchases.md` | Suppliers, purchase documents with GST, cess, discount and freight, payments and payables, returns to suppliers, supplier statement, credit and refunds, invoice file |
+| `72-barcode-labels.md` | Store barcode generation and label printing (PDF, thermal printer commands, JSON) |
+| `73-paytm-terminal.md` | Card and UPI payments on the Paytm wireless swipe machine from the till |
+| `50`, `51`, `52-backend-response-*.md` | The backend's answers to the Flutter reviews, item by item (change history) |
 
 The backend is one REST API over HTTPS. Base path: `/api/v1`. All bodies are JSON (`Content-Type: application/json`) except image uploads (`multipart/form-data`) and the live-event stream (`text/event-stream`).
 

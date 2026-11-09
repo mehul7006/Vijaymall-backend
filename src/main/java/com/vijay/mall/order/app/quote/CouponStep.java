@@ -33,5 +33,6 @@ public class CouponStep implements QuoteStep {
     c.couponDiscount = Math.min(applied.discountPaise(), c.subtotal);
     c.couponByLine = applied.perLine() == null ? List.of() : applied.perLine();
     c.couponBlocksCoins = !applied.worksWithCoins();
+    c.couponMinOrder = applied.minOrderPaise();
   }
 }

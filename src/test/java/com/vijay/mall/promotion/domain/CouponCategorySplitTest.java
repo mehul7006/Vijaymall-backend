@@ -58,8 +58,8 @@ class CouponCategorySplitTest {
     assertThat(c.categoryIds()).containsExactly(dairy);
     assertThat(c.covers(dairy)).isTrue();
     assertThat(c.covers(snacks)).isFalse();
-    assertThat(c.covers(null)).isFalse();
-    assertThat(coupon(Coupon.FLAT, 1, 0).covers(null)).isTrue();
+    assertThat(c.covers((java.util.UUID) null)).isFalse();
+    assertThat(coupon(Coupon.FLAT, 1, 0).covers((java.util.UUID) null)).isTrue();
   }
 
   @Test

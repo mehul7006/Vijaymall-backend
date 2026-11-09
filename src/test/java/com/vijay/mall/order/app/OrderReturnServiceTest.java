@@ -196,7 +196,7 @@ class OrderReturnServiceTest {
     verify(wallet).restore(eq(user), anyInt(), any());
     // no defective ledger wired here, so the item returned with restock=false is put back too (the units are never lost)
     verify(inventory, Mockito.times(2)).release(anyList(), any(), eq("ORDER_RETURN"));
-    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(15000L), eq("CASH"), eq(0), anyInt(), eq(actor), anyList(), eq(now));
+    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(15000L), eq("CASH"), eq(0), anyInt(), eq(actor), anyList(), eq(now), anyLong());
     verify(payments, never()).refundPartial(any(), anyLong(), anyString());
   }
 
@@ -217,7 +217,7 @@ class OrderReturnServiceTest {
     when(payments.refundPartial(eq(orderId), anyLong(), anyString())).thenReturn(true);
     create(in("r", item(prodA, 1, null)));
     verify(wallet).clawback(eq(user), anyInt(), any());
-    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), anyLong(), eq("ONLINE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now));
+    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), anyLong(), eq("ONLINE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now), anyLong());
   }
 
   @Test
@@ -226,7 +226,7 @@ class OrderReturnServiceTest {
     stubFind();
     when(payments.refundPartial(eq(orderId), anyLong(), anyString())).thenReturn(false);
     create(in("r", item(prodA, 1, null)));
-    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), anyLong(), eq("CASH"), anyInt(), anyInt(), eq(actor), anyList(), eq(now));
+    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), anyLong(), eq("CASH"), anyInt(), anyInt(), eq(actor), anyList(), eq(now), anyLong());
   }
 
   @Test
@@ -239,7 +239,7 @@ class OrderReturnServiceTest {
     create(in("r", item(prodA, 1, false)));
     verify(inventory, never()).release(anyList(), any(), anyString());
     verify(defective).record(anyList(), eq("ORDER_RETURN"), any(), eq(actor), eq("r"));
-    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(0L), eq("NONE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now));
+    verify(returns).insert(any(), eq(orderId), eq("k1"), eq("r"), eq(0L), eq("NONE"), anyInt(), anyInt(), eq(actor), anyList(), eq(now), anyLong());
   }
 
   @Test

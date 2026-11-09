@@ -165,6 +165,15 @@ public class OrderRepository {
     return orders.findByUserIdAndIdemKey(userId, key).map(OrderRepository::toRow);
   }
 
+  /** The coupon's minimum order kept with the order when it was placed (0 when it had no coupon, or for older orders). */
+  public long couponMinimum(UUID orderId) { return orders.findById(orderId).map(e -> e.couponMinOrderPaise).orElse(0L); }
+
+  /** Keeps the minimum order of the coupon an order used, right after the order is inserted (nothing to keep when it is 0). */
+  @Transactional
+  public void recordCouponMinimum(UUID orderId, long minOrderPaise) {
+    if (minOrderPaise > 0) orders.findById(orderId).ifPresent(e -> e.couponMinOrderPaise = minOrderPaise);
+  }
+
   /** Flushes at once so a repeated idempotency key fails here, inside the transaction that can be rolled back. */
   @Transactional
   public void insert(NewOrder o) {

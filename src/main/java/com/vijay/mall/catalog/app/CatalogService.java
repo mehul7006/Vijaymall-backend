@@ -424,7 +424,7 @@ public class CatalogService {
       ProductData p = byId.get(e.getKey());
       if (p == null || !p.active() || counterOnly.contains(p.id())) throw ApiException.validation("productId", "product is not available: " + e.getKey());
       return new PricedLine(p.id(), p.categoryId(), p.nameEn(), e.getValue(), p.pricePaise(),
-          p.pricePaise() * e.getValue(), p.coinRedeemable(), p.earnsCoins(), p.nameGu(), p.unitLabel());
+          p.pricePaise() * e.getValue(), p.coinRedeemable(), p.earnsCoins(), p.nameGu(), p.unitLabel(), null, 0, p.productGroupId());
     }).toList();
   }
 

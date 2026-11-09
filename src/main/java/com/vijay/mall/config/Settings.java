@@ -24,7 +24,8 @@ public final class Settings {
   /** Sections of the config screen. */
   public enum Group {
     PAYMENT("Online payment"), PUSH("Push notifications"), SMS("SMS login codes"), EMAIL("E-mail login codes"),
-    PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), SECURITY("Security");
+    PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), SECURITY("Security"),
+    COUPONS("Coupons and returns");
 
     /** The heading shown to the admin. */
     public final String label;
@@ -218,6 +219,19 @@ public final class Settings {
   public static final Def POS_REQUIRE_OPEN_SHIFT = flag("pos.requireOpenShift", Group.COUNTER, "Cashier must open a shift to bill",
       "Forces the drawer to be counted in before billing.", "app.pos.require-open-shift", "false");
 
+  // ---- coupons and returns
+  /** Whether a coupon also discounts items that are on a flash sale. */
+  public static final Def COUPON_ALLOW_ON_FLASH = flag("coupon.allowOnFlashItems", Group.COUPONS, "Coupons on flash sale items",
+      "On: a coupon also takes its discount off items that are on a flash sale (on top of the sale price). Off: flash sale items are left "
+          + "out of every coupon, they do not count towards its minimum order and get no share of the discount.",
+      "app.coupon.allow-on-flash-items", "true");
+  /** What happens to the coupon discount when part of an order is returned. */
+  public static final Def RETURNS_COUPON_POLICY = choice("returns.couponPolicy", Group.COUPONS, "Coupon when part of an order is returned",
+      "KEEP: the customer keeps the coupon discount on the items they keep, in proportion, even if what is left is below the coupon's "
+          + "minimum order. CLAWBACK_BELOW_MINIMUM: if what is left of the covered items falls below the coupon's minimum order, the "
+          + "coupon discount on the items kept is taken back from the refund of the returned items (never below zero).",
+      "app.returns.coupon-policy", "KEEP", "KEEP", "CLAWBACK_BELOW_MINIMUM");
+
   // ---- GST and bills
   /** Whether counter bill totals are rounded to the nearest rupee. */
   public static final Def GST_ROUND_OFF = choice("gst.roundOff", Group.GST, "Round counter bills", "NEAREST_RUPEE rounds the bill total to the "
@@ -260,7 +274,7 @@ public final class Settings {
       FCM_SERVICE_ACCOUNT, SMS_CHANNEL, SMS_HTTP_URL, SMS_HTTP_METHOD, SMS_HTTP_HEADERS, SMS_HTTP_BODY, SMS_SENDER_ID, SMS_DLT_TEMPLATE_ID,
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,
-      GST_ROUND_OFF, PURCHASE_GST_MODE, CLIENT_IP_HEADER, CACHE_ENABLED);
+      GST_ROUND_OFF, PURCHASE_GST_MODE, CLIENT_IP_HEADER, CACHE_ENABLED, COUPON_ALLOW_ON_FLASH, RETURNS_COUPON_POLICY);
 
   /** Every setting: the fixed ones followed by one cache lifetime per cache. */
   public static final List<Def> ALL = Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();

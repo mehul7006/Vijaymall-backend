@@ -71,7 +71,7 @@ class CouponDomainCoverageTest {
   @Test
   void noCategoryLineIsNeverCoveredByALimitedCoupon() {
     var c = coupon(0, List.of(DAIRY));
-    assertThat(c.covers(null)).isFalse();
+    assertThat(c.covers((java.util.UUID) null)).isFalse();
     assertThat(c.covers(DAIRY)).isTrue();
     assertThat(CouponRules.firstViolation(CouponRules.STANDARD,
         new CouponContext(c, NOW, 100, List.of(line(null, 100)), 0))).contains("CATEGORY");

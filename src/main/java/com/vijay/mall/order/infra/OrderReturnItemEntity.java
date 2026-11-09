@@ -16,6 +16,7 @@ class OrderReturnItemEntity extends BaseEntity {
   int qty;
   long refundPaise;
   boolean restocked;
+  long couponSharePaise;
 
   /** For JPA. */
   protected OrderReturnItemEntity() {}

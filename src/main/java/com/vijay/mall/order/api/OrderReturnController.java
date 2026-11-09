@@ -42,6 +42,15 @@ public class OrderReturnController {
     return returns.create(CurrentUser.id(), id, key, new OrderReturnService.Input(b.reason(), b.items()));
   }
 
+  /**
+   * Previews a return: the exact refund, and per line the coupon and coin share that leaves with the returned pieces and any coupon
+   * discount taken back. Same checks as recording the return; changes nothing and needs no Idempotency-Key.
+   */
+  @PostMapping("/admin/orders/{id}/returns/preview")
+  public OrderReturnService.PreviewView preview(@PathVariable UUID id, @Valid @RequestBody ReturnBody b) {
+    return returns.preview(id, new OrderReturnService.Input(b.reason(), b.items()));
+  }
+
   /** Lists the returns recorded on any order, oldest first (ADMIN and CASHIER). */
   @GetMapping("/admin/orders/{id}/returns")
   public List<ReturnView> forStaff(@PathVariable UUID id) { return returns.forOrder(id, null); }

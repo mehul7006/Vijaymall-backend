@@ -213,6 +213,15 @@ public class PosController {
     return returns.refund(CurrentUser.id(), CurrentUser.isAdmin(), id, key, new ReturnInput(body.items(), body.reason(), body.refunds(), body.refundMode()));
   }
 
+  /**
+   * Shows what a return would refund before it is made: per line the price, the coupon share and the coins/discount share that leave
+   * with the units, any coupon taken back under the admin's return policy, the refund and its GST. Changes nothing.
+   */
+  @PostMapping("/sales/{id}/returns/preview")
+  public PosReturnService.Preview previewReturn(@PathVariable UUID id, @Valid @RequestBody ReturnBody body) {
+    return returns.preview(CurrentUser.isAdmin(), id, new ReturnInput(body.items(), body.reason(), body.refunds(), body.refundMode()));
+  }
+
   /** Lists the returns already made against a bill. */
   @GetMapping("/sales/{id}/returns")
   public List<ReturnRecord> returnsOf(@PathVariable UUID id) { return returns.returnsOf(id); }

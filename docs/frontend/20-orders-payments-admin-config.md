@@ -1349,3 +1349,114 @@ The date applies to `placedAt`. Errors are `400 VALIDATION_FAILED` with `details
 **Behaviour change:** an unknown `status` used to return an empty page; it is now `400 fields.status`. A blank `status` (`status=`) still means every status.
 
 `GET /admin/dashboard` has a new number `needsAction` (the same five statuses, counted now; it includes `newOrders`). It is cached with the rest of the dashboard for about 30 seconds; badge the "Orders" tab with it, and open the list with `?needsAction=true`.
+
+## Addendum 7 (item coupons, coupons and coins on partial returns, return preview)
+
+### Hot sale is not flash sale
+
+| | Hot sale | Flash sale |
+|---|---|---|
+| Purpose | The admin wants to **advertise** products | An **occasion sale**: a timed discount, everything captured |
+| Price | Never changes | Own sale price per product, its own quantity cap and reports |
+| Where | The featured/hot list and banners (`hotSale`, `hotStart`, `hotEnd`) | `/flash-sales` (see `40-flash-sales.md`) |
+
+They stay separate. Do not show a hot-sale product as discounted; show a discount only when `flashSaleId` / `flashDiscountPaise` is set on the line.
+
+### Item coupons
+
+A coupon can be limited by **category**, by **product (variant)** and by **product group** (every variant of one product). A cart line is *covered* when its category is in `categoryIds` OR its product is in `productIds` OR its product group is in `productGroupIds`. All three lists empty = the coupon covers every line (unchanged). At most 200 products and product groups together.
+
+Quote rules (the same engine serves the cart, checkout, the coupon picker and the counter):
+
+- The discount base is the sum of the **covered lines only**; percent and flat discounts are split over covered lines only (largest remainder, the shares add up to the discount to the paisa). `lines[].couponDiscountPaise` is 0 on lines the coupon does not cover.
+- The **minimum order counts covered lines only** (like categories before).
+- No covered line: `422 COUPON_INVALID`, `details.reason`: `CATEGORY` (category coupon), `ITEM` (the coupon lists products/groups), or `FLASH_ITEMS` (see below). The message names what the coupon is for: `This coupon is for Basmati Rice 5 kg and Dal; none are in your cart.` Show `message` as it is.
+- `MIN_ORDER` carries `details.minOrderPaise` and `details.shortfallPaise` measured on the covered lines ("Add Rs 120 more of the items this coupon is for").
+
+**Coupons on flash sale lines.** Admin setting `coupon.allowOnFlashItems` (default **true**): a coupon also discounts a flash sale line, on top of the sale price (the line price already includes the sale). Set to false and flash lines are left out of every coupon (no share, not counted towards the minimum); a coupon whose items are all on a flash sale answers `FLASH_ITEMS` "This coupon does not apply to items that are already on a flash sale." The setting is applied per line, online and at the counter.
+
+**Admin `/admin/coupons`** (create/update body gets two lists; list, detail and write responses show names):
+
+```json
+POST /api/v1/admin/coupons
+{ "code": "DAL20", "kind": "PERCENT", "value": 20, "minOrderPaise": 20000,
+  "categoryIds": [], "productIds": ["8d1c..."], "productGroupIds": ["5be2..."] }
+
+201
+{ "id": "c0f1...", "code": "DAL20", "kind": "PERCENT", "value": 20, "minOrderPaise": 20000, "maxDiscountPaise": 0,
+  "categoryIds": [], "productIds": ["8d1c..."], "productGroupIds": ["5be2..."], "usedCount": 0, "active": true, "...": "as before",
+  "appliesTo": { "type": "ITEMS",
+    "categories": [],
+    "products": [{ "id": "8d1c...", "name": "Basmati Rice 5 kg", "active": true }],
+    "productGroups": [{ "id": "5be2...", "name": "Dal", "active": true }] },
+  "warnings": [] }
+```
+
+`GET /admin/coupons` (list) and the new `GET /admin/coupons/{id}` return the same shape. `appliesTo.type` is `ALL`, `CATEGORIES`, `ITEMS` or `MIXED`. A product that exists but is switched off is **accepted** with a warning in `warnings` (e.g. `Dal is switched off, so it cannot be bought until it is back on sale`). An unknown id is `400` with the field path in `details.fields`: `productIds[2]`, `productGroupIds[0]`, `categoryIds[1]`; too many items is `400 productIds`.
+
+**Public view `GET /coupons`** has `productIds`, `productGroupIds`, `appliesTo` (`ALL|CATEGORIES|ITEMS|MIXED`), `appliesToNames` (list) and `appliesToText` ("Dairy, Basmati Rice 5 kg and Dal"; empty for ALL). Show "On: {appliesToText}" on the coupon card.
+
+**Picker `POST /cart/coupons`**: every option now has `appliesTo`, `appliesToText` and, when applicable, `coveredLines` (`productId`, `name`, `lineTotalPaise`, `discountPaise`; the shares add up to `discountPaise`):
+
+```json
+{ "code": "DAL20", "applicable": true, "discountPaise": 5000, "appliesTo": "ITEMS", "appliesToText": "Dal",
+  "coveredLines": [{ "productId": "5be2...", "name": "Dal", "lineTotalPaise": 25000, "discountPaise": 5000 }] }
+{ "code": "RICE10", "applicable": false, "reason": "ITEM", "message": "This coupon is for Basmati Rice 5 kg; none are in your cart.", "coveredLines": [] }
+```
+
+### What a return refunds when the order used a coupon and coins
+
+Every order line keeps its own **coupon share** (largest remainder, 0 on lines the coupon did not cover) and, from the coins spent, its **coin share** (in proportion to what the line cost after its coupon share). A return of some pieces refunds, for those pieces:
+
+`refund = price of the pieces - their coupon share - their coin share` (cumulative half-up share of the line, so any number of partial returns adds up to exactly `lineTotal - couponShare - coinShare`; the last piece takes the remainder). The **delivery fee is never refunded**. Coupon uses and limits are **not** given back by a partial return (only a cancelled order releases the use).
+
+Worked example, an order of 3 items, one coupon of 10% with a minimum of Rs 1,000, no coins:
+
+| Item | Price | Coupon share |
+|---|---|---|
+| Rice | Rs 400 | Rs 40 |
+| Oil | Rs 350 | Rs 35 |
+| Dal | Rs 250 | Rs 25 |
+| Total | Rs 1,000 | Rs 100, the customer paid Rs 900 |
+
+- **Category coupon** (10% on the Rice category only): the discount is Rs 40 on Rice. Returning Oil refunds the full **Rs 350**; returning Rice refunds **Rs 360**.
+- **Item coupon** (20% on Dal only, minimum Rs 200): the discount is Rs 50 on Dal. Returning Rice refunds Rs 400; returning Dal refunds Rs 200.
+- **Whole-cart coupon above, policy `KEEP` (default)**: return Oil: refund **Rs 315** (350 - 35). The customer keeps the coupon on Rice and Dal (Rs 65) although the rest is now Rs 650, below the Rs 1,000 minimum. Later returns: Rice Rs 360, Dal Rs 225; total refunded Rs 900 = what was paid.
+- **Policy `CLAWBACK_BELOW_MINIMUM`**: return Oil: what is left of the covered items (Rs 650) is below the coupon's minimum (Rs 1,000), so the coupon discount on the kept items (Rs 40 + Rs 25 = **Rs 65**) is taken back out of this refund: **Rs 315 - Rs 65 = Rs 250** (never below zero; if the refund is smaller than the amount, the refund is 0 and the rest is forgiven). `couponClawbackPaise` = 6500 on that return. The kept lines now carry no coupon share, so later returns give the clawed amount back in proportion: Rice Rs 400, Dal Rs 250. Total refunded Rs 900 again; the clawback only changes *when* the money comes back. Nothing is clawed when all covered pieces are returned, or while the covered remainder still meets the minimum.
+- With coins the coin share leaves with the pieces too (e.g. Rs 50 of coins is shared over Rice/Oil/Dal in proportion to their price after the coupon: Rs 20, Rs 17.50 and Rs 12.50). Coins spent and earned are restored/clawed in proportion to the returned price, as before.
+
+The minimum of the coupon is **kept on the order when it is placed**, so editing the coupon later never changes a refund. Older orders have no stored minimum, so they behave as `KEEP`.
+
+**Admin setting `returns.couponPolicy`** (group "Coupons and returns", `GET/PUT /admin/config`): `KEEP` (default) or `CLAWBACK_BELOW_MINIMUM`.
+
+### Return preview (no state change)
+
+`POST /api/v1/admin/orders/{id}/returns/preview` (ADMIN, CASHIER), same body as the return (`reason` optional here), no `Idempotency-Key`:
+
+```json
+{ "orderId": "...", "orderNo": "VM-1024", "couponPolicy": "KEEP", "refundPaise": 31500,
+  "couponShareRemovedPaise": 3500, "coinShareRemovedPaise": 0, "couponClawbackPaise": 0, "deliveryFeeRefundedPaise": 0,
+  "items": [{ "orderItemId": "...", "productId": "...", "name": "Oil", "qty": 1, "grossPaise": 35000,
+              "couponSharePaise": 3500, "coinSharePaise": 0, "clawbackPaise": 0, "refundPaise": 31500 }] }
+```
+
+Per line `refundPaise = grossPaise - couponSharePaise - coinSharePaise - clawbackPaise` exactly. Under `CLAWBACK_BELOW_MINIMUM` `couponSharePaise` can be lower than the line's share (it already counts what is given back) and `clawbackPaise` shows what is taken. Same errors as recording the return (`409 ORDER_NOT_DELIVERED`, `409 RETURN_EXCEEDS_SOLD`, `400`). The recorded return (`POST .../returns`, `GET .../returns`) now has `couponClawbackPaise` and each item `couponSharePaise`. Always show the preview before the staff confirm.
+
+```dart
+class ReturnPreviewLine {
+  final String name; final int qty;
+  final int grossPaise, couponSharePaise, coinSharePaise, clawbackPaise, refundPaise;
+  ReturnPreviewLine.fromJson(Map<String, dynamic> j)
+      : name = j['name'], qty = j['qty'], grossPaise = j['grossPaise'], couponSharePaise = j['couponSharePaise'],
+        coinSharePaise = j['coinSharePaise'], clawbackPaise = j['clawbackPaise'], refundPaise = j['refundPaise'];
+}
+// "Price Rs 350 - coupon Rs 35 - coins Rs 0 - taken back Rs 0 = refund Rs 315"
+```
+
+### Checklist (online)
+
+- [ ] Coupon form: three pickers (categories, products, product groups), show `appliesTo` names and `warnings`.
+- [ ] Coupon card: `appliesToText`; picker: `coveredLines` and `appliesTo`.
+- [ ] Handle `reason` `ITEM` and `FLASH_ITEMS` like `CATEGORY` (show `message`).
+- [ ] Return screen: call the preview first, show the per-line breakdown, then record.
+- [ ] Config screen: the two new settings.

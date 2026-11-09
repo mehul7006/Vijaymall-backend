@@ -180,6 +180,7 @@ class PromotionServiceCoverageTest {
   void offeredListOnlyHasCouponsThatCanBeUsedNow() {
     var live = coupon(UUID.randomUUID(), "LIVE", Coupon.FLAT, 100, 0, 0);
     var ended = new Coupon(UUID.randomUUID(), "ENDED", Coupon.FLAT, 100, 0, 0, null, 0, 0, 0, null, NOW.minusSeconds(1), true);
+    when(repo.namesFor(org.mockito.ArgumentMatchers.any())).thenReturn(new com.vijay.mall.promotion.infra.CouponRepository.Names(java.util.Map.of(), java.util.Map.of(), java.util.Map.of()));
     when(repo.allActive()).thenReturn(List.of(live, ended));
     assertThat(service.listOffered()).extracting(p -> p.code()).containsExactly("LIVE");
   }

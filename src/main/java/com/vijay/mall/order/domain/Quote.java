@@ -1,17 +1,28 @@
 package com.vijay.mall.order.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Price breakdown returned to the app. The server is the only place that computes it.
+ * couponMinOrderPaise (not sent to the app) is the minimum order of the coupon, kept on the order for the return policy.
  * couponByCategory lists, for a cart with a coupon, what the coupon took off each category in the cart (a category the
  * coupon does not cover shows 0), so the app can show the discount per category.
  */
 public record Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                     int coinsUsed, long coinDiscountPaise, long deliveryFeePaise, long totalPaise,
-                    long coinsToEarn, List<String> warnings, List<CategoryDiscount> couponByCategory) {
+                    long coinsToEarn, List<String> warnings, List<CategoryDiscount> couponByCategory,
+                    @JsonIgnore long couponMinOrderPaise) {
+
+  /** A quote that does not say what minimum order its coupon had. */
+  public Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
+               int coinsUsed, long coinDiscountPaise, long deliveryFeePaise, long totalPaise,
+               long coinsToEarn, List<String> warnings, List<CategoryDiscount> couponByCategory) {
+    this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise,
+        totalPaise, coinsToEarn, warnings, couponByCategory, 0);
+  }
 
   /** A quote with no per-category breakdown. */
   public Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,

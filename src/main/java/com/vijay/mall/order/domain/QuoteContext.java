@@ -23,6 +23,8 @@ public final class QuoteContext {
   public long couponDiscount;
   /** The coupon discount's share per line, in the order of {@link #lines}; empty when there is no split. */
   public List<Long> couponByLine = List.of();
+  /** The minimum order of the coupon that was applied (0 when none), kept on the order for the return policy. */
+  public long couponMinOrder;
   /** Coins redeemed. */
   public int coinsUsed;
   /** What the coins take off, in paise. */
@@ -68,7 +70,7 @@ public final class QuoteContext {
           l.flashSaleId() == null ? 0 : (l.listUnitPricePaise() - l.unitPricePaise()) * l.qty()));
     }
     return new Quote(out, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount, deliveryFee, total,
-        coinsToEarn, List.copyOf(warnings), couponByCategory());
+        coinsToEarn, List.copyOf(warnings), couponByCategory(), couponMinOrder);
   }
 
   /** Per category of the cart: what it costs and how much of the coupon discount it received. Empty without a coupon discount. */

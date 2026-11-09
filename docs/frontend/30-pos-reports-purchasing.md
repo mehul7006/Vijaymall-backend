@@ -1197,3 +1197,27 @@ The delivery is always recorded (legitimate re-entries exist), but when an earli
 **`POST /pos/sales/{id}/returns` with no items:** `400` with `fields.items` = `choose at least one item to return` (it used to be `must not be empty`).
 
 **`GET /admin/dashboard`** has a new `needsAction` number next to `newOrders`: online orders in PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY or READY_FOR_PICKUP (includes `newOrders`); cached about 30 seconds.
+
+## Addendum 7 (counter: item coupons, coupon share on returns, return preview)
+
+**Billing with an item coupon.** The counter uses the same coupon engine as the app. `POST /pos/quote` and `POST /pos/sales` work out the discount **at bill time on the covered lines only** (the categories, products and product groups the coupon lists; see `20-orders-payments-admin-config.md`, Addendum 7). The GST split follows each line's own share: a covered line is taxed on its price less its share, an uncovered line on its full price. If the cashier adds or removes items after the code was applied, call `POST /pos/quote` again with the new basket: the discount, the minimum order (covered lines only) and every line's `discountPaise` are recomputed. A basket with no covered line answers `422 COUPON_INVALID` with `reason` `ITEM`, `CATEGORY` or `FLASH_ITEMS` and a message such as `This coupon is for Dal; none are in your cart.` Flash sale lines at the counter follow the setting `coupon.allowOnFlashItems` (default: the coupon also applies on top of the sale price).
+
+Each stored bill line keeps `couponSharePaise` (the part of its `discountPaise` that came from the coupon; coins and the manual discount are the rest) and the bill keeps the coupon's minimum order at sale time.
+
+**Returns.** A return refunds each returned piece's share of what the customer paid for the line (the line's `netPaise`, which is already after the coupon, coins and manual discount); an uncovered line comes back at its full price, a covered one net of its coupon share. Any sequence of partial returns adds up to the line's `netPaise` exactly. Policy `returns.couponPolicy` (admin config): `KEEP` (default) or `CLAWBACK_BELOW_MINIMUM` (if what is left of the covered lines is below the coupon's minimum, the coupon share on the pieces kept is taken from this refund, never below zero, and given back as those pieces are returned later). Worked numbers are in the online addendum (3 items, Rs 1,000, 10%: return Oil gives Rs 315 under `KEEP`, Rs 250 under the clawback policy, Rs 900 refunded in total either way). The credit note GST (`taxablePaise`, `cgstPaise`, `sgstPaise`) is computed on the **refund actually paid** per line at that line's GST rate, so a clawback lowers the tax reversed on this credit note too.
+
+`ReturnRecord` (`POST/GET /pos/sales/{id}/returns`) has `couponClawbackPaise` (already deducted from `refundPaise`) and each item `couponSharePaise`. The credit note receipt text prints `Coupon share -X` (what stayed with the customer as discount) and `Coupon taken back -Y` above `Refund total`.
+
+**Preview, no state change:** `POST /pos/sales/{id}/returns/preview` (CASHIER, ADMIN; same body as the return, `refunds`/`refundMode` ignored):
+
+```json
+{ "saleId": "...", "invoiceNo": "VSM/2026-27/000042", "couponPolicy": "CLAWBACK_BELOW_MINIMUM", "refundPaise": 25000,
+  "couponShareRemovedPaise": 3500, "otherShareRemovedPaise": 0, "couponClawbackPaise": 6500,
+  "taxablePaise": 22321, "cgstPaise": 1339, "sgstPaise": 1340,
+  "lines": [{ "saleItemId": "...", "productId": "...", "name": "Oil", "qty": 1, "grossPaise": 35000, "couponSharePaise": 3500,
+              "otherSharePaise": 0, "clawbackPaise": 6500, "refundPaise": 25000, "taxablePaise": 22321, "cgstPaise": 1339, "sgstPaise": 1340 }] }
+```
+
+`refundPaise = grossPaise - couponSharePaise - otherSharePaise - clawbackPaise` per line (`otherSharePaise` = coins and manual discount). The cashier return window applies to the preview as well (`422 RETURN_NEEDS_ADMIN`). Show it before the cashier confirms.
+
+Checklist (counter): [ ] re-quote after every basket change; [ ] show per-line discount from the quote; [ ] return screen calls the preview first; [ ] print/show the coupon lines of the credit note; [ ] handle `ITEM`/`FLASH_ITEMS` reasons.
