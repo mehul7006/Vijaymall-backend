@@ -28,6 +28,7 @@ class CatalogAdminGapsIT extends IntegrationTestBase {
   private String newCategory(String admin) {
     var res = post("/api/v1/admin/categories", admin, Map.of("nameEn", "Gap " + UUID.randomUUID(), "nameGu", "શ્રેણી", "sortOrder", 98));
     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(res.getBody()).containsEntry("active", true).containsEntry("sortOrder", 98).containsKeys("id", "nameEn", "nameGu", "imageUrl");
     return (String) res.getBody().get("id");
   }
 
@@ -204,7 +205,8 @@ class CatalogAdminGapsIT extends IntegrationTestBase {
   void hiddenCategoriesCanBeListedReEnabledGivenAPictureAndDeleted() throws Exception {
     String admin = adminToken();
     String id = newCategory(admin);
-    call(HttpMethod.PUT, "/api/v1/admin/categories/" + id, admin, Map.of("nameEn", "Hidden " + id, "nameGu", "છુપી", "active", false), null);
+    var put = call(HttpMethod.PUT, "/api/v1/admin/categories/" + id, admin, Map.of("nameEn", "Hidden " + id, "nameGu", "છુપી", "active", false), null);
+    assertThat(put.getBody()).containsEntry("id", id).containsEntry("active", false).containsKeys("nameEn", "nameGu", "imageUrl", "sortOrder");
 
     var all = (List<Map>) get("/api/v1/admin/categories", admin).getBody().get("_array");
     assertThat(all).anySatisfy(c -> assertThat(c).containsEntry("id", id).containsEntry("active", false).containsKey("imageUrl"));
@@ -266,7 +268,8 @@ class CatalogAdminGapsIT extends IntegrationTestBase {
     assertThat(order.indexOf(soon)).isLessThan(order.indexOf(late));
     assertThat(order.indexOf(late)).isLessThan(order.indexOf(open));
 
-    assertThat(get("/api/v1/hot-sale?size=9999", t).getBody()).containsEntry("size", 50);
+    assertThat(first).containsEntry("totalExact", true).containsKey("hasMore");
+    assertThat(get("/api/v1/hot-sale?size=9999", t).getBody()).containsEntry("size", 50).containsKey("hasMore");
     assertThat(get("/api/v1/hot-sale?size=0&page=-1", t).getBody()).containsEntry("size", 1).containsEntry("page", 0);
     assertThat(get("/api/v1/hot-sale", t).getBody()).containsEntry("size", 20);
   }

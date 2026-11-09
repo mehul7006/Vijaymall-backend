@@ -1,5 +1,6 @@
 package com.vijay.mall.identity.infra;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -14,6 +15,9 @@ interface DeviceJpa extends JpaRepository<DeviceTokenEntity, UUID> {
 
   @Query("select d.fcmToken from DeviceTokenEntity d where d.userId = :user")
   List<String> tokensOf(@Param("user") UUID user);
+
+  @Query("select d.fcmToken from DeviceTokenEntity d where d.userId in :users")
+  List<String> tokensOfAll(@Param("users") Collection<UUID> users);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query("delete from DeviceTokenEntity d where d.userId = :user")

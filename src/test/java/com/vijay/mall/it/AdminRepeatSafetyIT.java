@@ -130,6 +130,7 @@ class AdminRepeatSafetyIT extends IntegrationTestBase {
     var b = call(HttpMethod.POST, "/api/v1/admin/categories", admin, Map.of("nameEn", name, "nameGu", name), k);
     assertThat(a.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     assertThat(b.getBody().get("id")).isEqualTo(a.getBody().get("id"));
+    assertThat(b.getBody()).containsEntry("active", true);
     assertThat(jdbc.queryForObject("select count(*) from category where name_en = ?", Integer.class, name)).isEqualTo(1);
   }
 

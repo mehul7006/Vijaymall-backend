@@ -15,6 +15,10 @@ in the app and read it with `docker compose -f docker-compose.prod.yml logs api 
 server refuses to start with them, and the admin config screen refuses to save them there. Never put customers on a dev server (anyone who can read its log can
 sign in as anyone).
 
+**Seeded dev admin:** the admin account is whatever `ADMIN_EMAIL` is set to in the env file (default `admin@vijaysupermall.local`; a test instance with
+`ADMIN_EMAIL=admin@mall.com` has `admin@mall.com`). The sample cashier is `cashier@vijaysupermall.local`. In the dev profile the login code is `12345` unless `OTP_FIXED_CODE` overrides it
+(an env file written with the fixed code left off has it empty and the codes then appear in the log).
+
 Safety rules the server enforces at start-up (it refuses to start otherwise): a long random `JWT_SECRET` and `OTP_PEPPER`, an empty `OTP_FIXED_CODE`,
 `OTP_CHANNEL=email`, an `ADMIN_EMAIL`, and the metrics port different from the public port. Put TLS in front (Caddy, nginx or a cloud load balancer).
 Back up the `dbdata` volume (pg_dump) and the `images` volume.

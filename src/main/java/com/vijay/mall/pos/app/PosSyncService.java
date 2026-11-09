@@ -8,6 +8,7 @@ import com.vijay.mall.pos.app.PosViews.Rung;
 import com.vijay.mall.pos.app.PosViews.SaleInput;
 import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -57,6 +58,7 @@ public class PosSyncService {
    * status is CREATED (now recorded), DUPLICATE (already recorded earlier, nothing done) or REJECTED (with errorCode and message).
    * exceptions lists what a manager will review (empty when the bill matched the system, and for a rejected bill).
    */
+  @Schema(name = "PosSyncResult")
   public record Result(String idempotencyKey, String status, UUID saleId, String invoiceNo, String errorCode, String message,
                        List<ExceptionView> exceptions) {
     /** A result with no exceptions. */
@@ -69,6 +71,7 @@ public class PosSyncService {
    * What an offline till needs to know before syncing: the server time, the catalog version stamp, how many days old
    * an offline bill may be, and the upload batch size.
    */
+  @Schema(name = "PosSyncStatus")
   public record Status(Instant serverTime, Instant catalogVersion, int maxOfflineDays, int batchLimit) {}
 
   private final PosService pos;

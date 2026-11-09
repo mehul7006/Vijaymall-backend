@@ -22,6 +22,13 @@ class ProductPatchTest {
       null, true, 7, true, true, false, 7, 5, true, T1, T2, UUID.randomUUID(), 0, 0);
 
   @Test
+  void hotWindowAcceptsTheSameForgivingFormsAsOtherRequestDates() {
+    CatalogService.ProductInput in = new ProductPatch(Map.of("hotStart", "2026-11-09", "hotEnd", "2026-11-10T10:00:00")).applyTo(base);
+    assertThat(in.hotStart()).isEqualTo(Instant.parse("2026-11-08T18:30:00Z"));
+    assertThat(in.hotEnd()).isEqualTo(Instant.parse("2026-11-10T04:30:00Z"));
+  }
+
+  @Test
   void emptyPatchKeepsEverythingAndStock() {
     CatalogService.ProductInput in = new ProductPatch(Map.of()).applyTo(base);
     assertThat(in.categoryId()).isEqualTo(cat);

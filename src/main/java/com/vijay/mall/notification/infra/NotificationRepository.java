@@ -1,6 +1,7 @@
 package com.vijay.mall.notification.infra;
 
 import com.vijay.mall.common.Page;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -17,11 +18,12 @@ public class NotificationRepository {
    * @param id notification id
    * @param title short headline
    * @param body message text
-   * @param kind what it is about: {@code ORDER}, {@code PAYMENT}, {@code FLASH} or {@code STOCK}
+   * @param kind what it is about: {@code ORDER}, {@code PAYMENT}, {@code FLASH}, {@code STOCK} or {@code ANNOUNCEMENT} (an admin broadcast)
    * @param ref the order number, sale id or product id it points to, may be null
    * @param read true once the user opened it
    * @param createdAt when it was created
    */
+  @Schema(name = "NotificationRow")
   public record Row(UUID id, String title, String body, String kind, String ref, boolean read, Instant createdAt) {}
 
   private final NotificationJpa jpa;

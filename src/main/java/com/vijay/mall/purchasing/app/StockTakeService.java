@@ -4,6 +4,7 @@ import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -23,9 +24,11 @@ public class StockTakeService {
   public record Count(UUID productId, int countedQty) {}
 
   /** delta is counted minus what the system had: negative means stock was missing. */
+  @Schema(name = "StockTakeChange")
   public record Change(UUID productId, String name, int before, int counted, int delta) {}
 
   /** What a stock take changed, plus how many products already matched the count. */
+  @Schema(name = "StockTakeResult")
   public record Result(List<Change> changes, int unchanged) {}
 
   /** Most products in one stock take. */

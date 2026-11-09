@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,9 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /** Every exception type maps to one stable code, status and the current trace id. */
@@ -67,7 +70,7 @@ class GlobalExceptionHandlerTest {
   @Test
   void beanValidationListsEachBadField() throws Exception {
     var br = new BeanPropertyBindingResult(new Object(), "body");
-    br.addError(new FieldError("body", "email", "must not be blank"));
+    br.addError(new FieldError("body", "email", "", false, null, null, "must not be blank"));
     br.addError(new FieldError("body", "otp", "size"));
     var param = new MethodParameter(getClass().getDeclaredMethod("sample", String.class), 0);
     var r = handler.invalid(new MethodArgumentNotValidException(param, br));
@@ -83,11 +86,33 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
-  void unreadableBodyAndMissingParamAreBadRequest() {
-    check(handler.badRequest(new HttpMessageNotReadableException("x", new MockHttpInputMessage(new byte[0]))),
-        HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
-    check(handler.badRequest(new MissingServletRequestParameterException("q", "String")),
-        HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+  void emptyBodyIsNotJson() {
+    var r = handler.unreadable(new HttpMessageNotReadableException("x", new MockHttpInputMessage(new byte[0])));
+    check(r, HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+    assertThat(r.getBody().message()).isEqualTo("The request body is not valid JSON");
+    assertThat(r.getBody().details()).isEmpty();
+  }
+
+  @Test
+  void missingParameterNamesTheParameter() {
+    var r = handler.missingParameter(new MissingServletRequestParameterException("q", "String"));
+    check(r, HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+    assertThat(r.getBody().details()).isEqualTo(Map.of("fields", Map.of("q", "is required")));
+  }
+
+  @Test
+  void missingHeaderNamesTheHeader() {
+    var r = handler.missingHeader(new MissingRequestHeaderException("Idempotency-Key", null));
+    check(r, HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+    assertThat(r.getBody().message()).isEqualTo("Missing header Idempotency-Key");
+    assertThat(r.getBody().details()).isEqualTo(Map.of("fields", Map.of("Idempotency-Key", "is required")));
+  }
+
+  @Test
+  void wrongTypeInPathOrQueryNamesTheParameter() {
+    var r = handler.wrongType(new MethodArgumentTypeMismatchException("x", UUID.class, "id", null, null));
+    check(r, HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+    assertThat(r.getBody().details()).isEqualTo(Map.of("fields", Map.of("id", "must be a valid id")));
   }
 
   @Test
@@ -130,5 +155,22 @@ class GlobalExceptionHandlerTest {
     Assertions.assertThat(handler.integrity(fk).getStatusCode().value()).isEqualTo(400);
     Assertions.assertThat(handler.integrity(dup).getStatusCode().value()).isEqualTo(409);
     Assertions.assertThat(handler.integrity(other).getStatusCode().value()).isEqualTo(500);
+  }
+
+  @Test
+  void aFullConnectionPoolAnswersBusyNotBroken() {
+    var timeout = new java.sql.SQLTransientConnectionException("mall-db - Connection is not available, request timed out after 5000ms");
+    var wrapped = new org.springframework.transaction.CannotCreateTransactionException("Could not open JPA EntityManager", timeout);
+    var r = handler.other(wrapped);
+    Assertions.assertThat(r.getStatusCode().value()).isEqualTo(503);
+    Assertions.assertThat(r.getHeaders().getFirst("Retry-After")).isEqualTo("2");
+    Assertions.assertThat(r.getBody().code()).isEqualTo("SERVICE_BUSY");
+    Assertions.assertThat(r.getBody().details()).containsEntry("retryAfterSeconds", 2);
+    var viaJdbc = handler.other(new RuntimeException("x", new org.springframework.jdbc.CannotGetJdbcConnectionException("pool", timeout)));
+    Assertions.assertThat(viaJdbc.getStatusCode().value()).isEqualTo(503);
+    var sse = new org.springframework.mock.web.MockHttpServletResponse();
+    sse.setContentType("text/event-stream");
+    Assertions.assertThat(handler.other(wrapped, sse)).as("nothing can be written to a stream").isNull();
+    Assertions.assertThat(handler.other(new RuntimeException("plain")).getStatusCode().value()).isEqualTo(500);
   }
 }

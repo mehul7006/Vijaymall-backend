@@ -47,6 +47,7 @@ public class CreditReportService {
    * givenPaise: put on accounts by bills. returnedPaise: cancelled because goods came back. recoveredPaise: customers
    * paid it off. writtenOffPaise / addedPaise: admin corrections down / up.
    */
+  @Schema(name = "CreditReport")
   public record Report(LocalDate from, LocalDate to, long outstandingPaise, long customersWithDues, long givenPaise,
                        long returnedPaise, long recoveredPaise, long writtenOffPaise, long addedPaise,
                        Map<String, Long> recoveredByMode, List<TypeRow> salesByPaymentType, List<DayRow> byDay,

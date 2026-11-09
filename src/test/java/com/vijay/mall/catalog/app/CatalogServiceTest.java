@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vijay.mall.catalog.domain.AdminProduct;
+import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.Category;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.catalog.domain.PricedLine;
@@ -478,17 +479,22 @@ class CatalogServiceTest {
   @Test
   void categoryCreateAndUpdate() {
     Category c = new Category(cat, "Dairy", "ડેરી", null, 2);
+    AdminCategory hidden = new AdminCategory(cat, "Dairy", "ડેરી", null, 2, false);
     when(categories.insert("Dairy", "ડેરી", 2, true)).thenReturn(cat);
     when(categories.find(cat)).thenReturn(Optional.of(c));
+    when(categories.findAdmin(cat)).thenReturn(Optional.of(hidden));
     assertThat(service.createCategory("Dairy", "ડેરી", 2, true)).isEqualTo(c);
-    assertThat(service.updateCategory(cat, "Dairy", "ડેરી", 2, false)).isEqualTo(c);
+    assertThat(service.createAdminCategory("Dairy", "ડેરી", 2, true)).isEqualTo(hidden);
+    assertThat(service.updateCategory(cat, "Dairy", "ડેરી", 2, false)).isEqualTo(hidden);
+    assertThat(service.adminCategory(cat)).isEqualTo(hidden);
     verify(categories).update(cat, "Dairy", "ડેરી", 2, false);
   }
 
   @Test
-  void updatingAnUnknownCategoryIsNotFound() {
-    when(categories.find(cat)).thenReturn(Optional.empty());
+  void updatingOrReadingAnUnknownCategoryIsNotFound() {
+    when(categories.findAdmin(cat)).thenReturn(Optional.empty());
     assertThatThrownBy(() -> service.updateCategory(cat, "a", "b", 0, true)).satisfies(t -> assertApi(t, 404, "NOT_FOUND"));
+    assertThatThrownBy(() -> service.adminCategory(cat)).satisfies(t -> assertApi(t, 404, "NOT_FOUND"));
     verify(categories, never()).update(any(), any(), any(), anyInt(), anyBoolean());
   }
 

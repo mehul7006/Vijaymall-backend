@@ -67,3 +67,28 @@ Each ID is the ID in your review. **Status** is one of: **Fixed** (new in this r
 
 - **Coupon "save 0"**: see the coupon addendum in file 20: the saving is only ever `couponDiscountPaise` in the quote; a coupon that cannot be used makes the quote answer `422 COUPON_INVALID` with a plain message (and `shortfallPaise` for a minimum order), and `POST /cart/coupons` previews what every coupon would save on the cart.
 - **Lists and totals**: paged responses now also carry `totalExact` and `hasMore`. `total` is always exact up to 10,000 rows; beyond that `total` is 10000 and `totalExact` is `false` (show "10,000+"); `hasMore` is always exact, so page until `hasMore` is false.
+
+## Round 2 (2026-11-09 evening)
+
+The full explanation, before/after examples and what changes for the app is in [51-backend-response-round-2.md](51-backend-response-round-2.md). The table below is the short form.
+
+| ID | Status | What changed / what to do | Details |
+|---|---|---|---|
+| E1-E11 | **Fixed (error messages)** | Error messages and validation fields reworked; see the error section of file 00 and file 20. | file 00, file 20 |
+| R2-03 | **Documented** | `PUT /admin/products/{id}` is a full replacement (decision). Omitted: `hotStart`, `hotEnd`, `description`, `packSize` are cleared; `active`/`earnsCoins`/`coinRedeemable` reset to true, `hotSale` to false; `qtyOnHand`, `lowThreshold`, `unit`, `productGroupId`, `variantName`, `variantOrder` are kept. Use `PATCH` for partial edits. Behaviour unchanged. | file 10 |
+| R2-04 | **Fixed** | `PATCH /admin/products/{id}` publishes the typed schema `ProductPatchBody` in Swagger (keys, types, descriptions). Semantics unchanged: absent key keeps, explicit `null` clears `hotStart`, `hotEnd`, `description`. | file 10 addendum |
+| R2-05 | **Fixed** | `POST` and `PUT /admin/categories` return the full category (`id`, `nameEn`, `nameGu`, `imageUrl`, `sortOrder`, `active`), same shape as the admin list item. | file 10 |
+| R2-06 | **Fixed (error messages)** | See the error section. | file 00 |
+| R2-07 | **Fixed (error messages)** | See the error section. | file 00 |
+| R2-08 | **Fixed (error messages)** | See the error section. | file 00 |
+| R2-10 | **Fixed** | Duplicate Swagger schema names (`View`, `Row`, `Report`, `ReviewBody`, `Result`, `Status`, `Change`, `ItemInput`, `ItemView`, `QuoteBody`, `ReturnBody`, `ActiveBody`) now have unique names, for example `OrderView`, `ProductReviewBody`, `DefectiveReviewBody`, `CounterControlsReport`. A test fails if two API models share a name. Wire JSON unchanged. | file 10 addendum |
+| R2-11 | **Fixed** | `GET /pos/products?updatedSince=` (and the `PATCH` hot window) accept `Z`/offset, zone-less (India time) and a plain date, using the same parser as JSON bodies. | file 00, 10, 30 |
+| R2-12 | **Fixed** | `GET /hot-sale` returns `totalExact` and `hasMore` next to `page`, `size`, `total`. | file 10 |
+| R2-14 | **Documented** | `GET /admin/stock/low` stays a plain array. Cap 200 (`limit` 1..200, default 50), sorted by `qty` ascending, no paging. | file 30 |
+| R2-15 | **Fixed (error messages)** | See the error section. | file 00 |
+| D1 | **Documented** | POS payment-mode error text depends on context: bills `payment mode must be CASH, UPI or CARD, or CREDIT on a bill (got "x")`; refunds and repayments `payment mode must be CASH, UPI or CARD (got "x")`. | file 30 |
+| D2 | **Documented** | Request date-times accept `Z`/offset, zone-less (India time) and a plain date; formerly stricter: `updatedSince`, PATCH hot window. | file 00, 10 |
+| D3 | **Documented** | Customer order view `OrderViews.View` is the schema `OrderView`. | file 10 addendum |
+| Docs (file 30) | **Documented** | Added complete text for `roundOffMode`, `refundMode`, the return (credit note) and credit repayment receipts with real sample text, `updatedSince`, and the `/pos/products` fields `packSize`, `unit`, `variantName`, `displayName`. | file 30 addendum |
+| Test env | **Documented** | The seeded dev admin is `ADMIN_EMAIL` (default `admin@vijaysupermall.local`; `admin@mall.com` on instances that set it); dev code `12345`. | file 00 section 6, deploy/README.md |
+

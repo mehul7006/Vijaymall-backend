@@ -7,10 +7,15 @@ import com.vijay.mall.identity.infra.AddressRepository;
 import com.vijay.mall.identity.infra.DeviceRepository;
 import com.vijay.mall.identity.infra.UserRepository;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -131,4 +136,49 @@ public class ProfileService {
     users.findAllByIds(ids).forEach(u -> out.put(u.id(), u));
     return out;
   }
+
+  /** Roles that can sign in and so receive announcements. */
+  private static final List<String> LOGIN_ROLES = List.of(User.CUSTOMER, User.ADMIN, User.CASHIER);
+
+  /**
+   * People an explicit announcement list resolved to.
+   * @param ids the eligible accounts, sorted by id text, without duplicates
+   * @param skipped the ids and mobile numbers that matched no active account that can sign in
+   */
+  public record Recipients(List<UUID> ids, List<String> skipped) {}
+
+  /** The next {@code limit} ids after {@code after} of active accounts with one of these roles who can sign in, in id order. */
+  public List<UUID> recipientIdsAfter(Collection<String> roles, UUID after, int limit) { return users.recipientIdsAfter(roles, after, limit); }
+
+  /** How many active accounts with one of these roles can receive an announcement. */
+  public long countRecipients(Collection<String> roles) { return users.countRecipients(roles); }
+
+  /** How many of those have at least one push device. */
+  public long countRecipientsWithDevices(Collection<String> roles) { return users.countRecipientsWithDevices(roles); }
+
+  /**
+   * Resolves an explicit list of ids and 10-digit mobile numbers to accounts that can receive an announcement (customers and staff
+   * that are active). A mobile number can belong to more than one account; all of them are included.
+   */
+  public Recipients resolveRecipients(Collection<UUID> userIds, Collection<String> mobiles) {
+    Set<UUID> wanted = new LinkedHashSet<>(userIds);
+    Set<String> numbers = new LinkedHashSet<>(mobiles);
+    Set<UUID> eligible = wanted.isEmpty() ? Set.of() : new HashSet<>(users.eligibleIds(wanted, LOGIN_ROLES));
+    Map<String, List<UUID>> byMobile = numbers.isEmpty() ? Map.of() : users.eligibleIdsByMobile(numbers, LOGIN_ROLES);
+    Set<UUID> found = new HashSet<>();
+    List<String> skipped = new ArrayList<>();
+    for (UUID id : wanted) {
+      if (eligible.contains(id)) found.add(id);
+      else skipped.add(id.toString());
+    }
+    for (String m : numbers) {
+      List<UUID> ids = byMobile.get(m);
+      if (ids == null) skipped.add(m);
+      else found.addAll(ids);
+    }
+    return new Recipients(found.stream().sorted(Comparator.comparing(UUID::toString)).toList(), skipped);
+  }
+
+  /** Push tokens of all these users' devices. */
+  public List<String> deviceTokensOf(Collection<UUID> userIds) { return userIds.isEmpty() ? List.of() : devices.tokensOfAll(userIds); }
 }

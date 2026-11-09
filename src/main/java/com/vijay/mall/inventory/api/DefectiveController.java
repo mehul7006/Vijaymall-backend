@@ -4,6 +4,7 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.inventory.app.DefectiveService;
 import com.vijay.mall.inventory.infra.DefectiveRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -26,6 +27,7 @@ public class DefectiveController {
   /**
    * Request body for a review: {@code decision} is {@code CONFIRM_DEFECTIVE} or {@code RESTOCK}; {@code note} is optional, at most 200 characters.
    */
+  @Schema(name = "DefectiveReviewBody")
   public record ReviewBody(@NotBlank String decision, String note) {}
 
   /**

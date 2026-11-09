@@ -81,12 +81,14 @@ public class CatalogService {
 
   /**
    * The hot-sale screen: the banners that are live now (all of them) and one page of the in-stock products currently on hot
-   * sale, soonest ending window first. page, size and total describe the products part only.
+   * sale, soonest ending window first. page, size, total, totalExact and hasMore describe the products part only and mean
+   * the same as in {@link Page}.
    */
-  public record HotSale(List<HotBanner> banners, List<Product> products, int page, int size, long total) {
+  public record HotSale(List<HotBanner> banners, List<Product> products, int page, int size, long total, boolean totalExact,
+                        boolean hasMore) {
     /** A single page holding all the given products. */
     public HotSale(List<HotBanner> banners, List<Product> products) {
-      this(banners, products, 0, products.size(), products.size());
+      this(banners, products, 0, products.size(), products.size(), true, false);
     }
   }
 
@@ -317,7 +319,8 @@ public class CatalogService {
     // all banners are cached (they change rarely); which ones are on right now depends on the clock, so that is decided here
     List<HotBanner> all = caches == null ? banners.all() : caches.get(AppCaches.Name.BANNERS, "all", banners::all);
     return new HotSale(all.stream().filter(b -> b.active() && (b.startAt() == null || !b.startAt().isAfter(now))
-        && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list, found.page(), found.size(), found.total());
+        && (b.endAt() == null || !b.endAt().isBefore(now))).toList(), list, found.page(), found.size(), found.total(),
+        found.totalExact(), found.hasMore());
   }
 
   /** Products with their variants, one entry per product. A product matches when any of its variants does. */
@@ -674,13 +677,26 @@ public class CatalogService {
     return categories.find(id).orElseThrow();
   }
 
-  /** Changes a category's names, order and active flag; {@code NOT_FOUND} when it does not exist. */
+  /** Creates a category and returns it as the admin list shows it (with the active flag), whether active or hidden. */
   @Transactional
-  public Category updateCategory(UUID id, String nameEn, String nameGu, int sort, boolean active) {
-    categories.find(id).orElseThrow(() -> ApiException.notFound("Category"));
+  public AdminCategory createAdminCategory(String nameEn, String nameGu, int sort, boolean active) {
+    UUID id = categories.insert(nameEn, nameGu, sort, active);
+    changed();
+    return categories.findAdmin(id).orElseThrow();
+  }
+
+  /** The category as the admin list shows it; {@code NOT_FOUND} when unknown (used to repeat an earlier create). */
+  public AdminCategory adminCategory(UUID id) {
+    return categories.findAdmin(id).orElseThrow(() -> ApiException.notFound("Category"));
+  }
+
+  /** Changes a category's names, order and active flag and returns it as the admin list shows it; {@code NOT_FOUND} when unknown. */
+  @Transactional
+  public AdminCategory updateCategory(UUID id, String nameEn, String nameGu, int sort, boolean active) {
+    categories.findAdmin(id).orElseThrow(() -> ApiException.notFound("Category"));
     categories.update(id, nameEn, nameGu, sort, active);
     changed();
-    return categories.find(id).orElseThrow();
+    return categories.findAdmin(id).orElseThrow();
   }
 
   /** Every hot-sale banner, including inactive and expired ones, ordered by start time. */

@@ -3,6 +3,7 @@ package com.vijay.mall.config;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.File;
 import java.time.Instant;
 import java.util.Arrays;
@@ -35,6 +36,7 @@ public class AdminLogController {
    * @param folder the folder holding the log files; {@code null} without file logging
    * @param files the newest files first, at most 60
    */
+  @Schema(name = "LogStatus")
   public record Status(String levelApp, String levelRoot, String levelSql, int retentionDays, boolean fileLogging, String folder,
                        List<LogFile> files) {}
 

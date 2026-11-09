@@ -58,8 +58,11 @@ import tools.jackson.databind.json.JsonMapper;
 public class OrderService implements OrderNumberLookup, PurchaseLookup, ReferenceLookup {
   private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
-  /** slot is the delivery or pickup time window the customer picked, shown back as it was sent. */
-  public record PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise,
+  /**
+   * slot is the delivery or pickup time window the customer picked, shown back as it was sent. expectedTotalPaise is the total
+   * the customer saw; null skips the price-changed check.
+   */
+  public record PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, Long expectedTotalPaise,
                              String slot) {
     /** Without a slot. */
     public PlaceCommand(QuoteRequest quote, UUID addressId, String paymentMethod, long expectedTotalPaise) {
@@ -183,10 +186,10 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     if ("CREDIT".equals(method) || "HYBRID".equals(method)) {
       throw ApiException.validation("paymentMethod", "credit and hybrid payment are only available at the shop counter");
     }
-    if (!"COD".equals(method) && !"ONLINE".equals(method)) throw ApiException.validation("paymentMethod", "COD or ONLINE");
+    if (!"COD".equals(method) && !"ONLINE".equals(method)) throw ApiException.validation("paymentMethod", "must be COD or ONLINE (got \"" + method + "\")");
     payments.requireEnabled(method);
     Quote q = quotes.quote(userId, cmd.quote());
-    if (q.totalPaise() != cmd.expectedTotalPaise()) {
+    if (cmd.expectedTotalPaise() != null && q.totalPaise() != cmd.expectedTotalPaise()) {
       throw ApiException.conflict("PRICE_CHANGED", "Prices changed, please review", Map.of("quote", q));
     }
     Fulfilment f = cmd.quote().fulfil();

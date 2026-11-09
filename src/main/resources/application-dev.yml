@@ -23,6 +23,10 @@ app:
     sms-channel: console
     # Dev login code. OTP_FIXED_CODE overrides it; the prod profile refuses to start with any fixed code.
     fixed-code: ${OTP_FIXED_CODE:12345}
+  rate-limit:
+    # Dev testers often share one proxy address, so the hourly login-code limits are very high here. Prod keeps 5 and 20.
+    otp-per-email-hour: ${OTP_PER_EMAIL_HOUR:1000}
+    otp-per-ip-hour: ${OTP_PER_IP_HOUR:10000}
   cors:
     # flutter run -d chrome picks a random port, so allow any local port
     # CORS_ORIGINS adds the web app of a test server; the default is any local port

@@ -2,6 +2,7 @@ package com.vijay.mall.catalog.app;
 
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.web.RequestInstants;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
@@ -98,7 +99,7 @@ public final class ProductPatch {
   private Instant instant(String key) {
     String s = str(key, true);
     try {
-      return s == null ? null : Instant.parse(s);
+      return s == null ? null : RequestInstants.parse(s);
     } catch (DateTimeParseException e) {
       throw ApiException.validation(key, "must be a date-time such as 2026-01-31T10:00:00Z");
     }

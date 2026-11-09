@@ -30,7 +30,7 @@ public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coin
 
   /**
    * Cleans what the client sent: repeated products are merged (first position wins), a blank coupon becomes null and
-   * is upper-cased, a missing coin mode becomes NONE, and percent is kept only for PERCENT.
+   * is upper-cased, a missing coin mode becomes NONE, and percent is kept only for PERCENT (a missing percent means 100, as in a quote).
    */
   public static Cart normalized(List<Line> lines, String coupon, CoinRedemption.Mode mode, Integer percent) {
     var merged = new LinkedHashMap<UUID, Integer>();
@@ -38,7 +38,7 @@ public record Cart(List<Line> items, String couponCode, CoinRedemption.Mode coin
     var items = merged.entrySet().stream().map(e -> new Line(e.getKey(), Math.min(e.getValue(), MAX_QTY))).toList();
     String code = coupon == null || coupon.isBlank() ? null : coupon.trim().toUpperCase();
     var m = mode == null ? CoinRedemption.Mode.NONE : mode;
-    Integer pct = m == CoinRedemption.Mode.PERCENT ? Math.max(0, Math.min(percent == null ? 0 : percent, 100)) : null;
+    Integer pct = m == CoinRedemption.Mode.PERCENT ? Math.max(0, Math.min(percent == null ? 100 : percent, 100)) : null;
     return new Cart(items, code, m, pct, null);
   }
 }

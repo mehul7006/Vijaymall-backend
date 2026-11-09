@@ -23,6 +23,7 @@ import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -70,6 +71,7 @@ public class PosController {
    * Request body for a price preview: the same basket fields as a cart plus the optional manual discount a sale takes, so
    * the previewed total matches the sale. No reason or PIN is needed to preview.
    */
+  @Schema(name = "PosQuoteBody")
   public record QuoteBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
                           CoinRedemption.Mode coinMode, Integer percent, PosViews.ManualDiscount manualDiscount) {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
@@ -93,6 +95,7 @@ public class PosController {
    * is paid out: either an explicit {@code refunds} split or a {@code refundMode} (CASH, UPI or CARD) for the whole pay-out,
    * never both.
    */
+  @Schema(name = "PosReturnBody")
   public record ReturnBody(@NotEmpty List<ReturnLine> items, String reason, List<Pay> refunds, String refundMode) {}
 
   /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
@@ -141,13 +144,13 @@ public class PosController {
 
   /**
    * Searches the products sellable at the counter, page by page. {@code q} matches names, and also a barcode or an item code
-   * (PLU) exactly; a product with an exact barcode or code match comes first. {@code updatedSince} (ISO-8601 instant) keeps only
+   * (PLU) exactly; a product with an exact barcode or code match comes first. {@code updatedSince} (ISO-8601 with Z or an offset, a zone-less date-time or a plain date, the last two read as India time) keeps only
    * products changed at or after it, for an offline till refreshing its copy.
    */
   @GetMapping("/products")
   public Page<PosProduct> products(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
                                    @RequestParam(defaultValue = "20") int size,
-                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant updatedSince) {
+                                   @RequestParam(required = false) Instant updatedSince) {
     return catalog.search(q, page, size, updatedSince);
   }
 

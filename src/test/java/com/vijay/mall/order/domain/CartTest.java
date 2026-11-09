@@ -45,7 +45,7 @@ class CartTest {
     assertThat(Cart.normalized(List.of(), null, Mode.PERCENT, 40).percent()).isEqualTo(40);
     assertThat(Cart.normalized(List.of(), null, Mode.PERCENT, 400).percent()).isEqualTo(100);
     assertThat(Cart.normalized(List.of(), null, Mode.PERCENT, -5).percent()).isEqualTo(0);
-    assertThat(Cart.normalized(List.of(), null, Mode.PERCENT, null).percent()).isEqualTo(0);
+    assertThat(Cart.normalized(List.of(), null, Mode.PERCENT, null).percent()).isEqualTo(100);
     assertThat(Cart.normalized(List.of(), null, Mode.ALL, 40).percent()).isNull();
     assertThat(Cart.normalized(List.of(), null, null, 40).percent()).isNull();
     assertThat(Cart.normalized(List.of(), null, null, 40).coinMode()).isEqualTo(Mode.NONE);

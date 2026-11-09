@@ -7,6 +7,7 @@ import com.vijay.mall.promotion.domain.Coupon;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -43,7 +44,7 @@ public class AdminCouponController {
    * @param categoryIds categories it covers; empty or null means every category
    */
   @Schema(name = "CouponBody")
-  public record Body(@NotBlank String code, @NotBlank String kind, @Min(1) long value, Long minOrderPaise,
+  public record Body(@NotBlank String code, @NotBlank String kind, @NotNull @Min(1) Long value, Long minOrderPaise,
                      Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
                      Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly,
                      List<UUID> categoryIds) {

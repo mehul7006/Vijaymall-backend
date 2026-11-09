@@ -1,5 +1,6 @@
 package com.vijay.mall.identity.infra;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,4 +58,23 @@ interface UserJpa extends JpaRepository<UserEntity, UUID> {
 
   @Query("select u.id from UserEntity u where u.role in ('ADMIN', 'CASHIER') and u.status = 'ACTIVE'")
   List<UUID> activeStaffIds();
+
+  /** Who may receive an announcement: active, with a login (an unclaimed counter account has none). */
+  String ELIGIBLE = "u.role in :roles and u.status = 'ACTIVE' and not (u.source = 'POS' and u.mobileVerified = false)";
+
+  @Query("select u.id from UserEntity u where " + ELIGIBLE + " and u.id > :after order by u.id")
+  List<UUID> eligibleAfter(@Param("roles") Collection<String> roles, @Param("after") UUID after, Pageable page);
+
+  @Query("select count(u) from UserEntity u where " + ELIGIBLE)
+  long countEligible(@Param("roles") Collection<String> roles);
+
+  @Query("select count(u) from UserEntity u where " + ELIGIBLE
+      + " and exists (select 1 from DeviceTokenEntity d where d.userId = u.id)")
+  long countEligibleWithDevices(@Param("roles") Collection<String> roles);
+
+  @Query("select u.id from UserEntity u where u.id in :ids and " + ELIGIBLE)
+  List<UUID> eligibleAmong(@Param("ids") Collection<UUID> ids, @Param("roles") Collection<String> roles);
+
+  @Query("select u from UserEntity u where u.mobile in :mobiles and " + ELIGIBLE + " order by u.createdAt")
+  List<UserEntity> eligibleByMobile(@Param("mobiles") Collection<String> mobiles, @Param("roles") Collection<String> roles);
 }

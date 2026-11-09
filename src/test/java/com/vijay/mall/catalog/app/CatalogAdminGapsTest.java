@@ -277,6 +277,8 @@ class CatalogAdminGapsTest {
     CatalogService.HotSale hs = service.hotSale(1, 1);
     assertThat(hs.page()).isEqualTo(1);
     assertThat(hs.total()).isEqualTo(5);
+    assertThat(hs.totalExact()).isTrue();
+    assertThat(hs.hasMore()).isTrue();
     assertThat(hs.products()).hasSize(1);
   }
 
@@ -285,6 +287,8 @@ class CatalogAdminGapsTest {
     CatalogService.HotSale hs = new CatalogService.HotSale(List.of(), List.of());
     assertThat(hs.page()).isZero();
     assertThat(hs.total()).isZero();
+    assertThat(hs.totalExact()).isTrue();
+    assertThat(hs.hasMore()).isFalse();
   }
 
   // ---------- B10-11: an omitted active keeps the current value ----------

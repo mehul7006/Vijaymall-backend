@@ -7,10 +7,13 @@ import com.vijay.mall.common.persistence.Window;
 import com.vijay.mall.identity.domain.User;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -226,4 +229,24 @@ public class UserRepository {
 
   /** True when the account is blocked and must not sign in. */
   public boolean isBlocked(UUID id) { return jpa.existsByIdAndStatus(id, "BLOCKED"); }
+
+  /** The next {@code limit} ids, after {@code after} in id order, of active accounts with one of these roles who can sign in. */
+  public List<UUID> recipientIdsAfter(Collection<String> roles, UUID after, int limit) {
+    return jpa.eligibleAfter(roles, after, PageRequest.of(0, limit));
+  }
+
+  /** How many active accounts with one of these roles can receive an announcement. */
+  public long countRecipients(Collection<String> roles) { return jpa.countEligible(roles); }
+
+  /** How many of those also have at least one push device. */
+  public long countRecipientsWithDevices(Collection<String> roles) { return jpa.countEligibleWithDevices(roles); }
+
+  /** Of these ids, the ones that are active accounts with one of these roles who can sign in. */
+  public List<UUID> eligibleIds(Collection<UUID> ids, Collection<String> roles) { return jpa.eligibleAmong(ids, roles); }
+
+  /** Eligible account ids per mobile number (a number can belong to a counter and an app account). */
+  public Map<String, List<UUID>> eligibleIdsByMobile(Collection<String> mobiles, Collection<String> roles) {
+    return jpa.eligibleByMobile(mobiles, roles).stream()
+        .collect(Collectors.groupingBy(e -> e.mobile, LinkedHashMap::new, Collectors.mapping(e -> e.id, Collectors.toList())));
+  }
 }

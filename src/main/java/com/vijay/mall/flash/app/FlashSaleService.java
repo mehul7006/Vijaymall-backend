@@ -22,6 +22,7 @@ import com.vijay.mall.flash.domain.FlashWindow;
 import com.vijay.mall.flash.infra.FlashRepository.Item;
 import com.vijay.mall.flash.infra.FlashRepository.Sale;
 import com.vijay.mall.flash.infra.FlashRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -63,6 +64,7 @@ public class FlashSaleService {
   public static final int MAX_CUSTOMER_LIMIT = 999;
 
   /** discountKind/discountValue/maxQty/perCustomerLimit may be null: follow the sale, no cap, follow the sale. */
+  @Schema(name = "FlashItemInput")
   public record ItemInput(UUID productId, String discountKind, Long discountValue, Integer maxQty, Integer perCustomerLimit) {}
 
   /** startsAt null = start now. channel null = BOTH. A null discountKind means NONE (every item then needs its own discount). */

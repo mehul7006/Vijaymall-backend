@@ -304,6 +304,20 @@ class FrontendGapsIT extends IntegrationTestBase {
   }
 
   @Test
+  void openApiPublishesThePatchKeysAndKeepsSameNamedModelsApart() {
+    Map schemas = (Map) ((Map) get("/v3/api-docs", null).getBody().get("components")).get("schemas");
+    var patch = (Map) ((Map) get("/v3/api-docs", null).getBody().get("paths")).get("/api/v1/admin/products/{id}");
+    String body = String.valueOf(((Map) patch.get("patch")).get("requestBody"));
+    assertThat(body).contains("ProductPatchBody");
+    assertThat(((Map) ((Map) schemas.get("ProductPatchBody")).get("properties")).keySet())
+        .contains("nameEn", "pricePaise", "hotStart", "hotEnd", "description", "lowThreshold", "variantName");
+    assertThat(((Map) ((Map) schemas.get("DefectiveReviewBody")).get("properties")).keySet()).containsExactlyInAnyOrder("decision", "note");
+    assertThat(((Map) ((Map) schemas.get("ProductReviewBody")).get("properties")).keySet()).containsExactlyInAnyOrder("rating", "comment");
+    assertThat(((Map) ((Map) schemas.get("OrderView")).get("properties")).keySet()).contains("orderNo", "items", "paymentStatus");
+    assertThat(schemas).containsKeys("CounterControlsReport", "CreditReport", "CounterControlsRow", "PosQuoteBody", "CartQuoteBody");
+  }
+
+  @Test
   void openApiDescribesOrderLinesAndTheSalesSummaryWithTheirOwnSchemas() {
     Map schemas = (Map) ((Map) get("/v3/api-docs", null).getBody().get("components")).get("schemas");
     assertThat(((Map) ((Map) schemas.get("OrderItem")).get("properties")).keySet())

@@ -2,6 +2,7 @@ package com.vijay.mall.config;
 
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.security.CurrentUser;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ public class AdminConfigController {
    * @param groups all settings, grouped
    * @param issues plain-language warnings about half-finished set-ups
    */
+  @Schema(name = "ConfigView")
   public record View(List<Group> groups, List<String> issues) {}
 
   /**

@@ -3,6 +3,7 @@ package com.vijay.mall.order.api;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.order.app.OrderReturnService;
 import com.vijay.mall.order.app.OrderReturnService.ReturnView;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
@@ -26,6 +27,7 @@ public class OrderReturnController {
    * @param reason why the goods come back, 1 to 200 characters
    * @param items the products and quantities, 1 to 100 entries
    */
+  @Schema(name = "OrderReturnBody")
   public record ReturnBody(String reason, @NotEmpty List<OrderReturnService.ItemInput> items) {}
 
   private final OrderReturnService returns;

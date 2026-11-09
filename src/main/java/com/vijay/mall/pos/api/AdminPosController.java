@@ -9,6 +9,7 @@ import com.vijay.mall.pos.app.StaffService;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.pos.domain.WeighedMode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -69,6 +70,7 @@ public class AdminPosController {
   public record StaffBody(@NotBlank String email, String name, String mobile) {}
 
   /** Request body for blocking ({@code false}) or unblocking ({@code true}) a cashier. */
+  @Schema(name = "PosActiveBody")
   public record ActiveBody(boolean active) {}
 
   /** active is false for a blocked cashier, so the roster can show who is switched off. */

@@ -217,6 +217,25 @@ class PosFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/pos/holds/" + id, cashier).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
 
+  @Test void theHeldBasketListShowsOnlyTheNewestHundred() {
+    String cashier = cashier();
+    List<Object> ids = new java.util.ArrayList<>();
+    try {
+      for (int i = 0; i < 101; i++) {
+        var made = post("/api/v1/pos/holds", cashier,
+            Map.of("label", "bulk " + i, "cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)))));
+        assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ids.add(made.getBody().get("id"));
+      }
+      var listed = getList("/api/v1/pos/holds", cashier);
+      assertThat(listed).hasSize(100);
+      assertThat(listed.get(0).get("id")).as("newest first").isEqualTo(ids.get(100));
+      assertThat(listed).noneMatch(h -> ids.get(0).equals(h.get("id")));
+    } finally {
+      ids.forEach(id -> call(HttpMethod.DELETE, "/api/v1/pos/holds/" + id, cashier, null, null));
+    }
+  }
+
   @Test void upiLinkNeedsTheShopUpiId() {
     String admin = adminToken();
     assertThat(get("/api/v1/pos/upi-link?amountPaise=100", cashier()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -421,6 +440,11 @@ class PosFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/pos/products?updatedSince=" + java.time.Instant.now().plusSeconds(3600), cashier).getBody().get("total")).isEqualTo(0);
     var all = get("/api/v1/pos/products?updatedSince=2020-01-01T00:00:00Z&size=50", cashier).getBody();
     assertThat(((Number) all.get("total")).intValue()).isGreaterThan(3);
+    // a plain date and a zone-less date-time (India time) are accepted like the offset form
+    assertThat(get("/api/v1/pos/products?updatedSince=2020-01-01&size=50", cashier).getBody().get("total")).isEqualTo(all.get("total"));
+    assertThat(get("/api/v1/pos/products?updatedSince=2020-01-01T05:30:00&size=50", cashier).getBody().get("total")).isEqualTo(all.get("total"));
+    assertThat(get("/api/v1/pos/products?updatedSince=2999-01-01", cashier).getBody().get("total")).isEqualTo(0);
+    assertThat(get("/api/v1/pos/products?updatedSince=garbage", cashier).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 
     // only the counter details (a new barcode) change: the product row itself is not touched, yet the till must refresh it
     String admin = adminToken();
