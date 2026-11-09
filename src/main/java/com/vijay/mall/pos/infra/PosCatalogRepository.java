@@ -24,6 +24,9 @@ public class PosCatalogRepository {
     this.barcodes = barcodes;
   }
 
+  /** When any product's counter details (price class, GST, barcodes) last changed; null for an empty shop. */
+  public java.time.Instant lastChange() { return pos.lastChange(); }
+
   private static ProductPos toDomain(ProductPosEntity e) {
     return new ProductPos(e.productId, SoldBy.valueOf(e.soldBy), e.plu, e.gstPercent, e.hsn);
   }

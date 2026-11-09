@@ -7,6 +7,7 @@ import com.vijay.mall.identity.app.ProfileService;
 import com.vijay.mall.notification.infra.NotificationRepository;
 import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,16 @@ public class NotificationService {
   private final JsonMapper json;
   private final Clock clock;
 
+  private com.vijay.mall.catalog.app.CatalogService catalog;
+  private com.vijay.mall.inventory.app.InventoryService inventory;
+
+  /** Optional (plain unit tests run without them): product names and the stock list for stock alerts. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void setStockSources(com.vijay.mall.catalog.app.CatalogService catalog, com.vijay.mall.inventory.app.InventoryService inventory) {
+    this.catalog = catalog;
+    this.inventory = inventory;
+  }
+
   public NotificationService(NotificationRepository repo, PushSender push, ProfileService profiles, JsonMapper json, Clock clock) {
     this.repo = repo;
     this.push = push;
@@ -36,6 +47,9 @@ public class NotificationService {
     this.json = json;
     this.clock = clock;
   }
+
+  /** Marks a note written when staff reject an order (see OrderService.adminReject). */
+  public static final String REJECTED = "rejected by shop:";
 
   @EventListener
   public void on(OutboxMessage m) {
@@ -49,13 +63,87 @@ public class NotificationService {
         }
         case "ORDER_STATUS" -> {
           String no = p.path("orderNo").asString();
+          String note = p.path("note").asString("");
+          if ("CANCELLED".equals(p.path("status").asString()) && note.startsWith(REJECTED)) {
+            notify(UUID.fromString(p.path("userId").asString()), "Order rejected", "Sorry, we could not accept order " + no + " ("
+                + note.substring(REJECTED.length()).trim() + "). Anything you paid will be refunded.", "ORDER", no);
+            return;
+          }
           notify(UUID.fromString(p.path("userId").asString()), "Order update", "Order " + no + " is now " + pretty(p.path("status").asString()) + ".", "ORDER", no);
+        }
+        case "LOW_STOCK" -> lowStock(p.path("items"));
+        case "FLASH_STARTED" -> {
+          int n = p.path("items").asInt();
+          tellStaff("Flash sale started", "\"" + p.path("name").asString() + "\" is live now with " + n + (n == 1 ? " item." : " items."),
+              p.path("saleId").asString());
+        }
+        case "FLASH_ENDED" -> tellStaff("Flash sale ended", "\"" + p.path("name").asString() + "\" has ended. Sold "
+            + p.path("unitsSold").asLong() + " units for Rs " + rupees(p.path("revenuePaise").asLong()) + ".", p.path("saleId").asString());
+        case "FLASH_ITEM_SOLD_OUT" -> {
+          UUID product = UUID.fromString(p.path("productId").asString());
+          String item = catalog == null ? "An item" : catalog.names(List.of(product)).getOrDefault(product, "An item");
+          tellStaff("Flash sale item sold out", item + " is sold out in \"" + p.path("saleName").asString()
+              + "\". It now sells at the normal price.", p.path("saleId").asString());
+        }
+        case "ORDER_RETURN" -> {
+          String no = p.path("orderNo").asString();
+          long refund = p.path("refundPaise").asLong();
+          String how = switch (p.path("mode").asString("")) {
+            case "ONLINE" -> "Rs " + rupees(refund) + " will go back to your original payment method.";
+            case "CASH" -> "Rs " + rupees(refund) + " will be refunded by the shop.";
+            default -> "The return is recorded.";
+          };
+          notify(UUID.fromString(p.path("userId").asString()), "Return accepted", "Order " + no + ": " + how, "ORDER", no);
         }
         default -> { }
       }
     } catch (Exception e) {
       log.error("Notification failed for {}: {}", m.type(), e.getMessage());
     }
+  }
+
+  /** Flash sale news goes to every staff member (admins and cashiers). */
+  private void tellStaff(String title, String body, String saleId) {
+    for (UUID staff : profiles.staffIds()) notify(staff, title, body, "FLASH", saleId);
+  }
+
+  private static String rupees(long paise) { return "%d.%02d".formatted(paise / 100, paise % 100); }
+
+  private static final int NAMES_SHOWN = 3;
+
+  /** "Rice: 0 left, Dal: 3 left, Oil: 2 left (+4 more)". */
+  private static String stockLine(List<Map.Entry<String, Integer>> items) {
+    String head = items.stream().limit(NAMES_SHOWN).map(e -> e.getKey() + ": " + e.getValue() + " left")
+        .collect(java.util.stream.Collectors.joining(", "));
+    return items.size() > NAMES_SHOWN ? head + " (+" + (items.size() - NAMES_SHOWN) + " more)" : head;
+  }
+
+  /** Staff are told when products fall to their alert level or run out (one event per stock change). */
+  private void lowStock(JsonNode items) {
+    if (catalog == null) return;
+    Map<UUID, Integer> qty = new java.util.LinkedHashMap<>();
+    items.forEach(i -> qty.put(UUID.fromString(i.path("productId").asString()), i.path("qty").asInt()));
+    Map<UUID, String> names = catalog.activeNames(qty.keySet());
+    List<Map.Entry<String, Integer>> lines = qty.entrySet().stream().filter(e -> names.containsKey(e.getKey()))
+        .map(e -> Map.entry(names.get(e.getKey()), e.getValue())).toList();
+    if (lines.isEmpty()) return;
+    boolean anyEmpty = lines.stream().anyMatch(e -> e.getValue() <= 0);
+    String title = anyEmpty ? "Out of stock" : "Low stock";
+    UUID first = qty.keySet().stream().filter(names::containsKey).findFirst().orElseThrow();
+    for (UUID staff : profiles.staffIds()) notify(staff, title, stockLine(lines), "STOCK", first.toString());
+  }
+
+  /** Every morning (shop time) staff get one list of everything still at or below its alert level. */
+  @org.springframework.scheduling.annotation.Scheduled(cron = "0 0 8 * * *", zone = "Asia/Kolkata")
+  public void lowStockDigest() {
+    if (catalog == null || inventory == null) return;
+    var low = inventory.lowStock(200);
+    Map<UUID, String> names = catalog.activeNames(low.stream().map(s -> s.productId()).toList());
+    List<Map.Entry<String, Integer>> lines = low.stream().filter(s -> names.containsKey(s.productId()))
+        .map(s -> Map.entry(names.get(s.productId()), s.qty())).toList();
+    if (lines.isEmpty()) return;
+    String title = lines.size() + (lines.size() == 1 ? " product needs" : " products need") + " restocking";
+    for (UUID staff : profiles.staffIds()) notify(staff, title, stockLine(lines), "STOCK", null);
   }
 
   public Inbox inbox(UUID userId, int page, int size) {

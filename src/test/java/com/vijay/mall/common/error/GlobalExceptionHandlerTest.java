@@ -113,4 +113,15 @@ class GlobalExceptionHandlerTest {
     check(r, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR");
     assertThat(r.getBody().message()).doesNotContain("secret");
   }
+
+  @org.junit.jupiter.api.Test
+  void databaseConstraintMistakesAreTheCallersNotServerErrors() {
+    var handler = new GlobalExceptionHandler();
+    var fk = new org.springframework.dao.DataIntegrityViolationException("x", new java.sql.SQLException("fk", "23503"));
+    var dup = new org.springframework.dao.DataIntegrityViolationException("x", new RuntimeException(new java.sql.SQLException("dup", "23505")));
+    var other = new org.springframework.dao.DataIntegrityViolationException("x", new java.sql.SQLException("check", "23514"));
+    org.assertj.core.api.Assertions.assertThat(handler.integrity(fk).getStatusCode().value()).isEqualTo(400);
+    org.assertj.core.api.Assertions.assertThat(handler.integrity(dup).getStatusCode().value()).isEqualTo(409);
+    org.assertj.core.api.Assertions.assertThat(handler.integrity(other).getStatusCode().value()).isEqualTo(500);
+  }
 }

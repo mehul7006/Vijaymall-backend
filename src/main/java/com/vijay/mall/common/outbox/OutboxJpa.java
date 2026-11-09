@@ -14,6 +14,8 @@ import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 
 interface OutboxJpa extends JpaRepository<OutboxEventEntity, UUID> {
+  long countByPublishedAtIsNull();
+
   /** Locks the rows it returns and skips rows another instance already holds (SKIP LOCKED = lock timeout -2). */
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))

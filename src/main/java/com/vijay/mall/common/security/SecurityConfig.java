@@ -76,6 +76,16 @@ public class SecurityConfig {
     };
   }
 
+  /** Staff tokens are checked against the account on every call; customers' tokens are not (they are short-lived). */
+  static boolean isBlockedStaff(String role, String subject, com.vijay.mall.identity.infra.UserRepository users) {
+    if (!"CASHIER".equals(role) && !"ADMIN".equals(role)) return false;
+    try {
+      return users.isBlocked(java.util.UUID.fromString(subject));
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
   private static void write(HttpServletResponse res, JsonMapper om, HttpStatus s, String code, String msg)
       throws java.io.IOException {
     res.setStatus(s.value());
@@ -84,7 +94,8 @@ public class SecurityConfig {
   }
 
   @Bean
-  SecurityFilterChain filterChain(HttpSecurity http, JsonMapper om) throws Exception {
+  SecurityFilterChain filterChain(HttpSecurity http, JsonMapper om,
+                                  com.vijay.mall.identity.infra.UserRepository users) throws Exception {
     AuthenticationEntryPoint entry =
         (req, res, ex) -> write(res, om, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Please sign in again");
     AccessDeniedHandler denied =
@@ -92,6 +103,10 @@ public class SecurityConfig {
 
     JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
     converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+      if (isBlockedStaff(jwt.getClaimAsString("role"), jwt.getSubject(), users)) {
+        // A blocked cashier or admin loses access at once, not when the 15-minute token runs out.
+        throw new org.springframework.security.authentication.DisabledException("account blocked");
+      }
       Collection<GrantedAuthority> list =
           List.<GrantedAuthority>of(new SimpleGrantedAuthority("ROLE_" + jwt.getClaimAsString("role")));
       return list;
@@ -106,13 +121,18 @@ public class SecurityConfig {
             .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
             .requestMatchers("/api/v1/auth/**", "/api/v1/payments/webhook/**",
                 "/actuator/health", "/actuator/health/**", "/img/**",
+                // Served only on the private management port (ManagementPortGuard refuses to start otherwise), where Prometheus scrapes it.
+                "/actuator/prometheus",
                 "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
             // Guests may browse the catalog (SecurityIT.catalogIsPublic). Writing a review still needs a sign-in.
             .requestMatchers(HttpMethod.GET, "/api/v1/categories", "/api/v1/products", "/api/v1/products/*",
                 "/api/v1/products/*/reviews", "/api/v1/hot-sale", "/api/v1/shop-settings", "/api/v1/coupons",
                 "/api/v1/product-groups", "/api/v1/product-groups/*", "/api/v1/product-groups/*/reviews", "/api/v1/units").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/v1/flash-sales/active", "/api/v1/flash-sales/upcoming").permitAll()
             // Counter staff (CASHIER) work the orders too; everything else under /admin stays admin-only.
             .requestMatchers("/api/v1/admin/orders", "/api/v1/admin/orders/**").hasAnyRole("ADMIN", "CASHIER")
+            // Flash sales are set up by the shop staff too (admin and cashier).
+            .requestMatchers("/api/v1/admin/flash-sales", "/api/v1/admin/flash-sales/**").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
             .requestMatchers("/api/v1/pos/**").hasAnyRole("CASHIER", "ADMIN")
             .anyRequest().authenticated())

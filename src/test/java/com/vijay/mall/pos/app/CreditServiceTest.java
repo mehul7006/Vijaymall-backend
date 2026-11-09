@@ -234,6 +234,7 @@ class CreditServiceTest {
     when(users.findByMobile("9000000010")).thenReturn(Optional.empty());
     when(users.insertCounterCustomer(eq("9000000010"), any())).thenReturn(new User(fresh, "pos-x@counter.invalid", null, "9000000010", User.CUSTOMER));
     when(users.findById(fresh)).thenReturn(Optional.of(new User(fresh, "pos-x@counter.invalid", null, "9000000010", User.CUSTOMER)));
+    when(repo.find(fresh)).thenReturn(new CreditRepository.Account(fresh, 0, 20000));
     service.setLimitByMobile("+91 9000000010", 20000, cashier);
     verify(repo).setLimit(eq(fresh), eq(20000L), any());
 

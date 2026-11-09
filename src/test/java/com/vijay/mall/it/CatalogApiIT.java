@@ -114,7 +114,7 @@ class CatalogApiIT extends IntegrationTestBase {
     var upd = call(HttpMethod.PUT, "/api/v1/admin/products/" + id, admin,
         product(cat, "Renamed " + UUID.randomUUID(), Map.of("pricePaise", 1500, "qtyOnHand", 4, "lowThreshold", 2, "unit", "")), null);
     assertThat(upd.getStatusCode()).isEqualTo(HttpStatus.OK);
-    assertThat(upd.getBody()).containsEntry("pricePaise", 1500).containsEntry("qtyOnHand", 4).containsEntry("lowThreshold", 2).containsEntry("unit", "pc");
+    assertThat(upd.getBody()).containsEntry("pricePaise", 1500).containsEntry("qtyOnHand", 4).containsEntry("lowThreshold", 2).containsEntry("unit", "pack");
 
     var restock = post("/api/v1/admin/products/" + id + "/stock", admin, Map.of("delta", 6, "reason", "RESTOCK"));
     assertThat(restock.getBody()).containsEntry("qtyOnHand", 10);

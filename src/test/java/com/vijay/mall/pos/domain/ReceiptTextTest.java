@@ -50,4 +50,25 @@ class ReceiptTextTest {
     assertThat(ReceiptText.wrap("abcdefghij", 4)).containsExactly("abcd");
     assertThat(ReceiptText.wrap("  ", 4)).isEmpty();
   }
+
+  private static ReceiptData withRoundOff(long roundOff) {
+    return new ReceiptData("Shop", "Road", "", "", "INV-1", "01-01-2026", "Asha", "",
+        List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 10050, 10050, 0)), 10050, 0, 0, 10000, 10000, 0, 0,
+        List.of(new ReceiptData.PaymentLine("CASH", 10000)), 0, 0, "Thanks", 0, roundOff);
+  }
+
+  @Test void roundOff_shownWithItsSignOnlyWhenNotZero() {
+    assertThat(ReceiptText.render(withRoundOff(-50), 32)).contains("Round off").contains("-0.50");
+    assertThat(ReceiptText.render(withRoundOff(30), 32)).contains("Round off").contains("+0.30");
+    assertThat(ReceiptText.render(withRoundOff(0), 32)).doesNotContain("Round off");
+  }
+
+  @Test void shorterConstructorsDefaultTheMissingParts() {
+    var lines = List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 100, 100, 0));
+    var pays = List.of(new ReceiptData.PaymentLine("CASH", 100));
+    var noRound = new ReceiptData("S", "A", "", "", "I", "D", "C", "", lines, 100, 0, 0, 100, 100, 0, 0, pays, 0, 0, "F", 25);
+    assertThat(noRound.manualDiscountPaise()).isEqualTo(25);
+    assertThat(noRound.roundOffPaise()).isZero();
+    assertThat(ReceiptText.render(noRound, 32)).contains("Discount");
+  }
 }

@@ -23,14 +23,24 @@ public class OrderRepository {
                     String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                     long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
                     String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
-                    String cancelReason) {
+                    String cancelReason, boolean stockReserved) {
+    public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
+               String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
+               long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
+               String addressSnapshot, Instant expiresAt, Instant placedAt, long version, String deliverySlot,
+               String cancelReason) {
+      this(id, orderNo, userId, fulfilment, status, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount,
+          deliveryFee, total, coinsEarned, coinsCredited, paymentMethod, paymentStatus, addressSnapshot, expiresAt,
+          placedAt, version, deliverySlot, cancelReason, false);
+    }
+
     public Row(UUID id, String orderNo, UUID userId, String fulfilment, String status, long subtotal,
                String couponCode, long couponDiscount, int coinsUsed, long coinDiscount, long deliveryFee,
                long total, int coinsEarned, boolean coinsCredited, String paymentMethod, String paymentStatus,
                String addressSnapshot, Instant expiresAt, Instant placedAt, long version) {
       this(id, orderNo, userId, fulfilment, status, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount,
           deliveryFee, total, coinsEarned, coinsCredited, paymentMethod, paymentStatus, addressSnapshot, expiresAt,
-          placedAt, version, null, null);
+          placedAt, version, null, null, false);
     }
   }
 
@@ -77,7 +87,7 @@ public class OrderRepository {
     return new Row(e.id, e.orderNo, e.userId, e.fulfilment, e.status, e.subtotalPaise, e.couponCode, e.couponDiscountPaise,
         e.coinsUsed, e.coinDiscountPaise, e.deliveryFeePaise, e.totalPaise, e.coinsEarned, e.coinsCredited, e.paymentMethod,
         e.paymentStatus, e.addressSnapshot, e.expiresAt, e.placedAt, e.version == null ? 0 : e.version, e.deliverySlot,
-        e.cancelReason);
+        e.cancelReason, e.stockReserved);
   }
 
   public String nextOrderNo() {
@@ -152,6 +162,15 @@ public class OrderRepository {
     history.save(e);
   }
 
+  /** An order line with what has been returned so far; the lines of a return refer to these by id. */
+  public record ItemRow(UUID id, UUID productId, String name, int qty, int returnedQty, long unitPricePaise, long lineTotalPaise,
+                        long couponDiscountPaise) {}
+
+  public List<ItemRow> itemRows(UUID orderId) {
+    return items.findByOrderIdOrderByName(orderId).stream().map(i -> new ItemRow(i.id, i.productId, i.name, i.qty, i.returnedQty,
+        i.unitPricePaise, i.lineTotalPaise, i.couponDiscountPaise)).toList();
+  }
+
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
         .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
@@ -186,6 +205,10 @@ public class OrderRepository {
     });
   }
 
+  /** Records whether the order currently holds stock (taken when staff confirm, given back on cancel). */
+  @Transactional
+  public void setStockReserved(UUID id, boolean reserved) { orders.findById(id).ifPresent(e -> e.stockReserved = reserved); }
+
   @Transactional
   public void setCancelReason(UUID id, String reason) { orders.findById(id).ifPresent(e -> e.cancelReason = reason); }
 
@@ -195,6 +218,15 @@ public class OrderRepository {
             + "and o.userId = :u and o.status in ('DELIVERED', 'PICKED_UP') order by o.placedAt desc", UUID.class)
         .setParameter("p", productId).setParameter("u", userId).setMaxResults(1).getResultList().stream().findFirst();
   }
+
+  /** How many orders are in each status right now. */
+  public Map<String, Long> countByStatus() {
+    return em.createQuery("select o.status, count(o) from OrderEntity o group by o.status", Object[].class).getResultList().stream()
+        .collect(java.util.stream.Collectors.toMap(r -> (String) r[0], r -> ((Number) r[1]).longValue()));
+  }
+
+  /** Orders that are still being handled (not delivered, picked up or cancelled). */
+  public long openOrderCount(UUID userId) { return orders.countOpen(userId); }
 
   /** Orders the person has placed that were not cancelled; used for "first order only" coupons. */
   public long activeOrderCount(UUID userId) { return orders.countByUserIdAndStatusNot(userId, "CANCELLED"); }
@@ -228,15 +260,18 @@ public class OrderRepository {
 
   public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
+  /** "1001" becomes "%1001%" in lower case; a % or _ typed by the person is dropped so it cannot act as a wildcard. */
+  static String pattern(String q) { return "%" + q.trim().toLowerCase().replace("%", "").replace("_", "") + "%"; }
+
   /** Orders newest first, optionally of one status and/or whose order number contains q (so staff can type "1001"). */
   public Page<SummaryRow> adminList(String status, String q, int page, int size) {
     PageRequest req = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"));
     boolean anyStatus = status == null || status.isBlank();
     boolean anyNumber = q == null || q.isBlank();
     var result = anyStatus
-        ? (anyNumber ? orders.findAll(req) : orders.findByOrderNoContainingIgnoreCase(q.trim(), req))
+        ? (anyNumber ? orders.findAll(req) : orders.searchByNumber(pattern(q), req))
         : (anyNumber ? orders.findByStatus(status, req)
-            : orders.findByStatusAndOrderNoContainingIgnoreCase(status, q.trim(), req));
+            : orders.searchByStatusAndNumber(status, pattern(q), req));
     return summaries(result, page, size);
   }
 }

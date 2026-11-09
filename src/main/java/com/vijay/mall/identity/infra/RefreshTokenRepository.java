@@ -33,6 +33,9 @@ public class RefreshTokenRepository {
   @Transactional
   public void revoke(UUID id, Instant now) { jpa.revoke(id, now); }
 
+  @Transactional
+  public void revokeAll(UUID userId, Instant now) { jpa.revokeAllOf(userId, now); }
+
   /** Revokes every open token of one device (a device id may be missing). */
   @Transactional
   public void revokeDevice(UUID userId, String deviceId, Instant now) {

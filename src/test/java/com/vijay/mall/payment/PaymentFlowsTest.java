@@ -172,12 +172,44 @@ class PaymentFlowsTest {
 
   // ---------- refund ----------
   @Test
-  void refundCallsTheProviderStoresItAndMarksRefunded() {
+  void refundIsQueuedWithTheCancelAndSentByTheJob() {
     when(repo.latestForOrder(orderId)).thenReturn(Optional.of(payment("CAPTURED")));
     assertThat(service.refund(orderId, "cancelled")).isTrue();
-    assertThat(fake.refunds).containsExactly("pay_1:5000");
-    verify(repo).insertRefund(paymentId, 5000, "ISSUED", "refund_pay_1", "cancelled", NOW);
+    verify(repo).insertRefund(paymentId, 5000, "PENDING", null, "cancelled", NOW);
     verify(repo).setStatus(paymentId, "REFUNDED", null, null, NOW);
+    assertThat(fake.refunds).isEmpty();
+
+    UUID refundId = UUID.randomUUID();
+    when(repo.pendingRefunds(50)).thenReturn(List.of(new PaymentRepository.PendingRefund(refundId, paymentId, "fake", "pay_1", 5000, "cancelled", 0)));
+    when(repo.claimRefund(refundId, NOW)).thenReturn(true);
+    service.sendQueuedRefunds();
+    assertThat(fake.refunds).containsExactly("pay_1:5000");
+    verify(repo).refundIssued(refundId, "refund_pay_1", NOW);
+  }
+
+  @Test
+  void aRefundAnotherServerAlreadyClaimedIsNotSentTwice() {
+    UUID refundId = UUID.randomUUID();
+    when(repo.pendingRefunds(50)).thenReturn(List.of(new PaymentRepository.PendingRefund(refundId, paymentId, "fake", "pay_1", 5000, "x", 0)));
+    when(repo.claimRefund(refundId, NOW)).thenReturn(false);
+    service.sendQueuedRefunds();
+    assertThat(fake.refunds).isEmpty();
+    verify(repo, never()).refundIssued(any(), any(), any());
+  }
+
+  @Test
+  void aFailingProviderLeavesTheRefundForANewTry() {
+    var gw = mock(PaymentGateway.class);
+    when(gw.provider()).thenReturn("fake");
+    when(gw.refund(anyString(), org.mockito.ArgumentMatchers.anyLong(), anyString())).thenThrow(new IllegalStateException("provider down"));
+    var svc = new PaymentService(repo, new PaymentGatewayRegistry(List.of(gw), props("fake")), events, audit,
+        Clock.fixed(NOW, ZoneOffset.UTC), new TransactionTemplate(mock(PlatformTransactionManager.class)));
+    UUID refundId = UUID.randomUUID();
+    when(repo.pendingRefunds(50)).thenReturn(List.of(new PaymentRepository.PendingRefund(refundId, paymentId, "fake", "pay_1", 5000, "x", 2)));
+    when(repo.claimRefund(refundId, NOW)).thenReturn(true);
+    svc.sendQueuedRefunds();
+    verify(repo).refundFailed(refundId, "provider down", PaymentService.MAX_REFUND_TRIES, NOW);
+    verify(repo, never()).refundIssued(any(), any(), any());
   }
 
   // ---------- reconcile ----------

@@ -56,7 +56,7 @@ class CreditFlowIT extends IntegrationTestBase {
   void creditNeedsApprovalThenWorksAndTheCustomerSeesItOnTheirAccount() {
     String m = mobile();
     var refused = sell(m, 2, List.of(pay("CREDIT", 2 * RICE)));
-    assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(refused.getBody().get("code")).isEqualTo("CREDIT_NOT_ALLOWED");
 
     approve(m, 50000);
@@ -96,7 +96,7 @@ class CreditFlowIT extends IntegrationTestBase {
     approve(m, 10000);
     int before = stockOfRice();
     var res = sell(m, 2, List.of(pay("CREDIT", 2 * RICE)));
-    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(res.getBody().get("code")).isEqualTo("CREDIT_LIMIT_EXCEEDED");
     assertThat(((Map) res.getBody().get("details")).get("availablePaise")).isEqualTo(10000);
     assertThat(stockOfRice()).isEqualTo(before);
@@ -132,7 +132,7 @@ class CreditFlowIT extends IntegrationTestBase {
 
     var over = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
         Map.of("customerMobile", m, "payments", List.of(pay("CASH", 15001))), UUID.randomUUID().toString());
-    assertThat(over.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(over.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(over.getBody().get("code")).isEqualTo("CREDIT_OVERPAYMENT");
     var viaCredit = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
         Map.of("customerMobile", m, "payments", List.of(pay("CREDIT", 100))), UUID.randomUUID().toString());
@@ -176,7 +176,7 @@ class CreditFlowIT extends IntegrationTestBase {
     var off = post("/api/v1/admin/credit/accounts/" + id + "/adjust", admin, Map.of("amountPaise", -5000, "note", "goodwill write-off"));
     assertThat(((Number) off.getBody().get("balancePaise")).longValue()).isEqualTo(20000);
     assertThat(post("/api/v1/admin/credit/accounts/" + id + "/adjust", admin, Map.of("amountPaise", -99999, "note", "too much")).getStatusCode())
-        .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(post("/api/v1/admin/credit/accounts/" + id + "/adjust", admin, Map.of("amountPaise", -100)).getStatusCode())
         .isEqualTo(HttpStatus.BAD_REQUEST);
 

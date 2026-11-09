@@ -46,7 +46,7 @@ class FrontendGapsIT extends IntegrationTestBase {
     String m = mobile();
     post("/api/v1/auth/otp/send-mobile", null, Map.of("mobile", m));
     var res = post("/api/v1/auth/otp/verify-mobile", null, Map.of("mobile", m, "otp", "00000"));
-    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(res.getBody().get("code")).isEqualTo("OTP_INVALID");
   }
 
@@ -120,7 +120,7 @@ class FrontendGapsIT extends IntegrationTestBase {
     String token = token(freshEmail());
     Object pid = productByName(token, "Digestive Biscuits").get("id");
     var early = post("/api/v1/products/" + pid + "/reviews", token, Map.of("rating", 5));
-    assertThat(early.getStatusCode()).as("not delivered yet").isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(early.getStatusCode()).as("not delivered yet").isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(early.getBody().get("code")).isEqualTo("REVIEW_NOT_ALLOWED");
     assertThat(get("/api/v1/products/" + pid + "/reviews/mine", token).getBody()).containsEntry("canReview", false);
     deliverPickupOrder(token, "Digestive Biscuits");
@@ -264,7 +264,7 @@ class FrontendGapsIT extends IntegrationTestBase {
 
     var again = post("/api/v1/cart/quote", token, Map.of("items", List.of(Map.of("productId", pid, "qty", 1)),
         "couponCode", code, "coinMode", "NONE", "fulfilment", "PICKUP"));
-    assertThat(again.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(again.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(((Map) again.getBody().get("details")).get("reason")).isEqualTo("FIRST_ORDER_ONLY");
   }
 
@@ -293,7 +293,8 @@ class FrontendGapsIT extends IntegrationTestBase {
 
     var pub = get("/api/v1/shop-settings", null);
     assertThat(pub.getStatusCode()).isEqualTo(HttpStatus.OK);
-    assertThat(pub.getBody().keySet()).containsExactlyInAnyOrder("shopName", "phone", "address", "promise");
+    assertThat(pub.getBody().keySet()).contains("shopName", "phone", "address", "promise", "details", "logoUrl", "hours", "openNow", "onlineOrdersOpen")
+        .as("billing details stay private").doesNotContain("gstin", "upiId", "invoicePrefix", "state");
     assertThat(pub.getBody().get("promise")).isEqualTo("Free home delivery on every order");
 
     // saving the form again without a promise keeps the one that was set

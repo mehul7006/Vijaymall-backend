@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminOrderController {
   public record StatusBody(@NotNull OrderStatus status, String note) {}
 
+  public record RejectBody(@NotNull @jakarta.validation.constraints.Size(min = 1, max = 200) String reason) {}
+
   private final OrderService orders;
 
   public AdminOrderController(OrderService orders) { this.orders = orders; }
@@ -35,6 +37,12 @@ public class AdminOrderController {
 
   @GetMapping("/{id}")
   public OrderViews.AdminView get(@PathVariable UUID id) { return orders.adminGet(id); }
+
+  /** Turn an order down: the customer is told why and gets everything back (stock, coins, coupon, money). */
+  @PostMapping("/{id}/reject")
+  public OrderViews.AdminView reject(@PathVariable UUID id, @Valid @RequestBody RejectBody b) {
+    return orders.adminReject(id, b.reason(), CurrentUser.id());
+  }
 
   @PostMapping("/{id}/status")
   public OrderViews.AdminView status(@PathVariable UUID id, @Valid @RequestBody StatusBody b) {

@@ -22,14 +22,36 @@ public final class PosViews {
 
   public record Pay(String mode, long amountPaise, String reference) {}
 
-  public record SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise) {}
+  /** A discount typed in at the till: the amount off the bill, why, and (above the cashier's limit) a manager's PIN. */
+  public record ManualDiscount(long amountPaise, String reason, String approverPin) {}
+
+  /**
+   * soldAt is when the bill was really rung up (set by an offline till on upload, otherwise the server's time). offline
+   * says the goods have already left: stock that came up short is recorded as a shortfall instead of refusing the bill.
+   */
+  public record SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount, java.time.Instant soldAt,
+                          boolean offline) {
+    public SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise, ManualDiscount manualDiscount) {
+      this(cart, payments, cashTenderedPaise, manualDiscount, null, false);
+    }
+
+    public SaleInput(Cart cart, List<Pay> payments, Long cashTenderedPaise) { this(cart, payments, cashTenderedPaise, null, null, false); }
+  }
 
   public record BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
                          long discountPaise, long netPaise, int gstPercent) {}
 
   public record BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                          int coinsUsed, long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise,
-                         long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings) {}
+                         long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings, long roundOffPaise) {
+    /** totalPaise is what the customer pays (already rounded when rounding is on); roundOffPaise is the rounding that was added (can be negative). */
+    public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
+                    long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
+                    List<String> warnings) {
+      this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise,
+          coinsToEarn, customerCoinBalance, warnings, 0);
+    }
+  }
 
   public record HoldView(UUID id, String label, String customerMobile, UUID cashierId, Instant createdAt, Cart cart) {}
 

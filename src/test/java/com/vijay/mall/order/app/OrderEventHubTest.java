@@ -87,9 +87,9 @@ class OrderEventHubTest {
     for (int i = 0; i < 50; i++) counting.on(new com.vijay.mall.common.live.CatalogChanged("CATALOG", at));
     assertThat(runs.get()).isEqualTo(afterReady);
     counting.flush();
-    assertThat(runs.get()).isEqualTo(afterReady + 1);
+    assertThat(runs.get()).as("one stock message and one catalog message, however many changes").isEqualTo(afterReady + 2);
     counting.flush();
-    assertThat(runs.get()).isEqualTo(afterReady + 1);
+    assertThat(runs.get()).as("nothing pending, nothing sent").isEqualTo(afterReady + 2);
   }
 
   @Test

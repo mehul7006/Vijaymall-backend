@@ -16,9 +16,13 @@ import org.springframework.http.HttpStatus;
 /** Many buyers, little stock: never oversell. */
 class InventoryConcurrencyIT extends IntegrationTestBase {
 
+  /**
+   * Orders are accepted while the shelf looks full, but stock is taken when staff confirm. With 12 orders for the 3
+   * toothpastes on the shelf, however many confirmations run at once, exactly 3 succeed and nothing is oversold.
+   */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
-  void neverSellsMoreThanInStock() throws Exception {
+  void neverConfirmsMoreThanInStock() throws Exception {
     String admin = adminToken();
     var toothpaste = productByName(admin, "Toothpaste"); // seeded with 3
     String pid = (String) toothpaste.get("id");
@@ -31,13 +35,17 @@ class InventoryConcurrencyIT extends IntegrationTestBase {
     Map<String, Object> order = Map.of("items", items, "coinMode", "NONE", "fulfilment", "PICKUP",
         "paymentMethod", "COD", "expectedTotalPaise", total);
 
+    List<String> orderIds = tokens.stream().map(t ->
+        (String) call(HttpMethod.POST, "/api/v1/orders", t, order, UUID.randomUUID().toString()).getBody().get("id")).toList();
+    assertThat(get("/api/v1/admin/products/" + pid, admin).getBody().get("qtyOnHand")).as("placing takes no stock").isEqualTo(stock);
+
     try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-      List<Future<HttpStatus>> results = tokens.stream().map(t -> pool.submit(() ->
-          HttpStatus.valueOf(call(HttpMethod.POST, "/api/v1/orders", t, order, UUID.randomUUID().toString())
+      List<Future<HttpStatus>> results = orderIds.stream().map(id -> pool.submit(() ->
+          HttpStatus.valueOf(post("/api/v1/admin/orders/" + id + "/status", admin, Map.of("status", "CONFIRMED"))
               .getStatusCode().value()))).toList();
-      long created = 0;
-      for (var f : results) if (f.get() == HttpStatus.CREATED) created++;
-      assertThat(created).isEqualTo(stock);
+      long confirmed = 0;
+      for (var f : results) if (f.get() == HttpStatus.OK) confirmed++;
+      assertThat(confirmed).isEqualTo(stock);
     }
     assertThat(get("/api/v1/admin/products/" + pid, admin).getBody().get("qtyOnHand")).isEqualTo(0);
   }

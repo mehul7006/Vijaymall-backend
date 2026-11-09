@@ -26,7 +26,7 @@ class CouponBoundaryTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"0,0,false", "-1,0,false", "1,0,true", "0,-1,false", "0,1,true", "-3600,3600,false", "1,-1,true"})
+  @CsvSource({"0,0,false", "-1,0,false", "1,0,true", "0,-1,true", "0,1,false", "-3600,3600,false", "1,-1,true"})
   void validityWindowIsInclusiveAtBothEnds(long startOffset, long endOffset, boolean expired) {
     // offsets of 0 mean "exactly now"; 1/-1 are outside. start offset is relative to NOW (start = NOW + offset)
     Instant start = startOffset == 0 && endOffset == 0 ? NOW : NOW.plusSeconds(startOffset);
@@ -69,7 +69,7 @@ class CouponBoundaryTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"0,0,0,false", "1,0,0,true", "2,1,0,false", "2,2,0,true", "0,0,1,false", "0,0,4,false", "3,0,2,false", "3,0,3,true"})
+  @CsvSource({"0,0,0,false", "1,0,1,true", "2,0,1,false", "2,0,2,true", "0,0,1,false", "0,0,4,false", "3,0,2,false", "3,0,3,true"})
   void perUserLimitBlocksAtTheLimitExactlyAndZeroMeansUnlimited(int limit, int ignored, int uses, boolean blocked) {
     Optional<String> r = check(c(Coupon.FLAT, 1, 0, 0, null, limit, 0, 0, null, null, true), 100, List.of(), uses);
     assertThat(r.isPresent()).isEqualTo(limit > 0 && uses >= limit);

@@ -91,14 +91,41 @@ class OnlinePaymentIT extends IntegrationTestBase {
     assertThat(order(p)).containsEntry("status", "PLACED");
   }
 
+  /** Regression: a failed attempt used to close the order, so a successful retry was charged but never honoured. */
   @Test
-  void failedPaymentCancelsTheOrderAndReturnsStock() {
+  void aFailedAttemptKeepsTheOrderOpenSoARetryCanStillPay() {
     int before = stock(placeOnlineProductId());
     var p = placeOnline("Orange Juice", 2);
-    assertThat(stock(p.productId())).isEqualTo(before - 2);
+    assertThat(stock(p.productId())).as("placing takes no stock").isEqualTo(before);
     event("ev-" + UUID.randomUUID(), "failed", p.orderId(), 0);
-    assertThat(order(p)).containsEntry("status", "CANCELLED");
-    assertThat(stock(p.productId())).isEqualTo(before);
+    assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
+    int refundsBefore = fake.refunds.size();
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
+    assertThat(order(p)).containsEntry("status", "PLACED").containsEntry("paymentStatus", "CAPTURED");
+    assertThat(fake.refunds).as("nothing to refund: the order is honoured").hasSize(refundsBefore);
+  }
+
+  @Test
+  void rejectingAPaidOrderRefundsTheCustomerInFull() {
+    String admin = adminToken();
+    var p = placeOnline("Orange Juice", 1);
+    event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total());
+    post("/api/v1/admin/orders/" + p.orderId() + "/status", admin, Map.of("status", "CONFIRMED"));
+    int refundsBefore = fake.refunds.size();
+    var res = post("/api/v1/admin/orders/" + p.orderId() + "/reject", admin, Map.of("reason", "cannot deliver today"));
+    assertThat(res.getBody()).containsEntry("status", "CANCELLED").containsEntry("paymentStatus", "REFUNDED");
+    assertThat(fake.refunds).hasSize(refundsBefore + 1);
+    assertThat(fake.refunds.get(fake.refunds.size() - 1)).endsWith(":" + p.total());
+  }
+
+  @Test
+  void staffCannotMoveAnUnpaidOnlineOrderForward() {
+    var p = placeOnline("Orange Juice", 1);
+    for (String target : List.of("PLACED", "DELIVERED")) {
+      var res = post("/api/v1/admin/orders/" + p.orderId() + "/status", adminToken(), Map.of("status", target));
+      assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+    assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
   }
 
   private Object placeOnlineProductId() { return productByName(adminToken(), "Orange Juice").get("id"); }
@@ -106,8 +133,10 @@ class OnlinePaymentIT extends IntegrationTestBase {
   @Test
   void wrongAmountIsNotAcceptedAsPayment() {
     var p = placeOnline("Orange Juice", 1);
+    int refundsBefore = fake.refunds.size();
     event("ev-" + UUID.randomUUID(), "captured", p.orderId(), p.total() - 1);
     assertThat(order(p)).containsEntry("status", "PAYMENT_PENDING");
+    assertThat(fake.refunds).as("the odd amount that did arrive is sent back").hasSize(refundsBefore + 1);
   }
 
   @Test
@@ -145,9 +174,10 @@ class OnlinePaymentIT extends IntegrationTestBase {
   }
 
   @Test
-  void unpaidOrdersExpireAndFreeTheirStock() {
+  void unpaidOrdersExpireWithoutEverTouchingStock() {
     int before = stock(placeOnlineProductId());
     var p = placeOnline("Orange Juice", 3);
+    assertThat(stock(p.productId())).isEqualTo(before);
     jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", java.sql.Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
     orders.expireUnpaid();
     assertThat(order(p)).containsEntry("status", "CANCELLED");

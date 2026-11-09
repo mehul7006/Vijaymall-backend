@@ -82,6 +82,29 @@ public class GlobalExceptionHandler {
     return body(HttpStatus.FORBIDDEN, "FORBIDDEN", "Not allowed", null);
   }
 
+  /** Bad input that only the database can see: a missing referenced row is the caller's mistake (400), a duplicate is a conflict (409). */
+  @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+  ResponseEntity<ErrorBody> integrity(org.springframework.dao.DataIntegrityViolationException e) {
+    String state = sqlState(e);
+    if ("23503".equals(state)) {
+      log.info("Rejected: references something that does not exist: {}", e.getMostSpecificCause().getMessage());
+      return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Something you referred to does not exist", null);
+    }
+    if ("23505".equals(state)) {
+      log.info("Rejected: already exists: {}", e.getMostSpecificCause().getMessage());
+      return body(HttpStatus.CONFLICT, "ALREADY_EXISTS", "This already exists", null);
+    }
+    return other(e);
+  }
+
+  private static String sqlState(Throwable t) {
+    for (Throwable c = t; c != null; c = c.getCause()) {
+      if (c instanceof java.sql.SQLException s && s.getSQLState() != null) return s.getSQLState();
+      if (c.getCause() == c) break;
+    }
+    return null;
+  }
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<ErrorBody> other(Exception e) {
     log.error("Unhandled error", e);

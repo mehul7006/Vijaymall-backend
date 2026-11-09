@@ -45,6 +45,9 @@ public class AddressRepository {
   @Transactional
   public void delete(UUID userId, UUID id) { jpa.deleteOwned(id, userId); }
 
+  @Transactional
+  public void deleteAll(UUID userId) { jpa.deleteAllOf(userId); }
+
   private static void copy(Address a, AddressEntity e) {
     e.label = a.label();
     e.line1 = a.line1();

@@ -4,5 +4,5 @@ WORKDIR /app
 COPY target/mall-api-0.1.0-SNAPSHOT.jar app.jar
 RUN mkdir -p /app/data/images
 ENV SPRING_PROFILES_ACTIVE=prod IMAGES_DIR=/app/data/images
-EXPOSE 8080
+EXPOSE 8080 9090
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "app.jar"]

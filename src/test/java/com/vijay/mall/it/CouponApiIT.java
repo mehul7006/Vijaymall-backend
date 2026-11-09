@@ -136,8 +136,9 @@ class CouponApiIT extends IntegrationTestBase {
     assertThat(reason(quote(t, pid, off))).isEqualTo("EXPIRED");
 
     String otherCategory = code();
-    create(admin, coupon(otherCategory, Map.of("categoryId", UUID.randomUUID().toString())));
-    assertThat(quote(t, pid, otherCategory).getStatusCode().is4xxClientError()).isTrue();
+    var unknown = post("/api/v1/admin/coupons", admin, coupon(otherCategory, Map.of("categoryId", UUID.randomUUID().toString())));
+    assertThat(unknown.getStatusCode()).as("a category that does not exist is the caller's mistake, not a server error")
+        .isEqualTo(HttpStatus.BAD_REQUEST);
   }
 
   @Test

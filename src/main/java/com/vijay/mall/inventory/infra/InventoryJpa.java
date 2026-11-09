@@ -30,6 +30,9 @@ interface InventoryJpa extends JpaRepository<InventoryEntity, UUID> {
   @Query("select i from InventoryEntity i where i.productId in :ids")
   List<InventoryEntity> byIds(@Param("ids") Collection<UUID> ids);
 
+  @Query("select count(i) from InventoryEntity i where i.qtyOnHand <= i.lowThreshold")
+  long countLow();
+
   @Query("select i from InventoryEntity i where i.qtyOnHand <= i.lowThreshold order by i.qtyOnHand asc")
   List<InventoryEntity> lowStock(Pageable page);
 }

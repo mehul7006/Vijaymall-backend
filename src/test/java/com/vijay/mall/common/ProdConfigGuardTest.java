@@ -27,6 +27,17 @@ class ProdConfigGuardTest {
   }
 
   @Test
+  void razorpayKeysNeedAWebhookSecret() {
+    AppProps base = props(GOOD_SECRET, GOOD_PEPPER, "", "email", "owner@shop.in");
+    AppProps withKeysOnly = new AppProps(base.jwt(), base.otp(), base.bootstrapAdminEmail(), base.imagesDir(),
+        new AppProps.Payment("razorpay", 15, "rzp_key", "secret", "", "https://api.razorpay.com"), base.delivery());
+    assertEquals(1, ProdConfigGuard.problems(withKeysOnly).size());
+    AppProps complete = new AppProps(base.jwt(), base.otp(), base.bootstrapAdminEmail(), base.imagesDir(),
+        new AppProps.Payment("razorpay", 15, "rzp_key", "secret", "whsec", "https://api.razorpay.com"), base.delivery());
+    assertTrue(ProdConfigGuard.problems(complete).isEmpty());
+  }
+
+  @Test
   void shortSecretIsRejected() {
     assertEquals(1, ProdConfigGuard.problems(props("short", GOOD_PEPPER, "", "email", "o@s.in")).size());
   }

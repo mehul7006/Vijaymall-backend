@@ -31,6 +31,12 @@ public class PromotionService {
 
   private void changed() { if (live != null) live.area(com.vijay.mall.common.live.CatalogChanged.COUPONS); }
 
+  private com.vijay.mall.common.cache.AppCaches caches;
+
+  /** Optional (plain unit tests run without it). */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  void setCaches(com.vijay.mall.common.cache.AppCaches caches) { this.caches = caches; }
+
   public PromotionService(CouponRepository coupons, AuditService audit, Clock clock) {
     this.coupons = coupons;
     this.audit = audit;
@@ -99,7 +105,9 @@ public class PromotionService {
   /** Coupons a customer may browse right now (no sign-in needed). Hides inactive, not-yet-started, ended and used-up ones. */
   public List<PublicCoupon> listOffered() {
     var now = clock.instant();
-    return coupons.allActive().stream().filter(c -> c.offeredAt(now)).map(PublicCoupon::from).toList();
+    // the active coupons are cached for a minute; which are on offer right now (dates, uses left) is decided on every call
+    var active = caches == null ? coupons.allActive() : caches.get(com.vijay.mall.common.cache.AppCaches.Name.COUPONS, "active", coupons::allActive);
+    return active.stream().filter(c -> c.offeredAt(now)).map(PublicCoupon::from).toList();
   }
 
   // ---------- admin ----------

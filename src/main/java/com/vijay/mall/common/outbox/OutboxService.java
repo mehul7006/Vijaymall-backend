@@ -19,6 +19,9 @@ public class OutboxService {
     this.clock = clock;
   }
 
+  /** Events written but not yet delivered; a growing number means the relay or a listener is stuck. */
+  public long pending() { return jpa.countByPublishedAtIsNull(); }
+
   @Transactional
   public void add(String type, Object payload) {
     OutboxEventEntity e = new OutboxEventEntity();

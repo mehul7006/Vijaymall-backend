@@ -34,6 +34,10 @@ public final class ReceiptText {
         out.add(split("Subtotal", Money.plain(r.subtotalPaise()), width));
         if (r.couponDiscountPaise() > 0) out.add(split("Coupon", "-" + Money.plain(r.couponDiscountPaise()), width));
         if (r.coinDiscountPaise() > 0) out.add(split("Coins", "-" + Money.plain(r.coinDiscountPaise()), width));
+        if (r.manualDiscountPaise() > 0) out.add(split("Discount", "-" + Money.plain(r.manualDiscountPaise()), width));
+        if (r.roundOffPaise() != 0) {
+            out.add(split("Round off", (r.roundOffPaise() > 0 ? "+" : "-") + Money.plain(Math.abs(r.roundOffPaise())), width));
+        }
         out.add(split("TOTAL", Money.plain(r.totalPaise()), width));
         out.add("-".repeat(width));
         out.add(split("Taxable", Money.plain(r.taxablePaise()), width));

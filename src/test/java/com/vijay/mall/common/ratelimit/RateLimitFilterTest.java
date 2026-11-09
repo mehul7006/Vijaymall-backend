@@ -16,7 +16,10 @@ import tools.jackson.databind.json.JsonMapper;
 class RateLimitFilterTest {
   private final RateLimiter limiter = new RateLimiter(Clock.fixed(Instant.parse("2027-01-01T00:00:00Z"), ZoneOffset.UTC));
 
-  private RateLimitFilter filter(int perMinute) { return new RateLimitFilter(limiter, JsonMapper.builder().build(), perMinute); }
+  private RateLimitFilter filter(int perMinute) { return filter(perMinute, ""); }
+  private RateLimitFilter filter(int perMinute, String ipHeader) {
+    return new RateLimitFilter(limiter, JsonMapper.builder().build(), perMinute, ipHeader);
+  }
 
   private static MockHttpServletRequest req(String uri) {
     var r = new MockHttpServletRequest("GET", uri);
@@ -66,20 +69,25 @@ class RateLimitFilterTest {
   }
 
   @Test
-  void clientIpPrefersCloudflareThenForwardedForThenSocket() {
+  void forwardedHeadersAreIgnoredUnlessOneIsTrusted() {
+    filter(10, "");
     var r = req("/api/x");
-    assertThat(RateLimitFilter.clientIp(r)).isEqualTo("5.5.5.5");
     r.addHeader("X-Forwarded-For", "1.1.1.1, 2.2.2.2");
-    assertThat(RateLimitFilter.clientIp(r)).isEqualTo("1.1.1.1");
-    r.addHeader("CF-Connecting-IP", " 3.3.3.3 ");
-    assertThat(RateLimitFilter.clientIp(r)).isEqualTo("3.3.3.3");
+    r.addHeader("CF-Connecting-IP", "3.3.3.3");
+    assertThat(RateLimitFilter.clientIp(r)).isEqualTo("5.5.5.5");
   }
 
   @Test
-  void blankProxyHeadersAreIgnored() {
+  void theTrustedHeaderAloneIsBelievedAndFallsBackToTheSocket() {
+    filter(10, "CF-Connecting-IP");
     var r = req("/api/x");
-    r.addHeader("CF-Connecting-IP", "  ");
-    r.addHeader("X-Forwarded-For", "");
+    r.addHeader("X-Forwarded-For", "1.1.1.1");
     assertThat(RateLimitFilter.clientIp(r)).isEqualTo("5.5.5.5");
+    r.addHeader("CF-Connecting-IP", " 3.3.3.3, 4.4.4.4 ");
+    assertThat(RateLimitFilter.clientIp(r)).isEqualTo("3.3.3.3");
+    var blank = req("/api/x");
+    blank.addHeader("CF-Connecting-IP", "  ");
+    assertThat(RateLimitFilter.clientIp(blank)).isEqualTo("5.5.5.5");
+    filter(10, ""); // leave the static setting clean for other tests
   }
 }

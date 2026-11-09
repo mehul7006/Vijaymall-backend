@@ -19,6 +19,7 @@ class OrderItemEntity extends BaseEntity {
   long lineTotalPaise;
   /** This line's share of the order's coupon discount (0 when the coupon did not cover its category). */
   long couponDiscountPaise;
+  int returnedQty;
   @Column(name = "earns_coins_snapshot") boolean earnsCoins;
   @Column(name = "coin_redeemable_snapshot") boolean coinRedeemable;
 

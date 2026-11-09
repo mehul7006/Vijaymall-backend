@@ -22,7 +22,9 @@ class OrderFlowIT extends IntegrationTestBase {
   void customerOrdersAdminDeliversAndCoinsArrive() {
     String admin = adminToken();
     String cust = token(freshEmail());
-    var rice = productByName(cust, "Basmati Rice");
+    // the 1 kg pack: another test adds a 5 kg variant with the same name, which must not change this test's prices
+    var rice = ((java.util.List<Map<String, Object>>) get("/api/v1/products?size=50&includeOutOfStock=true", cust).getBody().get("items")).stream()
+        .filter(p -> "Basmati Rice".equals(p.get("nameEn")) && "1 kg".equals(p.get("packSize"))).findFirst().orElseThrow();
 
     Map<String, Object> address = post("/api/v1/me/addresses", cust,
         Map.of("label", "Home", "line1", "12 Main Road", "area", "Station", "pincode", "390001", "isDefault", true)).getBody();

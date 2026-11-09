@@ -26,16 +26,20 @@ class PosFlowIT extends IntegrationTestBase {
 
   private String cashier() { return token(CASHIER); }
 
-  private Object riceId() { return productByName(cashier(), "Basmati Rice").get("id"); }
+  /** The 1 kg pack. Another test adds a 5 kg variant with the same name, so the name alone is not enough. */
+  private Object riceId() {
+    List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/products?size=50&includeOutOfStock=true", cashier()).getBody().get("items");
+    return items.stream().filter(p -> "Basmati Rice".equals(p.get("nameEn")) && "1 kg".equals(p.get("packSize"))).findFirst().orElseThrow().get("id");
+  }
 
   private Object sugarId(String cashier) {
-    List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/pos/products?q=Loose%20Sugar", cashier).getBody().get("items");
+    List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/pos/products?q=Sugar", cashier).getBody().get("items");
     return items.get(0).get("productId");
   }
 
   private int stockOf(String name) {
-    return jdbc.queryForObject("select i.qty_on_hand from inventory i join product p on p.id = i.product_id where p.name_en = ?",
-        Integer.class, name);
+    return jdbc.queryForObject("select sum(i.qty_on_hand) from inventory i join product p on p.id = i.product_id where p.name_en = ? "
+        + "and (p.pack_size = '1 kg' or p.pack_size = '' or p.pack_size is null or p.name_en <> 'Basmati Rice')", Integer.class, name);
   }
 
   private Map sale(String token, Map body, String key) {
@@ -215,7 +219,7 @@ class PosFlowIT extends IntegrationTestBase {
 
   @Test void upiLinkNeedsTheShopUpiId() {
     String admin = adminToken();
-    assertThat(get("/api/v1/pos/upi-link?amountPaise=100", cashier()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(get("/api/v1/pos/upi-link?amountPaise=100", cashier()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     var saved = call(HttpMethod.PUT, "/api/v1/admin/shop-settings", admin,
         Map.of("shopName", "Vijay Super Mall", "address", "Market Road", "phone", "9876543210", "gstin", "24ABCDE1234F1Z5",
             "stateCode", "24", "upiId", "vijay@upi", "invoicePrefix", "VSM", "receiptFooter", "Thanks", "weighedPrefix", "2",
@@ -240,7 +244,8 @@ class PosFlowIT extends IntegrationTestBase {
     Map paid = (Map) day.get("paidByMode");
     Map back = (Map) day.get("refundedByMode");
     assertThat(((Number) day.get("cashExpectedPaise")).longValue())
-        .isEqualTo(((Number) paid.get("CASH")).longValue() - ((Number) back.get("CASH")).longValue());
+        .isEqualTo(((Number) paid.get("CASH")).longValue() - ((Number) back.get("CASH")).longValue()
+            + ((Number) ((Map) day.get("creditRecoveredByMode")).get("CASH")).longValue()); // cash repayments go in the drawer too
     assertThat(paid.keySet()).containsExactlyInAnyOrder("CARD", "CASH", "UPI");
     assertThat(get("/api/v1/pos/reports/day?date=2020-01-01", adminToken()).getBody().get("bills")).isEqualTo(0);
     assertThat(((Number) get("/api/v1/admin/dashboard", adminToken()).getBody().get("posBillsToday")).longValue()).isGreaterThanOrEqualTo(1);
