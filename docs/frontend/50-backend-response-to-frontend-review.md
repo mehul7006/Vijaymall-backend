@@ -70,6 +70,8 @@ Each ID is the ID in your review. **Status** is one of: **Fixed** (new in this r
 
 ## Round 2 (2026-11-09 evening)
 
+The full explanation, before/after examples and what changes for the app is in [51-backend-response-round-2.md](51-backend-response-round-2.md). The table below is the short form.
+
 | ID | Status | What changed / what to do | Details |
 |---|---|---|---|
 | E1-E11 | **Fixed (error messages)** | Error messages and validation fields reworked; see the error section of file 00 and file 20. | file 00, file 20 |
