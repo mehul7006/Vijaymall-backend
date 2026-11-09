@@ -1,0 +1,51 @@
+# Production stack: PostgreSQL + the API. Usage (from this folder, after ./generate-prod-env.sh):
+#   (cd .. && mvn -q package -DskipTests)         # builds target/mall-api-0.1.0-SNAPSHOT.jar (needs JDK 26 and Maven)
+#   docker compose -f docker-compose.prod.yml --env-file prod.env up -d --build
+# The public API is on port 8080. Metrics/health are on 9090, published to this machine only (never to the internet).
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: prod.env
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      IMAGES_DIR: /app/data/images
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - images:/app/data/images
+      - logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  dbdata:
+  images:
+  logs:
