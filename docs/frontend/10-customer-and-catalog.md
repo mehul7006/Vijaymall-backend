@@ -358,7 +358,7 @@ OTP rate limits (429 `RATE_LIMITED`, `details.retryAfterSeconds`): per email 5 s
 ```
 | field | type | required | validation | meaning |
 |---|---|---|---|---|
-| name | string | no | trimmed. No length rule enforced by the API. **Sending null/omitting it sets the name to null (erases it)** - always send the current name back. | display name |
+| name | string | no | trimmed. No length rule enforced by the API. **Omitting it (or null) keeps the current name**; to change it send the new name. | display name |
 | mobile | string | no | blank/omitted = "no mobile". Otherwise must match exactly 10 digits `\d{10}` (no `+91`, no spaces) else 400 `VALIDATION_FAILED` `fields.mobile` = "must be 10 digits". | contact number (unverified unless proven by OTP login) |
 
 Mobile rules: if the account's mobile is **verified** (came from mobile OTP login), sending a different number returns 409 `MOBILE_VERIFIED`; sending the same number is fine; sending blank/omitted keeps the verified mobile (accounts with no email also keep their mobile). Changing the mobile of an unverified account just stores the new number as unverified.
@@ -424,7 +424,7 @@ The very first address is forced to default regardless of `isDefault`. Setting a
 - **Who**: customer (own addresses only).
 - **Purpose / when the UI calls it**: Edit address form "Save".
 - **Request**: path `id` uuid. Body is identical to POST (same validation).
-  **Important**: `isDefault` is written as given (null/omitted = false). Editing the current default address without sending `"isDefault": true` removes its default status and no other address becomes default. Always send the current `isDefault`. Sending `true` clears the default on all others.
+  **Important**: omitting `isDefault` (or null) keeps the address as it is (default stays default, non-default stays non-default). Send `true` to make it the default (this clears the default on all others); sending `false` on the current default is ignored (a customer who has addresses always has exactly one default; to change it, mark another address as default).
 - **Response**: `200` Address (updated).
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND` ("Address not found") if it does not exist or belongs to someone else.
 - **UI notes**: Re-fetch the list after saving if default changed.
@@ -435,7 +435,7 @@ The very first address is forced to default regardless of `isDefault`. Setting a
 - **Request**: path `id` uuid.
 - **Response**: `204 No Content`. Deleting an id that does not exist (or is not yours) also returns 204 (no error).
 - **Errors**: none specific (400 for a malformed uuid).
-- **UI notes**: If the deleted address was the default, no other address is promoted automatically: ask the user to pick a new default (via PUT with `isDefault:true`). Orders already placed keep their own copy of the address (handled elsewhere).
+- **UI notes**: If the deleted address was the default and other addresses remain, the first one in the list becomes the default automatically (refetch the list to show it). Orders already placed keep their own copy of the address (handled elsewhere).
 
 ### POST /api/v1/me/devices
 - **Who**: customer (also works for any signed-in role, e.g. admin app to get new-order pushes).
@@ -606,7 +606,7 @@ Fields: `id` uuid; `name` string; `spendPaise` integer paise (spend step); `coin
 | spendPaise | long (paise) | yes | `@Min(1)` (omitted = 0 = fails) | spend step |
 | coins | long | yes | `@Min(1)` | coins per step / per spend |
 | mode | enum | yes | `@NotNull`; exactly `PRO_RATA` or `SLAB` (else 400 "Bad request") | |
-| minOrderPaise | long (paise) | no | null -> 0. Do not send a negative number: it is not validated by Bean Validation and causes a 500 `INTERNAL_ERROR`. | minimum order base to earn |
+| minOrderPaise | long (paise) | no | null -> 0. `@Min(0)`: a negative number answers 400 `VALIDATION_FAILED` `fields.minOrderPaise`. | minimum order base to earn |
 | startAt / endAt | instant | no | null = open. Order (end after start) is NOT validated. | active window |
 | active | boolean | no | null -> true | |
 
@@ -915,8 +915,8 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 | hotStart / hotEnd | instant | no | if both set, `hotEnd` must not be before `hotStart` else 400 `fields.hotEnd` "must be after hotStart" | hot window |
 | earnsCoins | boolean | no | null -> true | |
 | coinRedeemable | boolean | no | null -> true | |
-| qtyOnHand | integer | no | null -> 0; negatives are clamped to 0 | initial stock |
-| lowThreshold | integer | no | null or <=0 -> 5 | low-stock alert level |
+| qtyOnHand | integer | no | `@Min(0)` (negative = 400); null -> 0 on create | initial stock (on edit: omitted keeps current stock) |
+| lowThreshold | integer | no | `@Min(0)`; null -> default 5 on create; `0` is allowed (alert only when out of stock) | low-stock alert level (on edit: omitted keeps current) |
 | productGroupId | uuid | no | puts this product into an existing group (as a variant) | |
 | variantName | string | no | if either `variantName` or `variantOrder` is sent, they are applied after creation | variant label e.g. "Mango" |
 | variantOrder | integer | no | | position in the variant picker |
@@ -936,7 +936,7 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 ### PUT /api/v1/admin/products/{id}
 - **Who**: admin.
 - **Purpose / when the UI calls it**: Edit-product "Save" (single variant).
-- **Request**: body identical to POST (same validation). Differences: it is a full replacement - omitted `description`/`packSize` become "", omitted `active` becomes true, omitted `hotSale` false, omitted `earnsCoins`/`coinRedeemable` true. `qtyOnHand` is the **new absolute stock**: the server records the difference as an `ADJUST` stock movement (omitted = 0 would zero the stock - always send the current value). `lowThreshold` only changes if > 0 (omitted -> 5 is applied). A blank `unit` keeps the current unit (and an inactive current unit is allowed to stay). A given `productGroupId` moves the product into that group. A `qtyOnHand` that would be negative is ignored.
+- **Request**: body identical to POST (same validation). Differences: it is a full replacement - omitted `description`/`packSize` become "", omitted `active` becomes true, omitted `hotSale` false, omitted `earnsCoins`/`coinRedeemable` true. `qtyOnHand` is the **new absolute stock** when sent: the server records the difference as an `ADJUST` stock movement. **Omitted (null) keeps the current stock** (it no longer resets to 0); a negative value is 400 `fields.qtyOnHand`. `lowThreshold` changes only if sent (omitted keeps the current alert level; `0` is a valid level). A blank `unit` keeps the current unit (and an inactive current unit is allowed to stay). A given `productGroupId` moves the product into that group. A `qtyOnHand` that would be negative is ignored.
 - **Response**: `200` AdminProduct.
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND`.
 - **UI notes**: For quick stock changes use the stock endpoint instead, to avoid overwriting concurrent changes (e.g. a sale while the form was open).
@@ -966,7 +966,7 @@ All endpoints below: **Who = admin** only. Changes trigger a live catalog-change
 | pricePaise | long (paise) | yes | `@Min(0)` | |
 | active | boolean | no | null -> true | |
 | qtyOnHand | integer | no | null -> 0 | |
-| lowThreshold | integer | no | null or <=0 -> 5 | |
+| lowThreshold | integer | no | `@Min(0)`? not enforced; null (or negative) -> 5; `0` is allowed | |
 | variantOrder | integer | no | null -> last position + 1 | |
 
 - **Response**: `201 Created` AdminProduct (the new variant; its `productGroupId` equals the group).
@@ -1191,7 +1191,7 @@ Only users with role `CUSTOMER` are visible here; staff ids return 404.
 ### PATCH /api/v1/admin/customers/{id}
 - **Who**: admin.
 - **Purpose / when the UI calls it**: Block/unblock a customer.
-- **Request**: body `{ "active": false }`. `active` boolean, required in practice (omitted = false = block!). Always send it explicitly.
+- **Request**: body `{ "active": false }`. `active` boolean, **required**: omitting it answers 400 `VALIDATION_FAILED` `fields.active` (it no longer defaults to false/blocked).
 - **Response**: `200` CustomerView (updated).
 - **Errors**: 404 `NOT_FOUND`.
 - **UI notes**: Blocking revokes every refresh token (signed out everywhere after the current access token expires, up to 15 min; customer access tokens are not re-checked per call) and prevents any new login (403 `FORBIDDEN` on verify/refresh). Confirm before blocking.
@@ -1209,3 +1209,21 @@ Only users with role `CUSTOMER` are visible here; staff ids return 404.
 - **Response**: `200` CustomerView (with new `coinBalance`).
 - **Errors**: 400 `VALIDATION_FAILED` (note: the validation error field is named `coins`, not `delta`); 404 `NOT_FOUND`.
 - **UI notes**: The customer's wallet screen is updated via the live wallet event. Map `fields.coins` to the delta input.
+
+
+---
+## Addendum: safe retries of admin actions (optional `Idempotency-Key`)
+
+These admin/staff calls accept an **optional** `Idempotency-Key` header (max 100 characters). Send a fresh UUID per tap and reuse it on every retry of that tap. The first call does the work; a repeat with the same key does nothing more and answers with the current state of what the first call touched. Without the header the call behaves as before (and a double tap applies twice). A call that fails does not use up its key.
+
+| Endpoint | Why |
+|---|---|
+| `POST /api/v1/admin/products/{id}/stock` | the stock change is relative (+50 twice = +100) |
+| `POST /api/v1/admin/customers/{id}/coins` | coins would be given or taken twice |
+| `POST /api/v1/admin/products` | would create two products |
+| `POST /api/v1/admin/categories` | would create two categories |
+| `POST /api/v1/admin/coin-rules` | would create two overlapping rules |
+| `POST /api/v1/admin/credit/accounts/{customerId}/adjust` (see file 30) | a write-off would be applied twice |
+| `POST /api/v1/admin/stock-takes` (see file 30) | a repeat would overwrite sales made since the count |
+
+For stock takes a repeat returns the first call's result and applies nothing more. A key belongs to one person and one request: the same key with a **different** request (or from a different admin) answers `409 IDEMPOTENCY_KEY_REUSED` (use a new key). If what the first call created has since been deleted, a repeat answers `409 IDEMPOTENT_RESULT_GONE`.

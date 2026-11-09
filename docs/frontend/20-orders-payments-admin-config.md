@@ -246,12 +246,12 @@ Calculation order: subtotal, coupon, coins (max redeemable limited by a coin-set
 |---|---|---|---|---|
 | `items` | array | yes | `@NotNull`, at most 100 lines (else 400 `items`); an empty array is allowed | lines |
 | `items[].productId` | UUID | yes | `@NotNull` | pack id (existence is not checked here) |
-| `items[].qty` | int | yes | `@Min(1) @Max(999)`, else 400 field `items[0].qty` | quantity |
+| `items[].qty` | int | yes | `@Min(1)`; the total for one product (lines of the same product are added together) must be at most **99**, else 400 field `qty` "quantity must be 1 to 99" | quantity |
 | `couponCode` | string | no | blank becomes null; trimmed and upper-cased; not validated against coupons | saved coupon |
 | `coinMode` | enum | no | null becomes `NONE` | saved coin choice |
 | `percent` | int | no | `@Min(0) @Max(100)`; kept only when `coinMode` is `PERCENT` (null stored as 0 then) | saved percent |
 
-Server normalisation: repeated `productId`s are merged (first position wins, quantities summed, each capped at 999).
+Server normalisation: repeated `productId`s are merged (first position wins, quantities summed). The limit of 99 applies to the merged total (and the saved basket `PUT /cart` allows at most 99 per line).
 
 - **Response** 200: the stored basket, same shape as `GET /cart`.
 - **Errors**: 400 `VALIDATION_FAILED` (rules above).
@@ -582,7 +582,7 @@ Newest first by `placedAt`.
 | `items` | array | yes | `@NotEmpty`; 1..100 entries else 400 field `items` | lines returned |
 | `items[].productId` | UUID | yes | must be on this order, else 400 field `productId` "is not on this order"; no duplicates (400 field `items`) | product |
 | `items[].qty` | int | yes | > 0 (else 400 field `qty`); not more than `sold qty - already returned` else 409 `RETURN_EXCEEDS_SOLD` | quantity coming back |
-| `items[].restock` | bool | no | null = true | `true` puts the goods back on the shelf (stock released with reason ORDER_RETURN); `false` for damaged goods |
+| `items[].restock` | bool | no | null = true | `true` puts the goods back on the shelf (stock released with reason ORDER_RETURN); `false` = "claimed defective": the customer is still refunded, but the units are **not** added to sellable stock; they wait in a review queue (`PENDING_REVIEW`) where staff or the owner confirm it is defective or put it back on sale (see `GET /api/v1/pos/stock/defective` and the review flow in file 30) |
 
 - **Response** 201: `ReturnView` (same as customer GET returns, a single object).
 - **Errors**:
@@ -1078,6 +1078,30 @@ Events (`event:` name, then `data:` is JSON):
 
 ## Things the code does not settle (flagged, not guessed)
 
-- The API does not return the payment deadline of a `PAYMENT_PENDING` order, only the admin setting does; the app cannot show an exact countdown.
+- The order response now carries `paymentExpiresAt` (ISO instant) while the order is `PAYMENT_PENDING`; it is `null` otherwise. Show a countdown to it; the server cancels the order when it passes.
 - Image upload limits for the logo (accepted formats, max size) are enforced by the shared image store, not read here.
 - `restart` is currently always false.
+
+
+---
+## Addendum: order response field and returns on split flash-sale lines
+
+- `paymentExpiresAt` (Instant|null): present on the order object only while `status` is `PAYMENT_PENDING` (online order waiting for payment). Use it for the "pay within mm:ss" countdown. After it passes the server cancels the order and releases everything.
+- When a flash sale splits one product into two order lines (sale price and list price), `POST /admin/orders/{id}/returns` still takes one entry per product: `{ "productId", "qty" }`. Units are taken from the order's lines for that product in the order they were sold (the flash-sale line first, then the normal-price line). `RETURN_EXCEEDS_SOLD` reports `returnable` as the total left across both lines.
+
+
+---
+## Addendum: wrong-amount and duplicate online payments
+
+Server-side behaviour (the app does not call anything new; it only has to react to the notifications and keep the order screen refreshed):
+
+- **Wrong amount**: when the provider reports a captured payment whose amount differs from the order total, the order is **not** marked paid and stays `PAYMENT_PENDING`. The money received is refunded in full to the customer's original payment method, automatically. The customer can pay again on the same order until `paymentExpiresAt`; a later correct payment is accepted normally.
+- **Duplicate payment**: a second captured payment (different provider payment id) on an order that is already paid is refunded in full; the first payment stands and the order is unaffected.
+- **Notifications** (push + in-app, produced by the server): to the customer, title `Payment amount did not match` ("We received Rs 400.50 instead of Rs 500.00 for order VSM-5. It is being refunded to your original payment method. Please pay again." - the last sentence only while the order is still waiting for payment) or `Duplicate payment` ("We received a second payment of Rs 25.00 for order VSM-7. It is being refunded to your original payment method."); to all staff, title `Payment problem`. Open the order screen when the notification is tapped and re-fetch it.
+- **UI**: on an order in `PAYMENT_PENDING` keep the "Pay now" button available until `paymentExpiresAt`; after a wrong-amount notice the same button works again.
+
+### GET /api/v1/admin/payments/anomalies
+- **Who**: admin only. **Purpose**: the "payment problems" list for the owner.
+- **Request**: query `page` (default 0), `size` (default 20, max 50).
+- **Response**: `{ items: [ { id, paymentId, orderId, kind ("MISMATCH"|"DUPLICATE"), expectedPaise, receivedPaise, providerRef, createdAt } ], page, size, total }`, newest first. The refunds they caused are in the refund monitor (`GET /api/v1/admin/refunds`) with reason `amount mismatch` or `duplicate payment`.
+- **Ops**: metric `mall_payments_anomalies_total{kind}`; alert `PaymentAnomaly`.

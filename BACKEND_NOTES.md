@@ -226,3 +226,19 @@ A timed offer on chosen products. Staff (ADMIN and CASHIER) configure it; custom
   `FLASH` and empties the `flash` cache. Apps should refetch the sale list and product prices when `FLASH` arrives.
 - Code: `common/FlashPricing` is the port (optional setter in `SubtotalStep`, `OrderService`, `PosService`, `CatalogService`); `flash/` holds the module.
 
+
+## Follow-up round: defective returns, repeat-safe admin actions, review fixes
+
+### Defective returns (review flow)
+- A return line with `restock:false` (online `POST /admin/orders/{id}/returns`, counter `POST /pos/sales/{id}/returns`) is a *claim*: the customer is refunded, the units are **not** added to the shelf, and a batch is written to `defective_stock` (V21) with status `PENDING_REVIEW`.
+- Staff or admin review it (`POST /pos/stock/defective/{id}/review`): `CONFIRM_DEFECTIVE` -> `HELD` (the defective list), `RESTOCK` -> `RESTOCKED` (units added back to inventory, stock movement `DEFECTIVE_REVIEW_RESTOCK`). Once per batch.
+- The admin then writes off or returns to the supplier a `HELD` batch (`POST /admin/stock/defective/{id}/resolve`): `WRITE_OFF` | `RETURN_TO_SUPPLIER`. Confirmed-defective goods never go back to sellable stock.
+- Reports: `GET /admin/stock/defective` (+ `/summary`), staff queue `GET /pos/stock/defective`. Metrics: `mall_stock_defective_pending_units`, `mall_stock_defective_units`. Audit actions `DEFECTIVE_*`.
+
+### Repeat-safe admin actions
+- `common/idem/AdminOps` + table `admin_op` (V20): optional `Idempotency-Key` header (max 100 chars) on stock adjust, coin adjust, credit adjust, stock take, and create product/category/coin rule. The key is stored in the same transaction as the action, so a failed action does not use it up; a repeat returns the current state. Keys are purged after 30 days. Without the header behaviour is unchanged.
+
+### Fixes from the code review and the frontend-guide review
+- Returns on orders split by a flash sale no longer crash (units come from the product's lines in order); client-IP header setting is applied live; Razorpay calls have timeouts and refunds sent after a commit are limited to 5 (the 30 s job takes the rest); a retried refund first asks Razorpay whether it already has it (receipt/notes carry our refund id); offline bills need no open shift at upload and take their invoice year from `soldAt`; SMTP port 465 uses implicit TLS and other ports use STARTTLS when offered.
+- Omitted fields keep what is there: profile name, address default flag (and deleting the default promotes the next address), product stock and alert level on edit. `PATCH /admin/customers/{id}` needs `active`. Negative `minOrderPaise` on a coin rule is a 400. The quantity limit of 99 applies to a product's merged total and to the saved basket. Orders waiting for online payment carry `paymentExpiresAt`. A counter sale without a cart or a payment without a mode is a 400.
+- Not changed on purpose: staff may still move an order to any non-pending status in any order (documented design). Known limits still open: offline bills are re-priced at upload (a changed price or ended flash sale can reject a bill); an amount-mismatch payment leaves the order pending.
