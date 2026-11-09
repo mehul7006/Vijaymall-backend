@@ -143,6 +143,8 @@ app:
     cashier-return-days: ${POS_CASHIER_RETURN_DAYS:7}
     # Manual discount a cashier may give without a manager's PIN, as a percent of the bill (0 = every manual discount needs the PIN).
     cashier-discount-percent: ${POS_CASHIER_DISCOUNT_PERCENT:0}
+    # Parked (held) baskets older than this many days are removed every night at 03:00 shop time (0 = never expire).
+    hold-expiry-days: ${HOLD_EXPIRY_DAYS:7}
     # true = billing needs an open cashier shift (drawer counted in).
     require-open-shift: ${POS_REQUIRE_OPEN_SHIFT:false}
   notifications:

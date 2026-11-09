@@ -23,11 +23,14 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.json.JsonMapper;
 
 class ShopProfileServiceTest {
@@ -211,6 +214,73 @@ class ShopProfileServiceTest {
     service.removeLogo(admin);
     verify(audit).log(admin, "UPDATE", "shop_profile", 1, "logo removed");
     verify(live, Mockito.times(2)).area("SHOP");
+  }
+
+  @Test
+  void aNewLogoGetsIconsAndTheOldFilesAreDeleted() {
+    when(images.save(any(), eq("shop"))).thenReturn("/img/shop/new_400.jpg");
+    when(images.saveIcons(any(), eq("/img/shop/new_400.jpg")))
+        .thenReturn(new ImageStore.Icons("/img/shop/new_icon192.png", "/img/shop/new_icon512.png"));
+    service.setLogo(new byte[] {1}, admin);
+    ArgumentCaptor<ShopProfileRepository.Row> saved = ArgumentCaptor.forClass(ShopProfileRepository.Row.class);
+    verify(repo).save(saved.capture(), eq(now));
+    assertThat(saved.getValue().iconUrl()).isEqualTo("/img/shop/new_icon512.png");
+    assertThat(saved.getValue().icon192Url()).isEqualTo("/img/shop/new_icon192.png");
+    verify(images).delete("/img/shop/a_400.jpg");
+  }
+
+  @Test
+  void removingTheLogoClearsTheIconsAndDeletesItsFiles() {
+    service.removeLogo(admin);
+    ArgumentCaptor<ShopProfileRepository.Row> saved = ArgumentCaptor.forClass(ShopProfileRepository.Row.class);
+    verify(repo).save(saved.capture(), eq(now));
+    assertThat(saved.getValue().logoUrl()).isEmpty();
+    assertThat(saved.getValue().iconUrl()).isNull();
+    assertThat(saved.getValue().icon192Url()).isNull();
+    verify(images).delete("/img/shop/a_400.jpg");
+  }
+
+  @Test
+  void nothingIsDeletedWhenThereWasNoLogoBefore() {
+    when(repo.get()).thenReturn(new ShopProfileRepository.Row("", "", "", "", "", "", "", WEEK, "", true, "", null));
+    service.removeLogo(admin);
+    verify(images, never()).delete(anyString());
+  }
+
+  @Test
+  void insideATransactionTheOldFilesGoOnlyAfterTheCommit() {
+    TransactionSynchronizationManager.initSynchronization();
+    try {
+      service.removeLogo(admin);
+      verify(images, never()).delete(anyString());
+      TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+      verify(images).delete("/img/shop/a_400.jpg");
+    } finally {
+      TransactionSynchronizationManager.clearSynchronization();
+    }
+  }
+
+  @Test
+  void iconsCanBeRebuiltFromTheStoredLogo() {
+    when(images.rebuildIcons("/img/shop/a_400.jpg")).thenReturn(Optional.of(new ImageStore.Icons("/i192", "/i512")));
+    service.rebuildIcons(admin);
+    ArgumentCaptor<ShopProfileRepository.Row> saved = ArgumentCaptor.forClass(ShopProfileRepository.Row.class);
+    verify(repo).save(saved.capture(), eq(now));
+    assertThat(saved.getValue().logoUrl()).isEqualTo("/img/shop/a_400.jpg");
+    assertThat(saved.getValue().iconUrl()).isEqualTo("/i512");
+    assertThat(saved.getValue().icon192Url()).isEqualTo("/i192");
+    verify(audit).log(admin, "UPDATE", "shop_profile", 1, "logo icons rebuilt");
+  }
+
+  @Test
+  void rebuildingIconsIsNotFoundWithoutALogoOrItsFile() {
+    when(images.rebuildIcons(anyString())).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.rebuildIcons(admin)).isInstanceOf(ApiException.class).hasMessageContaining("logo file");
+    when(repo.get()).thenReturn(new ShopProfileRepository.Row("", "", "", "", "", "", "", WEEK, "", true, "", null));
+    assertThatThrownBy(() -> service.rebuildIcons(admin)).isInstanceOf(ApiException.class);
+    when(repo.get()).thenReturn(new ShopProfileRepository.Row(null, "", "", "", "", "", "", WEEK, "", true, "", null));
+    assertThatThrownBy(() -> service.rebuildIcons(admin)).isInstanceOf(ApiException.class);
+    verify(repo, never()).save(any(), any());
   }
 
   @Test

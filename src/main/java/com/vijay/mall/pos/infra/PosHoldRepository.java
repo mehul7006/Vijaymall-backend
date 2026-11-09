@@ -54,4 +54,8 @@ public class PosHoldRepository {
     if (exists) jpa.deleteById(id);
     return exists;
   }
+
+  /** Deletes every basket parked before {@code cutoff} and returns how many were removed (running it twice removes nothing more). */
+  @Transactional
+  public int deleteCreatedBefore(Instant cutoff) { return jpa.deleteCreatedBefore(cutoff); }
 }

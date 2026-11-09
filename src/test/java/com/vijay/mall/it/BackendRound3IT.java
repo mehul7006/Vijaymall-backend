@@ -67,6 +67,44 @@ class BackendRound3IT extends FlashTestBase {
     call(HttpMethod.DELETE, "/api/v1/admin/shop-profile/logo", adminToken(), null, null);
   }
 
+  // ---------- R4 shop icons ----------
+  @Test
+  void aLogoGetsSquareIconsThatAreServedCachedAndCleanedUpOnReplaceAndRemove() throws Exception {
+    String admin = adminToken();
+    var res = uploadLogo(image(BufferedImage.TYPE_INT_ARGB, "png"));
+    String icon512 = (String) res.getBody().get("iconUrl");
+    String icon192 = (String) res.getBody().get("icon192Url");
+    assertThat(icon512).startsWith("/img/shop/").endsWith("_icon512.png");
+    assertThat(icon192).endsWith("_icon192.png");
+    var pub = get("/api/v1/shop-settings", null).getBody();
+    assertThat(pub).containsEntry("iconUrl", icon512).containsEntry("icon192Url", icon192);
+    var served = client().get().uri(icon192).retrieve().toEntity(byte[].class);
+    assertThat(served.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);
+    assertThat(served.getHeaders().getCacheControl()).contains("public", "max-age=31536000", "immutable");
+    var img = ImageIO.read(new java.io.ByteArrayInputStream(served.getBody()));
+    assertThat(img.getWidth()).isEqualTo(192);
+    assertThat(img.getHeight()).isEqualTo(192);
+    String oldLogo = (String) res.getBody().get("logoUrl");
+
+    var replaced = uploadLogo(image(BufferedImage.TYPE_INT_RGB, "png"));
+    assertThat((String) replaced.getBody().get("iconUrl")).isNotEqualTo(icon512);
+    assertThat(client().get().uri(oldLogo).retrieve().toBodilessEntity().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(client().get().uri(icon512).retrieve().toBodilessEntity().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    String newIcon = (String) replaced.getBody().get("iconUrl");
+
+    var rebuilt = call(HttpMethod.POST, "/api/v1/admin/shop-profile/logo/icon", admin, null, null);
+    assertThat(rebuilt.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(rebuilt.getBody()).containsEntry("iconUrl", newIcon);
+
+    call(HttpMethod.DELETE, "/api/v1/admin/shop-profile/logo", admin, null, null);
+    assertThat(client().get().uri(newIcon).retrieve().toBodilessEntity().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    var after = get("/api/v1/shop-settings", null).getBody();
+    assertThat(after.get("iconUrl")).isNull();
+    assertThat(after.get("icon192Url")).isNull();
+    var none = call(HttpMethod.POST, "/api/v1/admin/shop-profile/logo/icon", admin, null, null).getStatusCode();
+    assertThat(none).isEqualTo(HttpStatus.NOT_FOUND);
+  }
+
   // ---------- R2-20, R2-21 shop texts ----------
   @Test
   void shopGujaratiTextsAndShortNameAreSavedAndPublic() {

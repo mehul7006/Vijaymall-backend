@@ -58,12 +58,19 @@ public class AdminShopProfileController {
         b.onlineOrdersEnabled() == null || b.onlineOrdersEnabled(), b.onlineOrdersMessage(), null, b.holidayNoteGu()), CurrentUser.id());
   }
 
-  /** The shop logo: a picture file. It is stored in two sizes (the address shown is the small one; swap _400 for _1000 for the large). */
+  /** The shop logo: a picture file. It is stored in two sizes (the address shown is the small one; swap _400 for _1000 for the large) plus square app icons (iconUrl 512 px, icon192Url 192 px). */
   @PostMapping("/logo")
   public Profile logo(@RequestParam("file") MultipartFile file) throws IOException {
     if (file.isEmpty()) throw ApiException.validation("file", "file is empty");
     return profile.setLogo(file.getBytes(), CurrentUser.id());
   }
+
+  /**
+   * Makes the square app icons (192 and 512 px) again from the stored current logo, for logos uploaded before icons existed. 404 when
+   * there is no logo.
+   */
+  @PostMapping("/logo/icon")
+  public Profile rebuildIcons() { return profile.rebuildIcons(CurrentUser.id()); }
 
   /** Removes the shop logo and returns the updated profile. */
   @DeleteMapping("/logo")

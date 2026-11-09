@@ -15,6 +15,8 @@ import org.springframework.http.HttpStatus;
 /** The shop counter against real PostgreSQL: scan, bill, split payments, coins, returns, holds, cash-up, access rules. */
 @SuppressWarnings({"unchecked", "rawtypes"})
 class PosFlowIT extends IntegrationTestBase {
+  @org.springframework.beans.factory.annotation.Autowired private com.vijay.mall.pos.app.PosService posService;
+
   private static final String CASHIER = "cashier@vijaysupermall.local";
 
   @BeforeEach
@@ -217,6 +219,24 @@ class PosFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/pos/holds/" + id, cashier).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
 
+  @Test void forgottenBasketsExpireOvernightAndAFreshOneStays() {
+    String cashier = cashier();
+    var cart = Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)));
+    Object old = post("/api/v1/pos/holds", cashier, Map.of("label", "old", "cart", cart)).getBody().get("id");
+    var fresh = post("/api/v1/pos/holds", cashier, Map.of("label", "fresh", "cart", cart));
+    assertThat(fresh.getBody().get("expiresAt")).as("shown on the basket").isNotNull();
+    jdbc.update("update pos_hold set created_at = now() - interval '8 days' where id = ?::uuid", old.toString());
+    try {
+      assertThat(posService.purgeExpiredHolds()).isGreaterThanOrEqualTo(1);
+      assertThat(get("/api/v1/pos/holds/" + old, cashier).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+      assertThat(get("/api/v1/pos/holds/" + fresh.getBody().get("id"), cashier).getStatusCode()).isEqualTo(HttpStatus.OK);
+      assertThat(posService.purgeExpiredHolds()).as("running it again removes nothing more").isZero();
+      assertThat(jdbc.queryForObject("select count(*) from audit_log where action = 'HOLD_EXPIRED'", Integer.class)).isGreaterThanOrEqualTo(1);
+    } finally {
+      call(HttpMethod.DELETE, "/api/v1/pos/holds/" + fresh.getBody().get("id"), cashier, null, null);
+    }
+  }
+
   @Test void theHundredAndFirstHeldBasketIsRefusedSoNothingDropsOutOfTheList() {
     String cashier = cashier();
     List<Object> ids = new java.util.ArrayList<>();
@@ -232,7 +252,7 @@ class PosFlowIT extends IntegrationTestBase {
           Map.of("label", "one too many", "cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)))));
       assertThat(over.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
       assertThat(over.getBody().get("code")).isEqualTo("HOLD_LIMIT");
-      assertThat(over.getBody().get("message")).isEqualTo("Too many parked baskets: resume or discard some first");
+      assertThat(over.getBody().get("message")).isEqualTo("Too many parked baskets: resume or discard some first. Parked baskets are removed automatically after 7 days");
       assertThat(((Map) over.getBody().get("details")).get("max")).isEqualTo(100);
       assertThat(getList("/api/v1/pos/holds", cashier)).hasSize(100);
       if (!ids.isEmpty()) {

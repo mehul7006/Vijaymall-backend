@@ -316,11 +316,13 @@ Every order and spending condition uses one definition:
 {
   "type": "TOTAL_SPENT",
   "label": "Total spent",
+  "labelGu": "કુલ ખર્ચ",
   "description": "Customers whose total spending compares as chosen. Use op BETWEEN with minPaise and maxPaise, otherwise paise.",
+  "descriptionGu": "જેમનો કુલ ખર્ચ પસંદ કરેલી શરત મુજબ હોય તેવા ગ્રાહકો. ...",
   "group": "Spending",
   "params": [
-    { "name": "op", "kind": "ENUM", "label": "Comparison", "required": true, "min": null, "max": null, "options": ["GTE", "LTE", "BETWEEN"], "pattern": null, "pickFrom": null },
-    { "name": "paise", "kind": "AMOUNT_PAISE", "label": "Amount (Rs)", "required": false, "min": 0, "max": 10000000000, "options": null, "pattern": null, "pickFrom": null, "inputUnit": "RUPEES", "scale": 100 }
+    { "name": "op", "kind": "ENUM", "label": "Comparison", "labelGu": "સરખામણી", "required": true, "min": null, "max": null, "options": ["GTE", "LTE", "BETWEEN"], "optionLabelsGu": { "GTE": "ઓછામાં ઓછું", "LTE": "વધુમાં વધુ", "BETWEEN": "વચ્ચે" }, "pattern": null, "pickFrom": null },
+    { "name": "paise", "kind": "AMOUNT_PAISE", "label": "Amount (Rs)", "labelGu": "રકમ (રૂપિયા)", "required": false, "min": 0, "max": 10000000000, "options": null, "optionLabelsGu": null, "pattern": null, "pickFrom": null, "inputUnit": "RUPEES", "scale": 100 }
   ],
   "supportsNegate": true,
   "example": { "type": "TOTAL_SPENT", "negate": false, "op": "GTE", "paise": 500000 }
@@ -340,7 +342,11 @@ Every order and spending condition uses one definition:
 | `STRING_LIST` | Chips input, each value must match `pattern`, `min`..`max` values | string[] |
 | `BOOLEAN` | Switch | true/false |
 
-Every param entry also has `inputUnit` and `scale`: `"RUPEES"` and `100` for `AMOUNT_PAISE` params, `null` for all others. A range error on an amount names the unit: `must be between 0 and 10000000000 paise`. Condition labels and descriptions are English only. In Swagger the broadcast request body is the schema `BroadcastRequest` and `Rule.type` lists the 17 condition type names.
+Every param entry also has `inputUnit` and `scale`: `"RUPEES"` and `100` for `AMOUNT_PAISE` params, `null` for all others. A range error on an amount names the unit: `must be between 0 and 10000000000 paise`. In Swagger the broadcast request body is the schema `BroadcastRequest` and `Rule.type` lists the 17 condition type names.
+
+**Gujarati texts.** Every condition entry has `labelGu` and `descriptionGu`, every param has `labelGu`, and every `ENUM` param has `optionLabelsGu`, an object keyed by the option value (`GTE`, `LTE`, `EQ`, `BETWEEN`, `APP`, `POS`) with its Gujarati caption. The English `label`, `description` and `options` values stay as they are (the `options` values are what you send). Show the Gujarati text when the admin's language is Gujarati and fall back to the English one when the Gujarati field is blank or missing (the backend always fills them today, but a new condition type could ship without a translation). Amount captions say `(રૂપિયા)`, matching the rupee input.
+
+> **Proof-read before launch:** the Gujarati texts were written for this release and have not yet been reviewed by a native speaker. Have a Gujarati speaker read all of them (they live next to the English texts in `ConditionType.java` and `Param.java`) before the admin app goes live; wording fixes are a backend text change only, the API does not change.
 
 `required` is `false` for parameters that are required only in some cases (for example `paise` of `TOTAL_SPENT` is needed unless `op` is `BETWEEN`, where `minPaise` and `maxPaise` are needed); the `description` says so and the server enforces it. For types with two alternatives (`LAST_ORDER`, `REGISTERED`) give exactly one of the two.
 

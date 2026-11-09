@@ -1506,3 +1506,24 @@ Several response/request records used to share a simple name (`View`, `Row`, `Re
 | Gujarati `shopNameGu` / `addressGu` / `promiseGu` / `detailsGu` / `holidayNoteGu` | 80 / 300 / 200 / 500 / 200 characters |
 
 (Profile name, address lines, holds, credit, staff and POS fields have their own limits in files 20 and 30.) A coupon has no description field, so there is nothing to limit there.
+
+## Addendum 5 (shop app icon)
+`GET /api/v1/shop-settings` (public) and `GET/PUT /api/v1/admin/shop-profile` (and the profile returned by the logo calls) have two new fields next to `logoUrl`:
+
+| field | meaning |
+|---|---|
+| `iconUrl` | square PNG icon, 512 x 512 px, e.g. `/img/shop/<uuid>_icon512.png` |
+| `icon192Url` | the same icon at 192 x 192 px, e.g. `/img/shop/<uuid>_icon192.png` |
+
+Both are `null` when the shop has no logo, and for a logo uploaded before this change until the admin rebuilds them (below). The icons are made when the admin uploads the logo (`POST /admin/shop-profile/logo`): the picture is cut to the largest centred square, scaled, and saved as PNG with its transparency kept (a wide logo loses its left and right edges, so tell admins to upload a logo that is near square or has its mark in the centre). They are served like all `/img` files: `Cache-Control: public, max-age=31536000, immutable`, so a new logo always gets new addresses.
+
+**Web-app manifest.** Use them for the installable web app and favicon, for example:
+```json
+{ "icons": [ { "src": "<api-origin>/img/shop/<uuid>_icon192.png", "sizes": "192x192", "type": "image/png" },
+             { "src": "<api-origin>/img/shop/<uuid>_icon512.png", "sizes": "512x512", "type": "image/png" } ] }
+```
+Read `icon192Url` and `iconUrl` from `GET /shop-settings` when generating the manifest (the manifest and `<link rel="icon">` can be built at start-up or server-side); when both are `null`, keep the app's built-in icon. The address changes only when the logo changes.
+
+**Rebuilding for an existing logo.** `POST /api/v1/admin/shop-profile/logo/icon` (admin, no body) makes the icons again from the stored large copy of the current logo and returns the updated profile. `404 NOT_FOUND` when there is no logo (or its file is gone). Reads never create icons; show a "Create app icon" button in the admin shop screen when `logoUrl` is set and `iconUrl` is `null`.
+
+**Cleanup.** Replacing the logo or deleting it (`DELETE /admin/shop-profile/logo`) now also deletes the old logo files (both sizes and the icons) from disk after the change is saved, so an old `logoUrl` or icon address stops working (404) once the logo is replaced. Do not store these addresses long-term; always take them from the current settings.

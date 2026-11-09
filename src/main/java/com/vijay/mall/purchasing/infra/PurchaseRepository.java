@@ -3,6 +3,7 @@ package com.vijay.mall.purchasing.infra;
 import com.vijay.mall.common.Page;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
@@ -36,6 +37,17 @@ public class PurchaseRepository {
 
   /** Finds the delivery already recorded under this idempotency key. */
   public Optional<Header> findByIdem(String key) { return purchases.findByIdemKey(key).map(PurchaseRepository::toHeader); }
+
+  /**
+   * The oldest other delivery recorded no later than {@code upTo} with the same supplier and invoice number, compared trimmed and
+   * ignoring case; empty when the invoice number is blank or nothing matches.
+   */
+  public Optional<Header> earlierWithInvoice(String supplier, String invoiceNo, UUID self, Instant upTo) {
+    String invoice = invoiceNo.strip().toLowerCase(Locale.ROOT);
+    if (invoice.isEmpty()) return Optional.empty();
+    return purchases.earlierWithInvoice(supplier.strip().toLowerCase(Locale.ROOT), invoice, self, upTo,
+        PageRequest.of(0, 1)).stream().findFirst().map(PurchaseRepository::toHeader);
+  }
 
   /** The lines of one delivery. */
   public List<Line> lines(UUID purchaseId) {

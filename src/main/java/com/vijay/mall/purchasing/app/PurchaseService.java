@@ -5,6 +5,7 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.purchasing.infra.PurchaseRepository.Header;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -43,9 +44,22 @@ public class PurchaseService {
   @Schema(name = "PurchaseItemView")
   public record ItemView(UUID productId, String name, int qty, long unitCostPaise, long lineCostPaise) {}
 
-  /** A recorded delivery with its lines. Money is paise. */
+  /**
+   * A recorded delivery with its lines. Money is paise. {@code warnings} is filled only in the answer to recording a delivery (an empty
+   * list otherwise): it says when the same invoice number was already recorded for the same supplier.
+   */
   public record PurchaseView(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
-                             Instant createdAt, List<ItemView> items) {}
+                             Instant createdAt, List<ItemView> items, List<String> warnings) {
+    /** A delivery without warnings. */
+    public PurchaseView(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
+                        Instant createdAt, List<ItemView> items) {
+      this(id, supplierName, invoiceNo, note, totalCostPaise, createdBy, createdAt, items, List.of());
+    }
+
+    PurchaseView withWarnings(List<String> found) {
+      return new PurchaseView(id, supplierName, invoiceNo, note, totalCostPaise, createdBy, createdAt, items, found);
+    }
+  }
 
   /** Most product lines in one delivery. */
   public static final int MAX_LINES = 200;
@@ -81,7 +95,7 @@ public class PurchaseService {
     if (existing.isPresent()) return replay(existing.get(), in);
     try {
       UUID id = tx.execute(s -> doReceive(actor, idemKey, in));
-      return view(repo.find(id).orElseThrow());
+      return recorded(repo.find(id).orElseThrow());
     } catch (DataIntegrityViolationException e) {
       return replay(repo.findByIdem(idemKey).orElseThrow(() -> e), in);
     }
@@ -101,7 +115,20 @@ public class PurchaseService {
     if (!same) {
       throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED", "This Idempotency-Key was already used for a different delivery: use a new key", Map.of());
     }
-    return view(stored);
+    return recorded(stored);
+  }
+
+  private PurchaseView recorded(Header h) { return view(h).withWarnings(warnings(h)); }
+
+  /**
+   * Warns (never blocks) when an earlier delivery has the same supplier and invoice number, compared trimmed and ignoring case. Worked
+   * out from the stored delivery, so a repeated request answers with the same warning.
+   */
+  private List<String> warnings(Header h) {
+    return repo.earlierWithInvoice(h.supplierName(), h.invoiceNo(), h.id(), h.createdAt())
+        .map(e -> List.of("invoice number " + h.invoiceNo().strip() + " was already recorded for this supplier on "
+            + e.createdAt().atZone(InvoiceNumbers.SHOP_ZONE).toLocalDate() + " (purchase " + e.id() + ")"))
+        .orElse(List.of());
   }
 
   private UUID doReceive(UUID actor, String idemKey, Input in) {

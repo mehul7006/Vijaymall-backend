@@ -149,7 +149,8 @@ class PosServiceCoverageTest {
         .isInstanceOfSatisfying(ApiException.class, e -> {
           assertThat(e.status().value()).isEqualTo(409);
           assertThat(e.code()).isEqualTo("HOLD_LIMIT");
-          assertThat(e.details()).isEqualTo(Map.of("max", 100));
+          assertThat(e.details()).isEqualTo(Map.of("max", 100, "expiryDays", 7));
+          assertThat(e.getMessage()).endsWith("Parked baskets are removed automatically after 7 days");
         });
     verify(holds, never()).insert(any(), anyString(), any(), anyString(), any());
   }

@@ -426,8 +426,8 @@ The "pay-out amount" = refund total minus any part that just reduces the custome
 - **Who**: both.
 - **Purpose**: park a basket while the customer fetches something; resume later (any till can resume).
 - **Request**: body `{ "label": "Mrs Shah", "cart": { ...same cart object... } }`. `cart` required with non-empty `items`; `label` optional free text (trimmed, at most 60 characters). At most 50 lines per basket; each line `qty` is 1 to 9999 pieces (1 to 100000 grams for a weighed item), else 400 with `details.fields["cart.items[N].qty"]` "must be 1 to 9999" ("must be 1 to 100000" for weighed). Customer mobile, if present, must be valid. Prices/stock are not checked and nothing is reserved. Holds are not tied to a shift.
-- **Response**: 201 `{ "id": "uuid", "label": "Mrs Shah", "customerMobile": "9876543210", "cashierId": "uuid", "createdAt": "...", "cart": { "items": [...], "customerMobile": ..., "couponCode": ..., "coinMode": ..., "percent": ... } }`.
-- **Errors**: 400 `VALIDATION_FAILED` (`cart.items` empty/missing; more than 50 lines (`items` "must have at most 50 lines"); a `qty` out of range; `label` over 60; bad mobile). 409 `HOLD_LIMIT` ("Too many parked baskets: resume or discard some first", `details.max` = 100) when 100 baskets are already parked: resume or discard one first, so no basket ever drops out of the list.
+- **Response**: 201 `{ "id": "uuid", "label": "Mrs Shah", "customerMobile": "9876543210", "cashierId": "uuid", "createdAt": "...", "expiresAt": "...", "cart": { "items": [...], "customerMobile": ..., "couponCode": ..., "coinMode": ..., "percent": ... } }`. `expiresAt` is when the basket is removed automatically (see Addendum 5), `null` when baskets never expire.
+- **Errors**: 400 `VALIDATION_FAILED` (`cart.items` empty/missing; more than 50 lines (`items` "must have at most 50 lines"); a `qty` out of range; `label` over 60; bad mobile). 409 `HOLD_LIMIT` ("Too many parked baskets: resume or discard some first. Parked baskets are removed automatically after 7 days", `details.max` = 100, `details.expiryDays` = 7) when 100 baskets are already parked: resume or discard one first, so no basket ever drops out of the list. The last sentence of the message is left out when baskets never expire.
 - **UI notes**: the cart is stored as sent, the product may be gone/changed later: re-quote on resume.
 
 ### GET /api/v1/pos/holds
@@ -751,8 +751,10 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 ```json
 { "id": "uuid", "supplierName": "Shah Traders", "invoiceNo": "ST-2231", "note": "Morning delivery", "totalCostPaise": 228000,
   "createdBy": "uuid", "createdAt": "2026-11-08T08:00:00Z",
-  "items": [ { "productId": "uuid", "name": "Basmati Rice 1kg", "qty": 24, "unitCostPaise": 9500, "lineCostPaise": 228000 } ] }
+  "items": [ { "productId": "uuid", "name": "Basmati Rice 1kg", "qty": 24, "unitCostPaise": 9500, "lineCostPaise": 228000 } ],
+  "warnings": [] }
 ```
+`warnings` is a list of texts; it is non-empty when the same invoice number was already recorded for the same supplier (see Addendum 5). The delivery is recorded either way.
 - **Errors**: 400 `VALIDATION_FAILED` (fields `supplierName`, `invoiceNo`, `note`, `items` incl. "a product appears twice: add its quantities together", `productId` required / "a product does not exist", `qty`, `unitCostPaise`; missing key header).
 - **UI notes**: generate the key when the admin opens the "new delivery" form, keep it until success. Never let the admin submit twice with new keys.
 
@@ -1170,4 +1172,14 @@ Every limit below is also in the Swagger schema. A value outside it answers `400
 | Staff `name` / `mobile` | 1 to 80 characters / exactly 10 digits |
 | Search `q` (`GET /pos/products`, `GET /admin/customers`, `GET /admin/orders`) | at most 100 characters (`fields.q` "must be at most 100 characters") |
 
-Supplier invoice numbers: the server does not warn when the same `invoiceNo` is recorded twice for one supplier (the app may check the purchases list before saving).
+Supplier invoice numbers: recording the same `invoiceNo` twice for one supplier is allowed, and the answer carries a `warnings` entry (see Addendum 5).
+
+## Addendum 5 (duplicate invoice warning, held basket expiry)
+
+### POST /api/v1/admin/purchases: `warnings` (new response field)
+The delivery is always recorded (legitimate re-entries exist), but when an earlier delivery has the same supplier and the same `invoiceNo` the 201 body carries a text in the new `warnings` array, for example `"invoice number ST-2231 was already recorded for this supplier on 2026-11-01 (purchase 5f0c...)"`. The date is the shop-time day of the earlier delivery (the oldest one if there are several) and the id is that delivery. `warnings` is `[]` otherwise, and always `[]` in `GET /admin/purchases` and `GET /admin/purchases/{id}`. Supplier and invoice number are compared after trimming and ignoring upper/lower case (`" st-2231 "` equals `ST-2231`); a blank invoice number never warns. A repeat of the same request (same `Idempotency-Key`) returns the same body, warning included. Show the warning as a confirmation banner ("Same invoice entered on 1 Nov: check you are not counting this delivery twice") with a link to that purchase; do not block the user or undo the delivery.
+
+### Held baskets expire
+- Parked baskets older than `app.pos.hold-expiry-days` (environment variable `HOLD_EXPIRY_DAYS`, default 7, `0` = never expire) are deleted automatically every night at 03:00 shop time (Asia/Kolkata), so forgotten baskets cannot fill the 100-basket limit. The clean-up writes an audit entry (`HOLD_EXPIRED`) with the number removed, logs it and counts it in the metric `mall.pos.holds.expired`.
+- `expiresAt` (new, in every hold object of `POST /pos/holds`, `GET /pos/holds` and `GET /pos/holds/{id}`) is the moment the basket becomes eligible for removal (`createdAt` plus the expiry days, removed at the next 03:00 run after that); `null` when baskets never expire. Show "expires in N days" and warn when a basket is close to expiring.
+- The 409 `HOLD_LIMIT` message now ends with "Parked baskets are removed automatically after N days" and `details.expiryDays` holds N (0 when baskets never expire, in which case the sentence is left out). A basket removed this way answers 404 on `GET /pos/holds/{id}` like a discarded one, so a till that tries to resume an old basket should refresh its list.

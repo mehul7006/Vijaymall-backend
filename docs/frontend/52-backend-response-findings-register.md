@@ -10,7 +10,8 @@ Please retest the rows marked Fixed and update the Backend column of your regist
 |---|---|
 | Fixed | R2-16, R2-17, R2-18, R2-19, R2-20, R2-21 (shortName only), P-1, P-2, P-3, P-4 (labels and unit), P-5, S-A1, S-E3, S-B6, S-D7 (partly, see 4), S-D1/S-C3, S-D3, S-D2/S-A5/S-C1/S-E2, S-E1, S-C2, S-B1, S-B3, S-D6, S-C4, S-E5, S-E6, S-C5, S-C6, and the documentation rows S-A2/S-B5, S-A3, S-A4, S-B2, S-B7, S-D9, S-E4 |
 | Clarification | S-B4 (two customers can order the last unit), the segments path (section 5) |
-| Deferred | R2-21 `iconUrl`, P-4 Gujarati labels, S-E7 duplicate supplier invoice, plus the part of S-D7 explained in section 4 |
+| Deferred in round 3, fixed in round 4 | R2-21 `iconUrl`, P-4 Gujarati labels, S-E7 duplicate supplier invoice (section 9) |
+| Kept as designed | the rest of S-D7 (section 4) |
 
 ## 2. Section 2 rows
 
@@ -19,13 +20,13 @@ Please retest the rows marked Fixed and update the Backend column of your regist
 | R2-18 images | **Fixed** | `/img/**` is served `Cache-Control: public, max-age=31536000, immutable`; no `no-store`, no `Expires: 0`. A repeat request with `If-Modified-Since` gets 304. |
 | R2-19 logo format | **Fixed** | An upload with an alpha channel stays PNG (`..._400.png`, `..._1000.png`); opaque images stay JPEG. The same rule now applies to product and category uploads, so do not assume the extension is `.jpg`; always use the URL from the API. |
 | R2-20 Gujarati shop text | **Fixed** | `GET /shop-settings` and the admin shop-settings / shop-profile GET and PUT have optional `shopNameGu`, `addressGu`, `promiseGu`, `detailsGu`, `holidayNoteGu`. Empty means "fall back to English". On PUT, a key left out keeps the stored text; `""` clears it. See file 20, Addendum 3. |
-| R2-21 shortName / icon | **Fixed (shortName), deferred (iconUrl)** | `shortName` (max 20 characters) is on the public and admin shop views. A square `iconUrl` needs image processing and a design decision on sizes; it is on the list, not in this release. |
+| R2-21 shortName / icon | **Fixed** | `shortName` (max 20 characters) is on the public and admin shop views. The square icon (`iconUrl`, `icon192Url`) was added in round 4, see section 9. |
 | P-1 push data | **Fixed** | Every push now has an FCM `data` map of strings: `type` (`ORDER`, `PAYMENT`, `STOCK`, `FLASH` or `ANNOUNCEMENT`) and `ref` (left out when there is none); announcements also carry `broadcastId`. Open the order, product or offer from `type` + `ref`. The text in file 00 is corrected. |
 | R2-17 low-stock list | **Fixed** | Inactive products are filtered out before the cap of 200. The array shape is unchanged. |
 | R2-16 flash sales admin | **Fixed** | (a) Create and update report all failing fields together. (b) `DELETE /admin/flash-sales/{id}`: 204; 404 unknown; 409 `FLASH_NOT_ALLOWED` if the sale started or has any recorded use (end or cancel those instead). Audited, and it fires the live FLASH event. A repeat DELETE answers 404. Cashiers can reach `/admin/flash-sales/**` (now stated in files 00 and 40). |
 | P-2 segment validation | **Fixed** | Create and update report `name`, `description` and the rule problems together. |
 | P-3 / S-C5 wording | **Fixed** | Neither given: "give a segmentId or a segment (match and rules)". Both given has its own text. |
-| P-4 condition catalog | **Fixed (labels), deferred (Gujarati)** | Amount parameters are labelled "(Rs)" and carry `inputUnit: "RUPEES"` and `scale: 100`: show rupees, send paise (`rupees * scale`). `labelGu` / `descriptionGu` are not shipped because we will not release unreviewed Gujarati for 17 condition types; send us reviewed text or confirm we should write it. |
+| P-4 condition catalog | **Fixed** (Gujarati added in round 4, section 9) | Amount parameters are labelled "(Rs)" and carry `inputUnit: "RUPEES"` and `scale: 100`: show rupees, send paise (`rupees * scale`). Gujarati labels: see section 9. |
 | P-5 defective resolve | **Fixed** | `must be WRITE_OFF or RETURN_TO_SUPPLIER (got "x")` on `fields.action`. |
 
 ## 3. Functional-validation rows
@@ -48,7 +49,7 @@ Please retest the rows marked Fixed and update the Backend column of your regist
 | S-E5 payment methods | **Fixed** | `PUT /admin/payment-methods` must list COD and ONLINE exactly once: an empty or partial list answers `fields.methods` "must list every method"; a repeat answers `duplicate code "X"`. Send both methods on save. |
 | S-E6 pause message | **Fixed** | While orders are paused and the admin left the message blank, `onlineOrdersMessage` returns the default pause text; it is `""` only while orders are open. |
 | S-C6 Swagger | **Fixed** | Broadcast request schema is `BroadcastRequest`; `Rule.type` publishes the 17 type names. |
-| S-E7 duplicate supplier invoice | **Deferred** | An observation, agreed. It needs a new lookup and a response field; file 30 says the server does not warn. |
+| S-E7 duplicate supplier invoice | **Fixed (round 4)** | See section 9. |
 | S-B4 last unit | **Clarification** | Two customers can both place an order for the last unit; staff reject the loser (the documented place-time behaviour). Stock is taken at confirmation. |
 
 ## 4. S-D7 explained
@@ -76,3 +77,12 @@ We cannot create these for you either on a shared server, but here is how to unb
 ## 8. Test data
 
 We will remove your financial test records (POS sale `VSM/2026-27/000001`, credit note `VSM-CN/2026-27/000001`, orders `VSM-1022`, `VSM-1023`, test customers, flash sales `ZZ-QA ...`) from the **dev** database when you give the go-ahead. We will not do that on any shared or production instance.
+
+## 9. Round 4: the items we had deferred
+
+| Item | What changed |
+|---|---|
+| Shop icon (R2-21) | Uploading the shop logo also writes square PNG icons (192 and 512 px, centre-cropped, transparency kept). `GET /shop-settings` and the admin shop profile carry `iconUrl` (512) and `icon192Url` (192); both are `null` when there is no logo or the logo was uploaded before this release. `POST /admin/shop-profile/logo/icon` rebuilds them from the stored logo (404 when there is no logo). Replacing or deleting the logo now removes the old logo and icon files, so an old image address returns 404: refetch the shop settings instead of caching the URL. File 10, Addendum 5. |
+| Gujarati labels (P-4) | The condition catalog has `labelGu` and `descriptionGu` for all 17 condition types, `labelGu` for every parameter and `optionLabelsGu` (keyed by option value) for choice parameters. Show them when the app language is Gujarati and fall back to English when blank. **Please have a native speaker proof-read the text before launch.** File 60. |
+| Duplicate supplier invoice (S-E7) | `POST /admin/purchases` still records the delivery but returns `warnings`: a list that is empty unless the same supplier already had that invoice number (trimmed, case-insensitive). Show it as a confirmation banner; nothing is blocked. File 30, Addendum 5. |
+| Held basket expiry | Parked baskets older than 7 days are removed every night at 03:00 shop time (setting `HOLD_EXPIRY_DAYS`, 0 = never). Hold objects have `expiresAt` (null when baskets never expire). The `HOLD_LIMIT` 409 message now ends with "Parked baskets are removed automatically after N days" and `details.expiryDays`; do not match on the old text. File 30. |

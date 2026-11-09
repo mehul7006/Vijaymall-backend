@@ -12,7 +12,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import org.springframework.stereotype.Component;
 
@@ -24,6 +27,11 @@ import org.springframework.stereotype.Component;
 public class LocalDiskImageStore implements ImageStore {
   /** Largest accepted image in pixels (width times height), to protect memory when decoding. */
   private static final long MAX_PIXELS = 25_000_000L;
+  /** The path {@link #save} hands out: folder, UUID name, 400 px marker and extension. */
+  private static final Pattern SAVED = Pattern.compile("^/img/([a-z0-9-]+)/([0-9a-f-]{36})_400\\.(jpg|png)$");
+  /** Side of the larger app icon; the smaller one is {@link #ICON_SMALL}. */
+  private static final int ICON_LARGE = 512;
+  private static final int ICON_SMALL = 192;
   private final Path root;
 
   /** Creates the store rooted at the configured images directory (made absolute). */
@@ -49,6 +57,82 @@ public class LocalDiskImageStore implements ImageStore {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  @Override
+  public Icons saveIcons(byte[] content, String savedUrl) {
+    Matcher m = saved(savedUrl);
+    try {
+      BufferedImage src = ImageIO.read(new ByteArrayInputStream(content));
+      if (src == null) throw ApiException.fieldError("UNSUPPORTED_IMAGE", "file", "must be an image (JPEG, PNG or WebP)");
+      return writeIcons(src, m);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  @Override
+  public Optional<Icons> rebuildIcons(String savedUrl) {
+    Matcher m = saved(savedUrl);
+    Path big = root.resolve(m.group(1)).resolve(m.group(2) + "_1000." + m.group(3));
+    try {
+      BufferedImage src = Files.isRegularFile(big) ? ImageIO.read(big.toFile()) : null;
+      return src == null ? Optional.empty() : Optional.of(writeIcons(src, m));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  @Override
+  public void delete(String savedUrl) {
+    Matcher m = savedUrl == null ? null : SAVED.matcher(savedUrl);
+    if (m == null || !m.matches()) return;
+    Path dir = root.resolve(m.group(1));
+    String base = m.group(2);
+    try {
+      for (String file : new String[] {base + "_400." + m.group(3), base + "_1000." + m.group(3), base + "_icon" + ICON_SMALL + ".png",
+          base + "_icon" + ICON_LARGE + ".png"}) {
+        Files.deleteIfExists(dir.resolve(file));
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static Matcher saved(String savedUrl) {
+    Matcher m = savedUrl == null ? null : SAVED.matcher(savedUrl);
+    if (m == null || !m.matches()) throw new IllegalArgumentException("not a saved image path");
+    return m;
+  }
+
+  private Icons writeIcons(BufferedImage src, Matcher m) throws IOException {
+    Path dir = root.resolve(m.group(1));
+    Files.createDirectories(dir);
+    String base = m.group(2);
+    ImageIO.write(squareIcon(src, ICON_LARGE), "png", dir.resolve(base + "_icon" + ICON_LARGE + ".png").toFile());
+    ImageIO.write(squareIcon(src, ICON_SMALL), "png", dir.resolve(base + "_icon" + ICON_SMALL + ".png").toFile());
+    String prefix = "/img/" + m.group(1) + "/" + base;
+    return new Icons(prefix + "_icon" + ICON_SMALL + ".png", prefix + "_icon" + ICON_LARGE + ".png");
+  }
+
+  /**
+   * Cuts the largest centred square out of the picture and scales it to exactly {@code size} by {@code size} pixels as ARGB, so the
+   * transparency of a PNG logo is kept. Big pictures are halved step by step first, which keeps the small result smooth.
+   */
+  static BufferedImage squareIcon(BufferedImage src, int size) {
+    int side = Math.min(src.getWidth(), src.getHeight());
+    BufferedImage cur = src.getSubimage((src.getWidth() - side) / 2, (src.getHeight() - side) / 2, side, side);
+    while (cur.getWidth() / 2 >= size) cur = drawn(cur, cur.getWidth() / 2);
+    return drawn(cur, size);
+  }
+
+  private static BufferedImage drawn(BufferedImage src, int side) {
+    BufferedImage out = new BufferedImage(side, side, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g = out.createGraphics();
+    g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+    g.drawImage(src, 0, 0, side, side, null);
+    g.dispose();
+    return out;
   }
 
   /**

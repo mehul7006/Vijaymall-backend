@@ -99,6 +99,31 @@ class PurchasingServicesTest {
     assertThat(v.totalCostPaise()).isEqualTo(6600);
   }
 
+  @Test
+  void anEarlierDeliveryWithTheSameInvoiceAddsAWarningButIsStillRecorded() {
+    UUID id = UUID.randomUUID();
+    UUID earlier = UUID.randomUUID();
+    when(repo.insert(any(), any(), any(), anyLong(), any(), any(), any(), any())).thenReturn(id);
+    stubStored(id);
+    when(repo.earlierWithInvoice("Agro Traders", "INV-77", id, NOW)).thenReturn(Optional.of(new PurchaseRepository.Header(earlier, "Agro Traders",
+        "inv-77", "", 1, actor, Instant.parse("2026-11-01T20:00:00Z"))));
+    var v = purchases.receive(actor, "key-w", input(new ItemInput(rice, 100, 50), new ItemInput(dal, 20, 80)));
+    assertThat(v.warnings()).containsExactly("invoice number INV-77 was already recorded for this supplier on 2026-11-02 (purchase " + earlier + ")");
+    verify(inventory).adjust(rice, 100, "PURCHASE", actor, id);
+  }
+
+  @Test
+  void aDeliveryWithoutADuplicateHasNoWarningsAndAReplayRepeatsTheWarning() {
+    UUID id = UUID.randomUUID();
+    stubStored(id);
+    when(repo.findByIdem("key-r")).thenReturn(Optional.of(header(id)));
+    assertThat(purchases.receive(actor, "key-r", input(new ItemInput(dal, 20, 80), new ItemInput(rice, 100, 50))).warnings()).isEmpty();
+    UUID earlier = UUID.randomUUID();
+    when(repo.earlierWithInvoice(any(), any(), any(), any())).thenReturn(Optional.of(header(earlier)));
+    assertThat(purchases.receive(actor, "key-r", input(new ItemInput(dal, 20, 80), new ItemInput(rice, 100, 50))).warnings()).hasSize(1);
+    assertThat(purchases.get(id).warnings()).as("reads never warn").isEmpty();
+  }
+
   private static long anyLong() { return ArgumentMatchers.anyLong(); }
 
   @Test

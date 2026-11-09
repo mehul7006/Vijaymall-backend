@@ -111,8 +111,8 @@ public final class PosViews {
     }
   }
 
-  /** A parked basket as the cashier sees it. */
-  public record HoldView(UUID id, String label, String customerMobile, UUID cashierId, Instant createdAt, Cart cart) {}
+  /** A parked basket as the cashier sees it; {@code expiresAt} is when it is removed automatically, null when baskets never expire. */
+  public record HoldView(UUID id, String label, String customerMobile, UUID cashierId, Instant createdAt, Cart cart, Instant expiresAt) {}
 
   /** restock false = these goods are damaged or unfit to sell: they are kept apart (defective stock), not put back on the shelf. */
   public record ReturnLine(UUID saleItemId,

@@ -23,6 +23,8 @@ class ShopProfileEntity {
   String hours;
   String holidayNote;
   String holidayNoteGu;
+  String iconUrl;
+  String icon192Url;
   boolean onlineOrdersEnabled;
   String onlineOrdersMessage;
   Instant updatedAt;
