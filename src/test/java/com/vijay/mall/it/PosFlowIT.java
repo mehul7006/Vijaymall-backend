@@ -279,4 +279,160 @@ class PosFlowIT extends IntegrationTestBase {
     var login = post("/api/v1/auth/otp/verify", null, Map.of("email", staffEmail, "otp", "12345", "deviceId", UUID.randomUUID().toString()));
     assertThat(login.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
   }
+
+  // ---------- counter gaps: payment modes, quote discount, refund mode, receipts, search ----------
+  private Map fieldsOf(org.springframework.http.ResponseEntity<Map> res) {
+    return (Map) ((Map) res.getBody().get("details")).get("fields");
+  }
+
+  @Test void paymentModeIsTrimmedAndUpperCased_andABadOneQuotesWhatWasReceived() {
+    String cashier = cashier();
+    Map cart = Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)));
+    Map ok = sale(cashier, Map.of("cart", cart, "payments", List.of(Map.of("mode", " cash ", "amountPaise", 12500))), UUID.randomUUID().toString());
+    assertThat(((Map) ((List) ok.get("payments")).get(0)).get("mode")).isEqualTo("CASH");
+
+    var bad = call(HttpMethod.POST, "/api/v1/pos/sales", cashier,
+        Map.of("cart", cart, "payments", List.of(Map.of("mode", "CASH", "amountPaise", 1), Map.of("mode", "xyz", "amountPaise", 12499))),
+        UUID.randomUUID().toString());
+    assertThat(bad.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(bad.getBody().get("code")).isEqualTo("VALIDATION_FAILED");
+    assertThat(fieldsOf(bad).get("payments[1].mode")).isEqualTo("payment mode must be CASH, UPI or CARD, or CREDIT on a bill (got \"xyz\")");
+
+    java.util.Map<String, Object> noMode = new java.util.HashMap<>();
+    noMode.put("amountPaise", 12500);
+    var missing = call(HttpMethod.POST, "/api/v1/pos/sales", cashier, Map.of("cart", cart, "payments", List.of(noMode)), UUID.randomUUID().toString());
+    assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(fieldsOf(missing)).containsKey("payments[0].mode");
+  }
+
+  @Test void shopInfoTellsWhetherRoundOffIsOn() {
+    assertThat(get("/api/v1/pos/shop", cashier()).getBody().get("roundOffMode")).isEqualTo("NONE");
+    assertThat(get("/api/v1/pos/shop", cashier()).getBody().get("shopName")).isNotNull();
+  }
+
+  @Test void quoteTakesTheManualDiscountSoThePreviewMatchesTheSale() {
+    String cashier = cashier();
+    Object rice = riceId();
+    Map cart = Map.of("items", List.of(Map.of("productId", rice, "qty", 2)));
+    Map previewBody = new java.util.HashMap<>(cart);
+    previewBody.put("manualDiscount", Map.of("amountPaise", 1000)); // no reason and no PIN needed to preview
+    var quote = post("/api/v1/pos/quote", cashier, previewBody).getBody();
+    assertThat(quote.get("manualDiscountPaise")).isEqualTo(1000);
+    assertThat(quote.get("totalPaise")).isEqualTo(24000);
+    assertThat(post("/api/v1/pos/quote", cashier, cart).getBody().get("manualDiscountPaise")).isEqualTo(0);
+
+    // the sale enforces the PIN: an admin gives the same discount and lands on the previewed total
+    Map s = sale(adminToken(), Map.of("cart", cart, "manualDiscount", Map.of("amountPaise", 1000, "reason", "damaged pack"),
+        "payments", List.of(Map.of("mode", "CASH", "amountPaise", 24000))), UUID.randomUUID().toString());
+    assertThat(s.get("totalPaise")).isEqualTo(quote.get("totalPaise"));
+    var noPin = call(HttpMethod.POST, "/api/v1/pos/sales", cashier, Map.of("cart", cart, "manualDiscount", Map.of("amountPaise", 1000, "reason", "x"),
+        "payments", List.of(Map.of("mode", "CASH", "amountPaise", 24000))), UUID.randomUUID().toString());
+    assertThat(noPin.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+
+    Map negative = new java.util.HashMap<>(cart);
+    negative.put("manualDiscount", Map.of("amountPaise", -1));
+    assertThat(post("/api/v1/pos/quote", cashier, negative).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    Map tooMuch = new java.util.HashMap<>(cart);
+    tooMuch.put("manualDiscount", Map.of("amountPaise", 25001));
+    assertThat(post("/api/v1/pos/quote", cashier, tooMuch).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  private Map upiBill(String cashier, int qty) {
+    return sale(cashier, Map.of("cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", qty))),
+        "payments", List.of(Map.of("mode", "UPI", "amountPaise", 12500L * qty, "reference", "U1"))), UUID.randomUUID().toString());
+  }
+
+  private org.springframework.http.ResponseEntity<Map> giveBack(String cashier, Map bill, Map extra) {
+    Map body = new java.util.HashMap<>(extra);
+    body.put("items", List.of(Map.of("saleItemId", ((Map) ((List) bill.get("items")).get(0)).get("id"), "qty", 1)));
+    return call(HttpMethod.POST, "/api/v1/pos/sales/" + bill.get("id") + "/returns", cashier, body, UUID.randomUUID().toString());
+  }
+
+  @Test void aReturnRefundsInTheBillsOwnModeUnlessToldOtherwise() {
+    String cashier = cashier();
+    Map bill = upiBill(cashier, 4);
+    var byDefault = giveBack(cashier, bill, Map.of());
+    assertThat(byDefault.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(((Map) ((List) byDefault.getBody().get("refunds")).get(0)).get("mode")).isEqualTo("UPI");
+    var asCash = giveBack(cashier, bill, Map.of("refundMode", " cash "));
+    assertThat(((Map) ((List) asCash.getBody().get("refunds")).get(0)).get("mode")).isEqualTo("CASH");
+    var both = giveBack(cashier, bill, Map.of("refundMode", "CARD", "refunds", List.of(Map.of("mode", "CARD", "amountPaise", 12500))));
+    assertThat(both.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(fieldsOf(both)).containsKey("refundMode");
+    var bogus = giveBack(cashier, bill, Map.of("refundMode", "credit"));
+    assertThat(fieldsOf(bogus).get("refundMode")).isEqualTo("payment mode must be CASH, UPI or CARD (got \"credit\")");
+    var explicit = giveBack(cashier, bill, Map.of("refunds", List.of(Map.of("mode", "cash", "amountPaise", 6000), Map.of("mode", "CARD", "amountPaise", 6500))));
+    assertThat(explicit.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    var badLine = giveBack(cashier, bill, Map.of("refunds", List.of(Map.of("mode", "CASH", "amountPaise", 6000), Map.of("mode", "zzz", "amountPaise", 6500))));
+    assertThat(fieldsOf(badLine).get("refunds[1].mode")).isEqualTo("payment mode must be CASH, UPI or CARD (got \"zzz\")");
+  }
+
+  @Test void aCashBillAndASplitBillRefundAsCash() {
+    String cashier = cashier();
+    Map cash = sale(cashier, Map.of("cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 2))),
+        "payments", List.of(Map.of("mode", "CASH", "amountPaise", 10000), Map.of("mode", "UPI", "amountPaise", 15000))), UUID.randomUUID().toString());
+    var r = giveBack(cashier, cash, Map.of());
+    assertThat(((Map) ((List) r.getBody().get("refunds")).get(0)).get("mode")).isEqualTo("CASH");
+  }
+
+  @Test void creditNoteReceiptPrintsTheReturn() {
+    String cashier = cashier();
+    Map bill = upiBill(cashier, 2);
+    var ret = giveBack(cashier, bill, Map.of("reason", "wrong pack"));
+    String url = "/api/v1/pos/sales/" + bill.get("id") + "/returns/" + ret.getBody().get("id") + "/receipt";
+    var receipt = get(url + "?width=32", cashier);
+    assertThat(receipt.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(receipt.getBody().get("width")).isEqualTo(32);
+    assertThat((String) receipt.getBody().get("text")).contains("CREDIT NOTE", (String) ret.getBody().get("creditNoteNo"),
+        (String) bill.get("invoiceNo"), "Basmati Rice", "Returned 1", "Taxable", "CGST", "Refund total", "125.00", "Refund UPI", "wrong pack");
+    assertThat(get(url + "?width=48", adminToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(get(url + "?width=40", cashier).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(get(url, cashier).getBody().get("width")).isEqualTo(32);
+    assertThat(get("/api/v1/pos/sales/" + bill.get("id") + "/returns/" + UUID.randomUUID() + "/receipt", cashier).getStatusCode())
+        .isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(get(url, token(freshEmail())).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+  }
+
+  @Test void counterSearchFindsABarcodeOrItemCodeExactlyAndShowsTheDisplayFields() {
+    String cashier = cashier();
+    var byBarcode = get("/api/v1/pos/products?q=" + ean("890100000001"), cashier);
+    List<Map<String, Object>> items = (List<Map<String, Object>>) byBarcode.getBody().get("items");
+    assertThat(items.get(0).get("name")).isEqualTo("Basmati Rice");
+    assertThat(items.get(0).get("packSize")).isEqualTo("1 kg");
+    assertThat(items.get(0).get("unit")).isEqualTo("kg");
+    assertThat(items.get(0)).containsKey("variantName");
+    assertThat((String) items.get(0).get("displayName")).startsWith("Basmati Rice").endsWith("1 kg");
+
+    var byPlu = (List<Map<String, Object>>) get("/api/v1/pos/products?q=101", cashier).getBody().get("items");
+    assertThat(byPlu.get(0).get("name")).isEqualTo("Loose Sugar");
+    var byPluPadded = (List<Map<String, Object>>) get("/api/v1/pos/products?q=000101", cashier).getBody().get("items");
+    assertThat(byPluPadded.get(0).get("name")).isEqualTo("Loose Sugar");
+    var byName = (List<Map<String, Object>>) get("/api/v1/pos/products?q=basmati", cashier).getBody().get("items");
+    assertThat(byName).anyMatch(p -> "Basmati Rice".equals(p.get("name")));
+    assertThat(get("/api/v1/pos/products?q=" + ean("890199999999"), cashier).getBody().get("total")).isEqualTo(0);
+
+    var scan = get("/api/v1/pos/barcode/" + ean("890100000001"), cashier).getBody();
+    assertThat((String) ((Map) scan.get("product")).get("displayName")).endsWith("1 kg");
+    assertThat(((Map) scan.get("product")).get("unit")).isEqualTo("kg");
+  }
+
+  @Test void updatedSinceReturnsOnlyWhatChangedAtOrAfterIt() {
+    String cashier = cashier();
+    assertThat(get("/api/v1/pos/products?updatedSince=" + java.time.Instant.now().plusSeconds(3600), cashier).getBody().get("total")).isEqualTo(0);
+    var all = get("/api/v1/pos/products?updatedSince=2020-01-01T00:00:00Z&size=50", cashier).getBody();
+    assertThat(((Number) all.get("total")).intValue()).isGreaterThan(3);
+
+    // only the counter details (a new barcode) change: the product row itself is not touched, yet the till must refresh it
+    String admin = adminToken();
+    Object dal = productByName(admin, "Toor Dal").get("id");
+    java.time.Instant before = java.time.Instant.now();
+    String code = "DAL-" + UUID.randomUUID().toString().substring(0, 8);
+    assertThat(call(HttpMethod.PUT, "/api/v1/admin/products/" + dal + "/pos", admin,
+        Map.of("soldBy", "UNIT", "gstPercent", 5, "barcodes", List.of(code)), null).getStatusCode()).isEqualTo(HttpStatus.OK);
+    var changed = (List<Map<String, Object>>) get("/api/v1/pos/products?updatedSince=" + before + "&size=50", cashier).getBody().get("items");
+    assertThat(changed).anyMatch(p -> dal.equals(p.get("productId")));
+    var exactAndChanged = (List<Map<String, Object>>) get("/api/v1/pos/products?q=" + code + "&updatedSince=" + before, cashier).getBody().get("items");
+    assertThat(exactAndChanged).hasSize(1);
+    assertThat(exactAndChanged.get(0).get("productId")).isEqualTo(dal);
+  }
 }

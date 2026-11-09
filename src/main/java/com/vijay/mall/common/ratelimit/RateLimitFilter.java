@@ -94,6 +94,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     } catch (ApiException e) {
       res.setStatus(e.status().value());
       res.setContentType("application/json");
+      Long retryAfter = e.retryAfterSeconds();
+      if (retryAfter != null) res.setHeader("Retry-After", String.valueOf(retryAfter));
       mapper.writeValue(res.getOutputStream(),
           new ErrorBody(e.code(), e.getMessage(), MDC.get(TraceIdFilter.KEY), e.details()));
       return;

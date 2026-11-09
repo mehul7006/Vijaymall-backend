@@ -2,6 +2,7 @@ package com.vijay.mall.inventory.app;
 
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.live.CatalogChanged;
 import com.vijay.mall.common.live.StockChanged;
 import com.vijay.mall.common.outbox.OutboxService;
 import com.vijay.mall.inventory.infra.InventoryRepository;
@@ -83,6 +84,30 @@ public class InventoryService {
   }
 
   /**
+   * Same, and also says so when a product went out of stock or came back in, because that changes which products the shop list
+   * shows: the catalog event empties the remembered product searches (and refreshes open apps) the moment the transaction commits,
+   * so the shop list is never out of date. The change in quantity decides it, so a rolled-back change announces nothing.
+   *
+   * @param deltas how much each product's quantity changed (negative = taken)
+   * @param reason why stock moved
+   */
+  private void changed(Map<UUID, Integer> deltas, String reason) {
+    changed(List.copyOf(deltas.keySet()), reason);
+    if (events == null) return;
+    boolean availabilityChanged = deltas.entrySet().stream().anyMatch(e -> {
+      int now = repo.quantity(e.getKey());
+      return (now - e.getValue() > 0) != (now > 0);
+    });
+    if (availabilityChanged) events.publishEvent(new CatalogChanged(CatalogChanged.CATALOG, clock.instant()));
+  }
+
+  private static Map<UUID, Integer> deltasOf(List<Item> items, int sign) {
+    Map<UUID, Integer> deltas = new LinkedHashMap<>();
+    items.forEach(it -> deltas.merge(it.productId(), sign * it.qty(), Integer::sum));
+    return deltas;
+  }
+
+  /**
    * Creates the stock row of a new product (or resets an existing one) with the opening quantity and low-stock alert level. Writes no movement.
    */
   @Transactional
@@ -105,7 +130,7 @@ public class InventoryService {
       log.info("Out of stock order={} items={}", orderId, failures);
       throw ApiException.conflict("OUT_OF_STOCK", "Some items are no longer available", Map.of("items", failures));
     }
-    changed(items.stream().map(Item::productId).distinct().toList(), reason);
+    changed(deltasOf(items, -1), reason);
     Map<UUID, Integer> taken = new LinkedHashMap<>();
     items.forEach(it -> taken.merge(it.productId(), it.qty(), Integer::sum));
     alertIfLow(taken);
@@ -139,7 +164,9 @@ public class InventoryService {
       }
     });
     if (!taken.isEmpty()) {
-      changed(List.copyOf(taken.keySet()), reason);
+      Map<UUID, Integer> deltas = new LinkedHashMap<>();
+      taken.forEach((id, n) -> deltas.put(id, -n));
+      changed(deltas, reason);
       alertIfLow(taken);
     }
     return shortfalls;
@@ -190,7 +217,7 @@ public class InventoryService {
       repo.add(it.productId(), it.qty(), clock.instant());
       repo.movement(it.productId(), it.qty(), reason, orderId, null, clock.instant());
     });
-    changed(items.stream().map(Item::productId).distinct().toList(), reason);
+    changed(deltasOf(items, 1), reason);
   }
 
   /** Admin restock or correction. Throws if the result would be below zero. */
@@ -204,7 +231,7 @@ public class InventoryService {
       throw ApiException.validation("delta", "stock cannot go below zero");
     }
     repo.movement(productId, delta, reason, refId, actorId, clock.instant());
-    changed(List.of(productId), reason);
+    changed(Map.of(productId, delta), reason);
     if (delta < 0) alertIfLow(Map.of(productId, -delta));
     return repo.quantity(productId);
   }

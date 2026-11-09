@@ -83,7 +83,16 @@ public final class PosViews {
    */
   public record BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                          int coinsUsed, long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise,
-                         long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings, long roundOffPaise) {
+                         long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings, long roundOffPaise,
+                         long manualDiscountPaise) {
+    /** A bill with no manual discount. */
+    public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
+                    long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
+                    List<String> warnings, long roundOffPaise) {
+      this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise,
+          coinsToEarn, customerCoinBalance, warnings, roundOffPaise, 0);
+    }
+
     /** totalPaise is what the customer pays (already rounded when rounding is on); roundOffPaise is the rounding that was added (can be negative). */
     public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
                     long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
@@ -102,16 +111,33 @@ public final class PosViews {
     public ReturnLine(UUID saleItemId, int qty) { this(saleItemId, qty, null); }
   }
 
-  /** The goods coming back from a bill, the reason and how the refund is paid (all cash when no split is given). */
-  public record ReturnInput(List<ReturnLine> items, String reason, List<Pay> refunds) {}
+  /**
+   * The goods coming back from a bill, the reason and how the refund is paid. {@code refunds} is an explicit split;
+   * {@code refundMode} (CASH, UPI or CARD) sends the whole pay-out in one mode and cannot be combined with {@code refunds}.
+   * With neither, the refund goes out in the bill's own mode when it was paid in exactly one of CASH, UPI or CARD, else cash.
+   */
+  public record ReturnInput(List<ReturnLine> items, String reason, List<Pay> refunds, String refundMode) {
+    /** A return with an explicit refund split (or none) and no refund mode. */
+    public ReturnInput(List<ReturnLine> items, String reason, List<Pay> refunds) { this(items, reason, refunds, null); }
+  }
 
   /**
    * A product as the counter sees it: names, price and MRP in paise, how it is sold, GST, HSN, item code, whether it
-   * is counter-only, stock on hand, coin flags and barcodes.
+   * is counter-only, stock on hand, coin flags and barcodes, plus the pack size, unit, variant name and the display name
+   * (name with variant and pack size, such as {@code Basmati Rice Premium 1 kg}).
    */
   public record PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
                            int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
-                           boolean coinRedeemable, boolean earnsCoins, List<String> barcodes) {}
+                           boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
+                           String variantName, String displayName) {
+    /** A product without pack size, unit or variant details: the display name is the plain name. */
+    public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
+                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      boolean coinRedeemable, boolean earnsCoins, List<String> barcodes) {
+      this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
+          coinRedeemable, earnsCoins, barcodes, "", "", "", name);
+    }
+  }
 
   /** A scanned code resolved to a product, the quantity the code implies and the price of that quantity. */
   public record Scan(PosProduct product, int qty, long linePaise) {}

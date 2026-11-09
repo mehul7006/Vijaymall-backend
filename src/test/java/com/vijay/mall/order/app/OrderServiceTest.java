@@ -17,6 +17,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vijay.mall.catalog.app.CatalogService;
+import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
@@ -456,7 +457,7 @@ class OrderServiceTest {
     service.adminReject(r.id(), "sold out", user);
     verify(inventory).release(List.of(new InventoryService.Item(product, 2)), r.id());
     verify(payments).refund(eq(r.id()), anyString());
-    verify(repo).setCancelReason(r.id(), "Rejected by shop: sold out");
+    verify(repo).setCancelInfo(r.id(), "SHOP", "REJECTED_BY_SHOP", "sold out");
   }
 
   @Test
@@ -520,12 +521,31 @@ class OrderServiceTest {
   }
 
   @Test
+  void placingCopiesTheProductPictureOntoTheLineAndLeavesPictureLessProductsNull() {
+    CatalogService catalog = mock(CatalogService.class);
+    service.setCatalog(catalog);
+    UUID plain = UUID.randomUUID();
+    when(catalog.posProducts(any())).thenReturn(List.of(
+        new ProductData(product, UUID.randomUUID(), "Rice", "R", "", 1, 1, "kg", "1", "/img/rice.png", true, false, null, null, true, true),
+        new ProductData(plain, UUID.randomUUID(), "Salt", "S", "", 1, 1, "kg", "1", null, true, false, null, null, true, true)));
+    when(quotes.quote(eq(user), any())).thenReturn(new Quote(List.of(
+        new Quote.Line(product, "Rice", 1, 5000, 5000, true, true), new Quote.Line(plain, "Salt", 1, 5000, 5000, true, true)),
+        10000, null, 0, 0, 0, 0, 10000, 0, List.of()));
+    stubPlaced("PLACED");
+    service.place(user, "key-img", cmd("COD", 10000, addressId, Fulfilment.DELIVERY));
+    ArgumentCaptor<OrderRepository.NewItem> items = ArgumentCaptor.forClass(OrderRepository.NewItem.class);
+    verify(repo, times(2)).insertItem(any(), items.capture());
+    assertEquals("/img/rice.png", items.getAllValues().get(0).imageUrl());
+    assertNull(items.getAllValues().get(1).imageUrl());
+  }
+
+  @Test
   void customerCancelKeepsTheReason() {
     OrderRepository.Row r = row("PLACED", "COD", "NONE", 0, 7, false, user);
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
     service.customerCancel(user, r.id(), "  Ordered by mistake ");
-    verify(repo).setCancelReason(r.id(), "Ordered by mistake");
+    verify(repo).setCancelInfo(r.id(), "CUSTOMER", "CUSTOMER_CANCELLED", "Ordered by mistake");
     verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("CANCELLED"), eq(user),
         eq("cancelled by customer: Ordered by mistake"), any());
   }
@@ -536,7 +556,7 @@ class OrderServiceTest {
     when(repo.find(r.id())).thenReturn(Optional.of(r));
     when(repo.updateStatus(any(), eq("CANCELLED"), anyLong(), any())).thenReturn(true);
     service.customerCancel(user, r.id(), "  ");
-    verify(repo, never()).setCancelReason(any(), any());
+    verify(repo).setCancelInfo(r.id(), "CUSTOMER", "CUSTOMER_CANCELLED", null);
     verify(repo).insertHistory(eq(r.id()), eq("PLACED"), eq("CANCELLED"), eq(user), eq("cancelled by customer"), any());
   }
 

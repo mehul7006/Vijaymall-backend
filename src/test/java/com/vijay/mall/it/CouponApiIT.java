@@ -143,6 +143,51 @@ class CouponApiIT extends IntegrationTestBase {
   }
 
   @Test
+  void aCouponThatNeedsABiggerOrderSaysHowMuchMoreToAdd() {
+    String admin = adminToken();
+    String t = token(freshEmail());
+    Object pid = juice(t);
+    String c = code();
+    create(admin, coupon(c, Map.of("minOrderPaise", 1_000_000)));
+    var res = quote(t, pid, c);
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    assertThat(res.getBody()).containsEntry("code", "COUPON_INVALID");
+    Map<?, ?> details = (Map<?, ?>) res.getBody().get("details");
+    assertThat(((Number) details.get("minOrderPaise")).longValue()).isEqualTo(1_000_000);
+    long shortfall = ((Number) details.get("shortfallPaise")).longValue();
+    assertThat(shortfall).isPositive().isLessThan(1_000_000);
+    assertThat((String) res.getBody().get("message")).startsWith("Add Rs ").contains("more to use this coupon").contains("minimum order Rs 10000");
+  }
+
+  @Test
+  void theCouponPickerShowsWhatEachCouponWouldSaveOnThisCart() {
+    String admin = adminToken();
+    String t = token(freshEmail());
+    Object pid = juice(t);
+    String usable = code();
+    String needsMore = code();
+    create(admin, coupon(usable, Map.of("value", 500)));
+    create(admin, coupon(needsMore, Map.of("value", 900, "minOrderPaise", 1_000_000)));
+    var res = call(HttpMethod.POST, "/api/v1/cart/coupons", t, Map.of("items", List.of(Map.of("productId", pid, "qty", 1)),
+        "coinMode", "NONE", "fulfilment", "PICKUP", "couponCode", "IGNORED"), null);
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    List<Map> options = (List<Map>) res.getBody().get("_array");
+    Map first = options.stream().filter(o -> usable.equals(o.get("code"))).findFirst().orElseThrow();
+    Map second = options.stream().filter(o -> needsMore.equals(o.get("code"))).findFirst().orElseThrow();
+    assertThat(first).containsEntry("applicable", true).containsEntry("kind", "FLAT");
+    assertThat(((Number) first.get("discountPaise")).longValue()).isEqualTo(500);
+    assertThat(first.get("reason")).isNull();
+    assertThat(second).containsEntry("applicable", false).containsEntry("reason", "MIN_ORDER").containsEntry("discountPaise", 0);
+    assertThat(((Number) second.get("shortfallPaise")).longValue()).isPositive();
+    assertThat((String) second.get("message")).contains("Add Rs");
+    assertThat(options.indexOf(first)).as("usable coupons come first").isLessThan(options.indexOf(second));
+    // the saving shown is the saving the quote gives
+    assertThat(((Number) quote(t, pid, usable).getBody().get("couponDiscountPaise")).longValue()).isEqualTo(500);
+    assertThat(call(HttpMethod.POST, "/api/v1/cart/coupons", null, Map.of("items", List.of()), null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    assertThat(call(HttpMethod.POST, "/api/v1/cart/coupons", t, Map.of("items", List.of()), null).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
   void perUserLimitIsEnforcedAndCancelGivesTheUseBack() {
     String admin = adminToken();
     String c = code();

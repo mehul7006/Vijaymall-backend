@@ -242,4 +242,50 @@ class CreditFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/credit", customer).getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(get("/api/v1/pos/credit/account?mobile=9111111111", cashier()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
+
+  // ---------- payment modes and the repayment receipt ----------
+  @Test
+  void aMissingOrUnknownRepaymentModeIsA400_notA500_andSpacesAndCaseAreForgiven() {
+    String m = mobile();
+    approve(m, 50000);
+    sell(m, 2, List.of(pay("CREDIT", 2 * RICE)));
+    java.util.Map<String, Object> noMode = new HashMap<>();
+    noMode.put("amountPaise", 100);
+    var missing = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
+        Map.of("customerMobile", m, "payments", List.of(noMode)), UUID.randomUUID().toString());
+    assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    Map fields = (Map) ((Map) missing.getBody().get("details")).get("fields");
+    assertThat(fields.get("payments[0].mode")).isEqualTo("payment mode must be CASH, UPI or CARD (got none)");
+    var unknown = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
+        Map.of("customerMobile", m, "payments", List.of(pay("CASH", 100), pay("xyz", 100))), UUID.randomUUID().toString());
+    assertThat(((Map) ((Map) unknown.getBody().get("details")).get("fields")).get("payments[1].mode"))
+        .isEqualTo("payment mode must be CASH, UPI or CARD (got \"xyz\")");
+    var spaced = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
+        Map.of("customerMobile", m, "payments", List.of(pay(" cash ", 100))), UUID.randomUUID().toString());
+    assertThat(spaced.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(((Map) ((List) spaced.getBody().get("payments")).get(0)).get("mode")).isEqualTo("CASH");
+  }
+
+  @Test
+  void repaymentReceiptShowsModesAndTheBalanceBeforeAndAfter() {
+    String m = mobile();
+    approve(m, 50000);
+    sell(m, 2, List.of(pay("CREDIT", 2 * RICE)));
+    var paid = call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(),
+        Map.of("customerMobile", m, "payments", List.of(pay("CASH", 6000), pay("UPI", 4000)), "note", "part"), UUID.randomUUID().toString());
+    // a later payment must not change what the first receipt says
+    call(HttpMethod.POST, "/api/v1/pos/credit/payments", cashier(), Map.of("customerMobile", m, "payments", List.of(pay("CASH", 1000))),
+        UUID.randomUUID().toString());
+    String url = "/api/v1/pos/credit/payments/" + paid.getBody().get("id") + "/receipt";
+    var receipt = get(url + "?width=32", cashier());
+    assertThat(receipt.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(receipt.getBody().get("width")).isEqualTo(32);
+    String text = (String) receipt.getBody().get("text");
+    assertThat(text).contains((String) paid.getBody().get("receiptNo"), m, "Balance before", "250.00", "Paid CASH", "60.00", "Paid UPI",
+        "40.00", "Amount paid", "100.00", "Balance after", "150.00", "Note: part");
+    assertThat(get(url + "?width=48", adminToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(get(url + "?width=33", cashier()).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(get("/api/v1/pos/credit/payments/" + UUID.randomUUID() + "/receipt", cashier()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(get(url, token(freshEmail())).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+  }
 }

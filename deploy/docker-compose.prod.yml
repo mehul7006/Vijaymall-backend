@@ -10,6 +10,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Connections the database accepts. The backend pool (DB_POOL_MAX, default 20) must stay well under this.
+    command: ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=256MB", "-c", "effective_cache_size=768MB", "-c", "random_page_cost=1.1"]
     volumes:
       - dbdata:/var/lib/postgresql/data
     healthcheck:

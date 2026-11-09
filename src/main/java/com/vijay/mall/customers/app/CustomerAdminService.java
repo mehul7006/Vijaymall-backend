@@ -7,10 +7,13 @@ import com.vijay.mall.identity.domain.User;
 import com.vijay.mall.identity.infra.RefreshTokenRepository;
 import com.vijay.mall.identity.infra.UserRepository;
 import com.vijay.mall.order.app.OrderService;
+import com.vijay.mall.order.domain.OrderViews;
 import com.vijay.mall.pos.app.CreditService;
 import com.vijay.mall.wallet.app.WalletService;
+import com.vijay.mall.wallet.infra.WalletRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,8 +62,8 @@ public class CustomerAdminService {
   @Transactional(readOnly = true)
   public Page<CustomerRow> search(String q, int page, int size) {
     Page<UserRepository.Detail> p = users.searchCustomers(q, Math.max(0, page), Page.clampSize(size));
-    return new Page<>(p.items().stream().map(d -> new CustomerRow(d.user().id(), d.user().name(), d.user().email(), d.user().mobile(),
-        !"BLOCKED".equals(d.status()), d.createdAt())).toList(), p.page(), p.size(), p.total());
+    return p.withItems(p.items().stream().map(d -> new CustomerRow(d.user().id(), d.user().name(), d.user().email(), d.user().mobile(),
+        !"BLOCKED".equals(d.status()), d.createdAt())).toList());
   }
 
   /**
@@ -86,7 +89,37 @@ public class CustomerAdminService {
     customer(id);
     String why = reason == null ? "" : reason.strip();
     if (why.isEmpty() || why.length() > 100) throw ApiException.validation("reason", "1 to 100 characters");
-    wallet.adminAdjust(id, delta, actor, why);
+    try {
+      wallet.adminAdjust(id, delta, actor, why);
+    } catch (ApiException e) {
+      throw withDeltaField(e);
+    }
     return view(customer(id));
+  }
+
+  /** The wallet reports its coin errors under "coins"; the request field is "delta", so both keys carry the message. */
+  private static ApiException withDeltaField(ApiException e) {
+    Object fields = e.details().get("fields");
+    if (!(fields instanceof Map<?, ?> f) || !f.containsKey("coins")) return e;
+    String message = String.valueOf(f.get("coins"));
+    return new ApiException(e.status(), e.code(), e.getMessage(), Map.of("fields", Map.of("delta", message, "coins", message)));
+  }
+
+  /** The customer's coin history, newest first (size clamped to 1..50). 404 for an unknown id or a staff account. */
+  @Transactional(readOnly = true)
+  public Page<WalletRepository.LedgerRow> walletLedger(UUID id, int page, int size) {
+    customer(id);
+    return wallet.ledger(id, page, size);
+  }
+
+  /** The customer's orders, newest first, as the same rows the admin order list shows (size clamped to 1..50). */
+  @Transactional(readOnly = true)
+  public Page<OrderViews.AdminSummary> orders(UUID id, int page, int size) {
+    User u = customer(id).user();
+    Page<OrderViews.Summary> p = orders.list(id, page, size);
+    return p.withItems(p.items().stream().map(r -> new OrderViews.AdminSummary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
+        r.totalPaise(), r.itemCount(), r.placedAt(), u.name(), u.email(), u.mobile(), r.subtotalPaise(), r.couponCode(),
+        r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(),
+        r.paymentStatus())).toList());
   }
 }

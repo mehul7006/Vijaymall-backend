@@ -132,7 +132,7 @@ public class PurchaseService {
   /** Deliveries, newest first. */
   public Page<PurchaseView> list(int page, int size) {
     Page<Header> p = repo.page(Math.max(0, page), Page.clampSize(size));
-    return new Page<>(p.items().stream().map(this::view).toList(), p.page(), p.size(), p.total());
+    return p.withItems(p.items().stream().map(this::view).toList());
   }
 
   private PurchaseView view(Header h) {

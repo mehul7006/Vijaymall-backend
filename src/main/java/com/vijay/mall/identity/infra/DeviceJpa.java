@@ -20,6 +20,10 @@ interface DeviceJpa extends JpaRepository<DeviceTokenEntity, UUID> {
   int deleteAllOf(@Param("user") UUID user);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query("delete from DeviceTokenEntity d where d.fcmToken = :token and d.userId = :user")
+  int deleteOwnedToken(@Param("user") UUID user, @Param("token") String token);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query("delete from DeviceTokenEntity d where d.fcmToken = :token")
   int deleteByToken(@Param("token") String token);
 }

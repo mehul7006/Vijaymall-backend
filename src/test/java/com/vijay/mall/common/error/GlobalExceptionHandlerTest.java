@@ -104,7 +104,9 @@ class GlobalExceptionHandlerTest {
 
   @Test
   void tooBigUploadIs400() {
-    check(handler.tooBig(new MaxUploadSizeExceededException(1024)), HttpStatus.BAD_REQUEST, "VALIDATION_FAILED");
+    var r = handler.tooBig(new MaxUploadSizeExceededException(1024));
+    check(r, HttpStatus.BAD_REQUEST, "FILE_TOO_LARGE");
+    assertThat(r.getBody().details()).isEqualTo(java.util.Map.of("fields", java.util.Map.of("file", "must be 5 MB or smaller")));
   }
 
   @Test

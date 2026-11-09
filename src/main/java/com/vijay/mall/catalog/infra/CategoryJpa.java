@@ -8,4 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 interface CategoryJpa extends JpaRepository<CategoryEntity, UUID> {
   /** Active categories in display order (sort order, then English name). */
   List<CategoryEntity> findByActiveTrueOrderBySortOrderAscNameEnAsc();
+
+  /** Every category, active or not, in display order (sort order, then English name). */
+  List<CategoryEntity> findAllByOrderBySortOrderAscNameEnAsc();
 }

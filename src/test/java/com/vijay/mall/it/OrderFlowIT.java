@@ -20,6 +20,36 @@ class OrderFlowIT extends IntegrationTestBase {
 
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
+  void orderLinesKeepTheProductPictureEvenAfterItChangesOrTheProductIsHidden() {
+    restock("Digestive Biscuits", 10);
+    String cust = token(freshEmail());
+    String admin = adminToken();
+    Object pid = productByName(cust, "Digestive Biscuits").get("id");
+    jdbc.update("update product set image_url = '/img/before.png' where id = ?::uuid", pid.toString());
+    var items = List.of(Map.of("productId", pid, "qty", 1));
+    Map<String, Object> req = Map.of("items", items, "coinMode", "NONE", "fulfilment", "PICKUP");
+    long total = ((Number) post("/api/v1/cart/quote", cust, req).getBody().get("totalPaise")).longValue();
+    var placed = call(HttpMethod.POST, "/api/v1/orders", cust, Map.of("items", items, "coinMode", "NONE", "fulfilment", "PICKUP",
+        "paymentMethod", "COD", "expectedTotalPaise", total), UUID.randomUUID().toString());
+    String id = (String) placed.getBody().get("id");
+    assertThat(((List<Map<String, Object>>) placed.getBody().get("items"))).singleElement()
+        .satisfies(i -> assertThat(i.get("imageUrl")).isEqualTo("/img/before.png"));
+
+    jdbc.update("update product set image_url = '/img/after.png', active = false where id = ?::uuid", pid.toString());
+    for (String url : List.of("/api/v1/orders/" + id, "/api/v1/admin/orders/" + id)) {
+      var body = get(url, url.contains("admin") ? admin : cust).getBody();
+      assertThat(((List<Map<String, Object>>) body.get("items"))).as(url).singleElement()
+          .satisfies(i -> assertThat(i.get("imageUrl")).isEqualTo("/img/before.png"));
+    }
+    var reorder = get("/api/v1/orders/" + id + "/reorder", cust);
+    jdbc.update("update product set active = true where id = ?::uuid", pid.toString());
+    assertThat(reorder.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(((List<Map<String, Object>>) reorder.getBody().get("items"))).singleElement()
+        .satisfies(i -> assertThat(i.get("imageUrl")).isEqualTo("/img/before.png"));
+  }
+
+  @Test
+  @SuppressWarnings({"unchecked", "rawtypes"})
   void customerOrdersAdminDeliversAndCoinsArrive() {
     String admin = adminToken();
     String cust = token(freshEmail());

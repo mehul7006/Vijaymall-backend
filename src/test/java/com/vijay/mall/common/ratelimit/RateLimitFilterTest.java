@@ -49,6 +49,26 @@ class RateLimitFilterTest {
   }
 
   @Test
+  void the429AlsoCarriesTheStandardRetryAfterHeader() throws Exception {
+    var f = filter(1);
+    f.doFilter(req("/api/v1/x"), new MockHttpServletResponse(), (a, b) -> { });
+    var res = new MockHttpServletResponse();
+    f.doFilter(req("/api/v1/x"), res, (a, b) -> { });
+    assertThat(res.getHeader("Retry-After")).isEqualTo("60");
+  }
+
+  @Test
+  void a429WithoutAWaitTimeSendsNoRetryAfter() throws Exception {
+    var mocked = org.mockito.Mockito.mock(RateLimiter.class);
+    org.mockito.Mockito.doThrow(new com.vijay.mall.common.error.ApiException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED", "x"))
+        .when(mocked).check(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyLong());
+    var res = new MockHttpServletResponse();
+    new RateLimitFilter(mocked, JsonMapper.builder().build(), 1, "").doFilter(req("/api/v1/x"), res, (a, b) -> { });
+    assertThat(res.getStatus()).isEqualTo(429);
+    assertThat(res.containsHeader("Retry-After")).isFalse();
+  }
+
+  @Test
   void limitIsPerClientAddress() throws Exception {
     var f = filter(1);
     f.doFilter(req("/api/v1/x"), new MockHttpServletResponse(), (a, b) -> { });

@@ -43,7 +43,9 @@ public class AppCaches implements MeterBinder {
     COUPONS("coupons", 60, 4, "Active coupons offered in the app"),
     DASHBOARD("dashboard", 30, 8, "Admin dashboard figures (heavy to compute)"),
     REPORT_SUMMARY("report-summary", 60, 60, "Sales report for a date range (heavy to compute)"),
-    FLASH("flash", 15, 4, "Flash sale definitions (times, discounts, caps); units left are never cached");
+    FLASH("flash", 15, 4, "Flash sale definitions (times, discounts, caps); units left are never cached"),
+    PRODUCT_LIST("product-list", 300, 400, "Which products match a shop or admin product search, in order, with the total. Emptied the moment a catalog edit commits or a product sells out or comes back in; stock numbers are always read fresh. The 5-minute life is only a backstop"),
+    BLOCKED_USERS("blocked-users", 10, 10_000, "Whether a signed-in customer is blocked (checked on every request, at most once per 10 seconds each)");
 
     /** Short name used in URLs, metrics and settings, for example {@code categories}. */
     public final String key;
@@ -159,6 +161,9 @@ public class AppCaches implements MeterBinder {
     log.atDebug().setMessage("Cache emptied cache={} entries={}").addArgument(name.key).addArgument(dropped).addKeyValue("event", "cache-clear")
         .addKeyValue("cache", name.key).addKeyValue("entries", dropped).log();
   }
+
+  /** Drops one key of a cache (for example a customer who was just blocked), so the next read loads fresh data. */
+  public void evict(Name name, Object key) { stores.get(name).map.remove(key); }
 
   /** Empties every cache. */
   public void invalidateAll() { for (Name n : Name.values()) invalidate(n); }

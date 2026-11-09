@@ -1035,7 +1035,7 @@ Events (`event:` name, then `data:` is JSON):
 | `wallet` | that customer's streams only | `{ "userId", "reason", "delta", "at" }` (`delta` in coins) | refetch the coin balance/ledger |
 | `credit` | that customer's streams only | `{ "customerId", "reason", "deltaPaise", "at" }` | refetch the credit (udhar) account |
 | `stock` | every stream | `{ "productIds": [UUID…], "reason": "…", "at" }`; empty `productIds` means many products changed (also used when over 200 products changed) | refetch the visible product lists or just those products' stock |
-| `catalog` | every stream | `{ "area": "CATALOG" or "COUPONS" or "UNITS" or "SHOP" or "PAYMENT_METHODS", "at" }` | refetch that area: CATALOG = products/categories/banners; COUPONS = `GET /coupons`; UNITS = `GET /units`; SHOP = `GET /shop-settings`; PAYMENT_METHODS = `GET /payment-methods` |
+| `catalog` | every stream | `{ "area": "CATALOG" or "COUPONS" or "UNITS" or "SHOP" or "PAYMENT_METHODS" or "FLASH", "at" }` | refetch that area: CATALOG = products/categories/banners; COUPONS = `GET /coupons`; UNITS = `GET /units`; SHOP = `GET /shop-settings`; PAYMENT_METHODS = `GET /payment-methods`; FLASH = `GET /flash-sales/active` and `/upcoming` and the flash badge on product cards (a flash sale started, ended, was changed or an item sold out) |
 
 `stock` and `catalog` events are merged and sent at most twice per second (one message per window and area). None of this requires a new login.
 
@@ -1105,3 +1105,35 @@ Server-side behaviour (the app does not call anything new; it only has to react 
 - **Request**: query `page` (default 0), `size` (default 20, max 50).
 - **Response**: `{ items: [ { id, paymentId, orderId, kind ("MISMATCH"|"DUPLICATE"), expectedPaise, receivedPaise, providerRef, createdAt } ], page, size, total }`, newest first. The refunds they caused are in the refund monitor (`GET /api/v1/admin/refunds`) with reason `amount mismatch` or `duplicate payment`.
 - **Ops**: metric `mall_payments_anomalies_total{kind}`; alert `PaymentAnomaly`.
+
+
+---
+## Addendum: coupons on the cart ("save 0" and the coupon picker)
+
+**Units (a common source of "save 0")**: on `GET /coupons`, `value` is **paise for `FLAT`** (`5000` = Rs 50) and a **percent for `PERCENT`** (`10` = 10 %); `minOrderPaise` and `maxDiscountPaise` are paise (0 = none). What a coupon actually saves on a cart is **only** `couponDiscountPaise` in the quote response (and `couponDiscountPaise` per line); never compute it from `value` on the device.
+
+**When a coupon cannot be used the quote is refused**, it does not return a quote with a 0 discount: `POST /cart/quote` answers `422 COUPON_INVALID` and no totals. Show the `message` (ready to display) next to the coupon box, and keep showing the last good totals. `details`:
+
+| `details.reason` | message (example) | extra `details` |
+|---|---|---|
+| `MIN_ORDER` | "Add Rs 669 more to use this coupon (minimum order Rs 999)." | `minOrderPaise`, `shortfallPaise` |
+| `CATEGORY` | "This coupon works only on certain categories, and none of them is in your cart." | |
+| `EXPIRED` | "This coupon is not active right now (it has ended, has not started yet or is switched off)." | |
+| `LIMIT_REACHED` | "You have already used this coupon the allowed number of times." / "This coupon has been used up." | |
+| `FIRST_ORDER_ONLY` | "This coupon is only for your first order." | |
+| `NOT_FOUND` | "That coupon code does not exist." | |
+
+For a category coupon the minimum counts only what is spent in its categories. If a coupon works with the cart, `couponDiscountPaise` is the real saving (a flat coupon never exceeds the amount it covers; a percent coupon is capped by `maxDiscountPaise`).
+
+### POST /api/v1/cart/coupons
+- **Who**: any signed-in customer. **Purpose**: the coupon picker on the cart screen: every coupon on offer tried on this exact cart, so you can show "Save Rs 50" or "Add Rs 669 more" for each.
+- **Request**: the same body as `POST /cart/quote` (`items`, optional `coinMode`, `percent`, `fulfilment`; any `couponCode` is ignored). Empty `items` is `400`.
+- **Response**: `200`, a list, usable coupons first (biggest saving first), then the others:
+
+```json
+[ { "code": "FESTIVE50", "kind": "FLAT", "value": 5000, "minOrderPaise": 99900, "maxDiscountPaise": 0,
+    "applicable": true, "discountPaise": 5000, "reason": null, "message": null, "shortfallPaise": 0, "worksWithCoins": true },
+  { "code": "BIG10", "kind": "PERCENT", "value": 10, "minOrderPaise": 200000, "maxDiscountPaise": 50000,
+    "applicable": false, "discountPaise": 0, "reason": "MIN_ORDER", "message": "Add Rs 1000 more to use this coupon (minimum order Rs 2000).", "shortfallPaise": 100000, "worksWithCoins": true } ]
+```
+- **UI notes**: refetch when the cart changes (debounce) and on a `catalog` event with `area: "COUPONS"`. The `discountPaise` shown here is exactly what `POST /cart/quote` will give when that code is applied. `worksWithCoins: false` means coins cannot be spent in the same order as this coupon.

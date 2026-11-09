@@ -118,6 +118,6 @@ public class ShiftService {
   @Transactional(readOnly = true)
   public Page<ShiftView> list(UUID cashierId, int page, int size) {
     Page<Shift> p = shifts.page(cashierId, Math.max(0, page), Page.clampSize(size));
-    return new Page<>(p.items().stream().map(this::view).toList(), p.page(), p.size(), p.total());
+    return p.withItems(p.items().stream().map(this::view).toList());
   }
 }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 /**
@@ -67,6 +68,11 @@ public class BootstrapStatus {
     boolean fixed = !p("app.otp.fixed-code").isBlank();
     out.add(new Item("Fixed login code", "OTP_FIXED_CODE", fixed ? State.UNSAFE : State.OK,
         fixed ? "ON: every login code is the same. Never in production" : "off (codes are random)"));
+    boolean consoleCodes = "console".equals(p("app.otp.channel")) || "console".equals(p("app.otp.sms-channel"));
+    boolean devOrTest = env.acceptsProfiles(Profiles.of("dev", "test"));
+    out.add(new Item("Login codes in the server log", "OTP_CHANNEL, SMS_CHANNEL", consoleCodes && !devOrTest ? State.UNSAFE : State.OK,
+        !consoleCodes ? "off (codes are sent by e-mail or SMS)"
+            : devOrTest ? "on (dev server: codes are printed in the log)" : "not allowed here: the server refuses to start with it outside the dev profile"));
     out.add(new Item("Secrets encryption key", "CONFIG_ENCRYPTION_KEY", crypto.available() ? State.OK : State.MISSING,
         crypto.available() ? "set" : "not set: keys and passwords cannot be saved from the config screen"));
     String mgmt = p("management.server.port");

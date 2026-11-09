@@ -46,4 +46,10 @@ class DeviceRepositoryTest {
     repo.deleteToken("dead");
     verify(jpa).deleteByToken("dead");
   }
+
+  @Test
+  void signOutDeletesOnlyTheUsersOwnToken() {
+    repo.deleteOwned(user, "mine");
+    verify(jpa).deleteOwnedToken(user, "mine");
+  }
 }

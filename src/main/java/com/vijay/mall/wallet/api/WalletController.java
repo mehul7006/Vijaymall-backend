@@ -89,6 +89,6 @@ public class WalletController {
         .filter(Objects::nonNull).distinct().toList());
     List<LedgerView> items = p.items().stream().map(r -> new LedgerView(r.id(), r.kind(), r.coins(),
         r.orderId() == null ? null : numbers.get(r.orderId()), r.createdAt(), r.expiresAt())).toList();
-    return new Page<>(items, p.page(), p.size(), p.total());
+    return p.withItems(items);
   }
 }

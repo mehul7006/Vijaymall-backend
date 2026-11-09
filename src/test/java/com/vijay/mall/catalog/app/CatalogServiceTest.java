@@ -178,7 +178,7 @@ class CatalogServiceTest {
   void hotSaleReturnsLiveBannersAndFirstTwentyHotProducts() {
     HotBanner banner = new HotBanner(UUID.randomUUID(), "Diwali", "", null, null, null, true);
     when(banners.all()).thenReturn(List.of(banner));
-    when(products.searchInStock(null, null, true, NOW, 0, 20))
+    when(products.searchHotInStock(NOW, 0, 20))
         .thenReturn(new Page<>(List.of(data(pid, true, true, null, null)), 0, 20, 1));
 
     CatalogService.HotSale hs = service.hotSale();

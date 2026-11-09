@@ -14,7 +14,9 @@ import com.vijay.mall.promotion.domain.PublicCoupon;
 import com.vijay.mall.promotion.infra.CouponRepository;
 import java.time.Clock;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.IntSupplier;
@@ -56,7 +58,48 @@ public class PromotionService {
   public static String normalize(String code) { return code == null ? null : code.trim().toUpperCase(); }
 
   private static ApiException invalid(String reason) {
-    return ApiException.unprocessable("COUPON_INVALID", "This coupon cannot be used", Map.of("reason", reason));
+    return invalid(reason, null);
+  }
+
+  /**
+   * The error for a coupon that cannot be used. The code stays {@code COUPON_INVALID} and {@code details.reason} is one of
+   * {@code NOT_FOUND}, {@code EXPIRED}, {@code MIN_ORDER}, {@code CATEGORY}, {@code LIMIT_REACHED}, {@code FIRST_ORDER_ONLY};
+   * the message says in plain words what is wrong, and for {@code MIN_ORDER} the details carry {@code minOrderPaise} and
+   * {@code shortfallPaise} (how much more the customer must add) so the app can show "Add Rs 669 more".
+   *
+   * @param reason which rule was broken
+   * @param ctx the cart the coupon was tried on, or null when only the reason is known
+   */
+  static ApiException invalid(String reason, CouponContext ctx) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("reason", reason);
+    String message;
+    switch (reason) {
+      case "NOT_FOUND" -> message = "That coupon code does not exist.";
+      case "EXPIRED" -> message = "This coupon is not active right now (it has ended, has not started yet or is switched off).";
+      case "MIN_ORDER" -> {
+        message = "This coupon needs a bigger order.";
+        if (ctx != null) {
+          long min = ctx.coupon().minOrderPaise();
+          long base = ctx.coupon().allCategories() ? ctx.subtotalPaise() : CouponMath.base(ctx.coupon(), ctx.lines(), ctx.subtotalPaise());
+          long shortfall = Math.max(0, min - base);
+          details.put("minOrderPaise", min);
+          details.put("shortfallPaise", shortfall);
+          message = "Add " + rupees(shortfall) + " more to use this coupon (minimum order " + rupees(min) + ").";
+        }
+      }
+      case "CATEGORY" -> message = "This coupon works only on certain categories, and none of them is in your cart.";
+      case "LIMIT_REACHED" -> message = ctx != null && ctx.coupon().perUserLimit() > 0 && ctx.userUses() >= ctx.coupon().perUserLimit()
+          ? "You have already used this coupon the allowed number of times." : "This coupon has been used up.";
+      case "FIRST_ORDER_ONLY" -> message = "This coupon is only for your first order.";
+      default -> message = "This coupon cannot be used";
+    }
+    return ApiException.unprocessable("COUPON_INVALID", message, details);
+  }
+
+  /** Paise as rupees for a message: {@code Rs 999}, or {@code Rs 999.50} when there are paise. */
+  static String rupees(long paise) {
+    return paise % 100 == 0 ? "Rs " + paise / 100 : String.format(Locale.ROOT, "Rs %d.%02d", paise / 100, paise % 100);
   }
 
   /**
@@ -84,7 +127,7 @@ public class PromotionService {
     int uses = coupons.userUses(c.id(), userId);
     int prior = c.firstOrderOnly() ? priorOrders.getAsInt() : 0;
     var ctx = new CouponContext(c, clock.instant(), subtotalPaise, lines, uses, prior);
-    CouponRules.firstViolation(CouponRules.STANDARD, ctx).ifPresent(r -> { throw invalid(r); });
+    CouponRules.firstViolation(CouponRules.STANDARD, ctx).ifPresent(r -> { throw invalid(r, ctx); });
     long discount = CouponMath.discount(c, CouponMath.base(c, lines, subtotalPaise));
     List<Long> perLine = Arrays.stream(CouponMath.perLine(c, lines, discount)).boxed().toList();
     return new Applied(discount, c.worksWithCoins(), perLine);

@@ -33,6 +33,10 @@ class OrderEntity extends BaseEntity {
   String addressSnapshot;
   String deliverySlot;
   String cancelReason;
+  /** CUSTOMER, SHOP or SYSTEM; null while the order is not cancelled (and for old cancels nobody can attribute). */
+  String cancelledBy;
+  /** Why it was cancelled, as a code the app can translate; null while not cancelled. */
+  String cancelCode;
   Instant expiresAt;
   Instant placedAt;
   Instant updatedAt;

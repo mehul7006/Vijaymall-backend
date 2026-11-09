@@ -18,7 +18,7 @@ public class AddressRepository {
   AddressRepository(AddressJpa jpa) { this.jpa = jpa; }
 
   private static Address toDomain(AddressEntity e) {
-    return new Address(e.id, e.label, e.line1, e.area, e.pincode, e.defaultAddress);
+    return new Address(e.id, e.label, e.line1, e.area, e.pincode, e.defaultAddress, e.phone);
   }
 
   /** Addresses of the user, default first, then oldest first. */
@@ -64,6 +64,7 @@ public class AddressRepository {
     e.line1 = a.line1();
     e.area = a.area();
     e.pincode = a.pincode();
+    e.phone = a.phone();
     e.defaultAddress = a.isDefault();
   }
 }

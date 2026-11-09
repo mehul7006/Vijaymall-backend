@@ -33,8 +33,10 @@ public class LocalDiskImageStore implements ImageStore {
   public String save(byte[] content, String folder) {
     try {
       BufferedImage src = ImageIO.read(new ByteArrayInputStream(content));
-      if (src == null) throw ApiException.validation("file", "not an image");
-      if ((long) src.getWidth() * src.getHeight() > MAX_PIXELS) throw ApiException.validation("file", "image is too large");
+      if (src == null) throw ApiException.fieldError("UNSUPPORTED_IMAGE", "file", "must be an image (JPEG, PNG or WebP)");
+      if ((long) src.getWidth() * src.getHeight() > MAX_PIXELS) {
+        throw ApiException.fieldError("FILE_TOO_LARGE", "file", "image is too large (max " + MAX_PIXELS + " pixels)");
+      }
       if (!folder.matches("[a-z0-9-]+")) throw new IllegalArgumentException("bad folder");
       String name = UUID.randomUUID().toString();
       Path dir = root.resolve(folder);

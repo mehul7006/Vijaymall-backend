@@ -48,4 +48,27 @@ class ProdConfigGuardTest {
         () -> new ProdConfigGuard(props("short", "dev-x", "1", "console", null)));
     assertTrue(e.getMessage().contains("JWT_SECRET") && e.getMessage().contains("OTP_CHANNEL"));
   }
+
+  @Test
+  void consoleLoginCodesAreNeverAllowedOnARealServer() {
+    AppProps console = props(GOOD_SECRET, GOOD_PEPPER, "", "console", "owner@shop.in");
+    assertEquals(1, ProdConfigGuard.problems(console).size(), "e-mail codes are required");
+    assertTrue(ProdConfigGuard.problems(console).get(0).contains("dev profile"));
+    AppProps email = props(GOOD_SECRET, GOOD_PEPPER, "", "email", "owner@shop.in");
+    assertEquals(1, ProdConfigGuard.problems(email, "console").size(), "mobile codes in the log are refused");
+    assertTrue(ProdConfigGuard.problems(email, "http").isEmpty());
+    assertTrue(ProdConfigGuard.problems(email, "none").isEmpty());
+    assertEquals(2, ProdConfigGuard.problems(console, "console").size());
+  }
+
+  @Test
+  void theGuardReadsTheMobileChannelFromTheEnvironment() {
+    var ok = props(GOOD_SECRET, GOOD_PEPPER, "", "email", "owner@shop.in");
+    new ProdConfigGuard(ok, new org.springframework.mock.env.MockEnvironment().withProperty("app.otp.sms-channel", "http"));
+    new ProdConfigGuard(ok, new org.springframework.mock.env.MockEnvironment());
+    new ProdConfigGuard(ok, null);
+    assertThrows(IllegalStateException.class, () -> new ProdConfigGuard(ok,
+        new org.springframework.mock.env.MockEnvironment().withProperty("app.otp.sms-channel", "console")));
+    assertThrows(IllegalStateException.class, () -> new ProdConfigGuard(props(GOOD_SECRET, GOOD_PEPPER, "", "console", "owner@shop.in")));
+  }
 }

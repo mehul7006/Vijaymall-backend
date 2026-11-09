@@ -446,7 +446,7 @@ class CatalogServiceCoverageTest {
     var startsNow = new HotBanner(i, "startsNow", "", null, NOW, NOW, true);
     var endsFuture = new HotBanner(i, "endsFuture", "", null, null, FUTURE, true);
     when(banners.all()).thenReturn(List.of(off, open, future, past, ended, running, startsNow, endsFuture));
-    when(products.searchInStock(any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    when(products.searchHotInStock(any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
 
     assertThat(svc.hotSale().banners()).containsExactly(open, past, running, startsNow, endsFuture);
   }

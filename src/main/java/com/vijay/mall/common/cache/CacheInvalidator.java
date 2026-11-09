@@ -33,6 +33,7 @@ public class CacheInvalidator {
       case CatalogChanged.CATALOG -> {
         caches.invalidate(Name.CATEGORIES);
         caches.invalidate(Name.BANNERS);
+        caches.invalidate(Name.PRODUCT_LIST);
       }
       case CatalogChanged.COUPONS -> caches.invalidate(Name.COUPONS);
       case CatalogChanged.UNITS -> caches.invalidate(Name.UNITS);

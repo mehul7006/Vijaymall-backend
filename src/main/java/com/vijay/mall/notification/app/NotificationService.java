@@ -79,7 +79,14 @@ public class NotificationService {
         case "ORDER_STATUS" -> {
           String no = p.path("orderNo").asString();
           String note = p.path("note").asString("");
-          if ("CANCELLED".equals(p.path("status").asString()) && note.startsWith(REJECTED)) {
+          boolean cancelled = "CANCELLED".equals(p.path("status").asString());
+          if (cancelled && "REJECTED_BY_SHOP".equals(p.path("cancelCode").asString(""))) {
+            notify(UUID.fromString(p.path("userId").asString()), "Order rejected", "Sorry, we could not accept order " + no + " ("
+                + p.path("cancelReason").asString("") + "). Anything you paid will be refunded.", "ORDER", no);
+            return;
+          }
+          // messages queued before cancel codes existed carry the reason in the note
+          if (cancelled && note.startsWith(REJECTED)) {
             notify(UUID.fromString(p.path("userId").asString()), "Order rejected", "Sorry, we could not accept order " + no + " ("
                 + note.substring(REJECTED.length()).trim() + "). Anything you paid will be refunded.", "ORDER", no);
             return;

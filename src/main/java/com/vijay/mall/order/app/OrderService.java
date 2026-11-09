@@ -1,5 +1,6 @@
 package com.vijay.mall.order.app;
 
+import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.app.PurchaseLookup;
 import com.vijay.mall.common.AppProps;
 import com.vijay.mall.common.FlashPricing;
@@ -34,6 +35,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,8 +69,29 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
 
   static final int MAX_SLOT = 40;
 
-  /** Start of the status note written when staff reject an order; the notification module recognises it in the event. */
-  public static final String REJECTED_PREFIX = "rejected by shop:";
+  /** Who cancelled an order. */
+  public static final String BY_CUSTOMER = "CUSTOMER";
+  /** Who cancelled an order. */
+  public static final String BY_SHOP = "SHOP";
+  /** Who cancelled an order. */
+  public static final String BY_SYSTEM = "SYSTEM";
+
+  /** Why an order was cancelled, as a code the app translates. */
+  public static final String CUSTOMER_CANCELLED = "CUSTOMER_CANCELLED";
+  /** Staff turned the order down (see {@link #adminReject}). */
+  public static final String REJECTED_BY_SHOP = "REJECTED_BY_SHOP";
+  /** Staff moved the order to CANCELLED through the status endpoint. */
+  public static final String CANCELLED_BY_SHOP = "CANCELLED_BY_SHOP";
+  /** The customer did not pay in time. */
+  public static final String PAYMENT_TIMEOUT = "PAYMENT_TIMEOUT";
+  /** The online payment failed. */
+  public static final String PAYMENT_FAILED = "PAYMENT_FAILED";
+
+  /** Text that old rows still carry in front of the shop's reason; removed when an order is shown. */
+  private static final String LEGACY_REJECTED = "rejected by shop:";
+
+  /** Who cancelled the order, why (code) and the free text for the customer (may be {@code null}). */
+  private record Cancel(String by, String code, String reason) {}
 
   private final OrderRepository repo;
   private final QuoteService quotes;
@@ -186,9 +209,11 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
         q.totalPaise(), (int) q.coinsToEarn(), method, needsPayment ? "INITIATED" : "NONE", addressJson, expires, now,
         slot));
 
+    Map<UUID, String> images = productImages(q);
     for (Quote.Line l : q.lines()) {
       repo.insertItem(orderId, new OrderRepository.NewItem(l.productId(), l.name(), l.unitPricePaise(), l.qty(),
-          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel(), l.couponDiscountPaise()));
+          l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel(), l.couponDiscountPaise(),
+          images.get(l.productId())));
     }
     repo.insertHistory(orderId, null, status, userId, null, now);
 
@@ -208,6 +233,21 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     outbox.add("ORDER_PLACED", Map.of("orderId", orderId, "orderNo", orderNo, "userId", userId, "totalPaise", q.totalPaise()));
     events.publishEvent(new OrderChanged(orderId, orderNo, userId, status, null, now));
     return orderId;
+  }
+
+  private CatalogService catalog;
+
+  /** Optional (plain unit tests run without it): the product pictures are copied onto the order lines. */
+  @Autowired(required = false)
+  void setCatalog(CatalogService catalog) { this.catalog = catalog; }
+
+  /** The picture each product of the quote has right now; products without one are left out. */
+  private Map<UUID, String> productImages(Quote q) {
+    if (catalog == null) return Map.of();
+    Map<UUID, String> out = new HashMap<>();
+    catalog.posProducts(q.lines().stream().map(Quote.Line::productId).distinct().toList())
+        .forEach(p -> { if (p.imageUrl() != null) out.put(p.id(), p.imageUrl()); });
+    return out;
   }
 
   /** The quote lines that were priced by a flash sale, as claims on the sale's quantity. */
@@ -230,7 +270,12 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
       // Only the payment result moves this order on; staff can turn it down but not wave it through unpaid.
       throw ApiException.conflict("AWAITING_PAYMENT", "The customer has not paid yet", Map.of());
     }
-    transition(row, target, actor, note);
+    Cancel cancel = null;
+    if (target == OrderStatus.CANCELLED) {
+      // the staff note, when there is one, is also what the customer reads as the reason
+      cancel = new Cancel(BY_SHOP, CANCELLED_BY_SHOP, note == null || note.isBlank() ? null : note.trim());
+    }
+    transition(row, target, actor, note, cancel);
     audit.log(actor, "ORDER_STATUS", "orders", orderId, target.name());
     return adminView(repo.find(orderId).orElseThrow());
   }
@@ -245,8 +290,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     if (why.isEmpty()) throw ApiException.validation("reason", "tell the customer why the order is rejected");
     if (why.length() > 200) throw ApiException.validation("reason", "must be at most 200 characters");
     OrderRepository.Row row = repo.find(orderId).orElseThrow(() -> ApiException.notFound("Order"));
-    transition(row, OrderStatus.CANCELLED, actor, OrderService.REJECTED_PREFIX + " " + why);
-    repo.setCancelReason(orderId, "Rejected by shop: " + why);
+    transition(row, OrderStatus.CANCELLED, actor, why, new Cancel(BY_SHOP, REJECTED_BY_SHOP, why));
     audit.log(actor, "ORDER_REJECT", "orders", orderId, why);
     return adminView(repo.find(orderId).orElseThrow());
   }
@@ -264,13 +308,13 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
       throw ApiException.conflict("ILLEGAL_TRANSITION", "This order can no longer be cancelled", Map.of());
     }
     String why = reason == null || reason.isBlank() ? null : reason.trim();
-    transition(row, OrderStatus.CANCELLED, userId, why == null ? "cancelled by customer" : "cancelled by customer: " + why);
-    if (why != null) repo.setCancelReason(orderId, why);
+    transition(row, OrderStatus.CANCELLED, userId, why == null ? "cancelled by customer" : "cancelled by customer: " + why,
+        new Cancel(BY_CUSTOMER, CUSTOMER_CANCELLED, why));
     return view(repo.find(orderId).orElseThrow());
   }
 
   /** The one place status changes and their side effects happen. Runs inside the caller's transaction. */
-  private void transition(OrderRepository.Row row, OrderStatus target, UUID actor, String note) {
+  private void transition(OrderRepository.Row row, OrderStatus target, UUID actor, String note, Cancel cancel) {
     OrderStatus from = OrderStatus.valueOf(row.status());
     Fulfilment f = Fulfilment.valueOf(row.fulfilment());
     if (!from.canMoveTo(target, f)) {
@@ -290,10 +334,14 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     repo.insertHistory(row.id(), from.name(), target.name(), actor, note, now);
     log.info("Order status orderNo={} {} -> {} actor={} note={}", row.orderNo(), from, target, actor, note);
 
-    if (target == OrderStatus.CANCELLED) onCancelled(row);
+    if (target == OrderStatus.CANCELLED) {
+      repo.setCancelInfo(row.id(), cancel.by(), cancel.code(), cancel.reason());
+      onCancelled(row);
+    }
     if (target.completesOrder()) onCompleted(row);
     outbox.add("ORDER_STATUS", Map.of("orderId", row.id(), "orderNo", row.orderNo(), "userId", row.userId(), "status", target.name(),
-        "note", note == null ? "" : note));
+        "note", note == null ? "" : note, "cancelCode", cancel == null ? "" : cancel.code(),
+        "cancelReason", cancel == null || cancel.reason() == null ? "" : cancel.reason()));
     events.publishEvent(new OrderChanged(row.id(), row.orderNo(), row.userId(), target.name(), from.name(), now));
   }
 
@@ -329,7 +377,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     OrderRepository.Row row = repo.find(e.orderId()).orElse(null);
     if (row == null) return;
     if (OrderStatus.PAYMENT_PENDING.name().equals(row.status())) {
-      transition(row, OrderStatus.PLACED, null, "payment received");
+      transition(row, OrderStatus.PLACED, null, "payment received", null);
       repo.setPaymentStatus(row.id(), "CAPTURED", clock.instant());
     } else if (OrderStatus.CANCELLED.name().equals(row.status())) {
       // paid after we expired the order: give the money back
@@ -369,7 +417,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   @Transactional
   public void on(PaymentEvents.PaymentFailed e) {
     repo.find(e.orderId()).filter(r -> OrderStatus.PAYMENT_PENDING.name().equals(r.status()))
-        .ifPresent(r -> transition(r, OrderStatus.CANCELLED, null, "payment failed"));
+        .ifPresent(r -> transition(r, OrderStatus.CANCELLED, null, "payment failed", new Cancel(BY_SYSTEM, PAYMENT_FAILED, null)));
   }
 
   /** Cancels online orders nobody paid for, which frees their stock, coins and coupon. */
@@ -378,7 +426,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     for (UUID id : repo.expiredPending(clock.instant(), 100)) {
       try {
         tx.executeWithoutResult(s -> repo.find(id).filter(r -> OrderStatus.PAYMENT_PENDING.name().equals(r.status()))
-            .ifPresent(r -> transition(r, OrderStatus.CANCELLED, null, "payment timeout")));
+            .ifPresent(r -> transition(r, OrderStatus.CANCELLED, null, "payment timeout", new Cancel(BY_SYSTEM, PAYMENT_TIMEOUT, null))));
       } catch (RuntimeException ex) {
         log.warn("Could not expire order {}: {}", id, ex.getMessage());
       }
@@ -395,26 +443,26 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   /** Lists the customer's orders, newest first. */
   public Page<OrderViews.Summary> list(UUID userId, int page, int size) {
     Page<OrderRepository.SummaryRow> p = repo.list(userId, Math.max(0, page), Page.clampSize(size));
-    return new Page<>(p.items().stream().map(r -> new OrderViews.Summary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
+    return p.withItems(p.items().stream().map(r -> new OrderViews.Summary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
         r.totalPaise(), r.itemCount(), r.placedAt(), r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(),
-        r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus())).toList(),
-        p.page(), p.size(), p.total());
+        r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(),
+        r.cancelCode())).toList());
   }
 
   /** Staff list of all orders, optionally of one status. */
   public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
 
-  /** q filters by order number (part of it is enough). */
+  /** q filters by order number, customer name, mobile or e-mail (part of it is enough, any case). */
   public Page<OrderViews.AdminSummary> adminList(String status, String q, int page, int size) {
     Page<OrderRepository.SummaryRow> p = repo.adminList(status, q, Math.max(0, page), Page.clampSize(size));
     Map<UUID, User> customers = profiles.users(p.items().stream().map(OrderRepository.SummaryRow::userId).distinct().toList());
-    return new Page<>(p.items().stream().map(r -> {
+    return p.withItems(p.items().stream().map(r -> {
       User u = customers.get(r.userId());
       return new OrderViews.AdminSummary(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.totalPaise(), r.itemCount(),
           r.placedAt(), u == null ? null : u.name(), u == null ? null : u.email(), u == null ? null : u.mobile(),
           r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(),
-          r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus());
-    }).toList(), p.page(), p.size(), p.total());
+          r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(), r.cancelCode());
+    }).toList());
   }
 
   /** The customer's latest delivered or picked-up order that contains this product, if any. Used to allow reviews. */
@@ -449,8 +497,16 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
         repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
         r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
-        r.deliverySlot(), r.cancelReason(), wallet.balance(r.userId()),
-        OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? r.expiresAt() : null); // the app shows a countdown to this
+        r.deliverySlot(), plainReason(r.cancelReason()), wallet.balance(r.userId()),
+        OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? r.expiresAt() : null, // the app shows a countdown to this
+        r.cancelledBy(), r.cancelCode());
+  }
+
+  /** The reason without the English prefix that old rows were saved with. */
+  static String plainReason(String stored) {
+    if (stored == null) return null;
+    boolean legacy = stored.regionMatches(true, 0, LEGACY_REJECTED, 0, LEGACY_REJECTED.length());
+    return legacy ? stored.substring(LEGACY_REJECTED.length()).trim() : stored;
   }
 
   private String toJson(Address a) {

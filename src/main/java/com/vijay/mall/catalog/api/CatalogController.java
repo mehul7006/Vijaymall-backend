@@ -70,7 +70,14 @@ public class CatalogController {
   @GetMapping("/product-groups/{id}")
   public CatalogService.ProductGroup productGroup(@PathVariable UUID id) { return catalog.group(id); }
 
-  /** The hot-sale screen: banners that are live now plus up to 20 in-stock hot products. */
+  /**
+   * The hot-sale screen: banners that are live now (all of them) plus one page of in-stock hot products, the soonest ending
+   * window first, then by name. The response carries page, size and total for the products part.
+   * @param page zero-based page number
+   * @param size page size, clamped to 1..50
+   */
   @GetMapping("/hot-sale")
-  public CatalogService.HotSale hotSale() { return catalog.hotSale(); }
+  public CatalogService.HotSale hotSale(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+    return catalog.hotSale(page, size);
+  }
 }

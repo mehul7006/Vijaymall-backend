@@ -1,6 +1,7 @@
 package com.vijay.mall.pos.domain;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /** Checks the way a bill (or a refund) is paid. Breaking a rule throws IllegalArgumentException with a readable message. */
@@ -12,6 +13,32 @@ public final class PaymentRules {
     public static final String CREDIT = "CREDIT";
 
     private PaymentRules() { }
+
+    /** Trims and upper-cases a payment mode so {@code " cash "} matches {@code CASH}; null stays null. No other aliases exist. */
+    public static String normalizeMode(String raw) {
+        return raw == null ? null : raw.strip().toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * Normalises a payment mode and checks it is allowed.
+     *
+     * @param allowCredit true for a bill, where {@code CREDIT} (pay later) is also a valid mode
+     * @return the mode in canonical form (CASH, UPI, CARD or CREDIT)
+     * @throws IllegalArgumentException with a message naming the value received when the mode is missing or unknown
+     */
+    public static String requireMode(String raw, boolean allowCredit) {
+        String mode = normalizeMode(raw);
+        if (mode == null || !(MODES.contains(mode) || (allowCredit && CREDIT.equals(mode)))) {
+            throw new IllegalArgumentException(modeMessage(raw, allowCredit));
+        }
+        return mode;
+    }
+
+    /** The 400 text for a bad mode, quoting what was received ({@code none} when it was missing). */
+    public static String modeMessage(String raw, boolean allowCredit) {
+        return "payment mode must be CASH, UPI or CARD" + (allowCredit ? ", or CREDIT on a bill" : "")
+            + " (got " + (raw == null ? "none" : "\"" + raw + "\"") + ")";
+    }
 
     /**
      * One payment part of a bill, refund or repayment: mode, amount in paise and an optional reference such as a UPI
@@ -87,10 +114,7 @@ public final class PaymentRules {
         }
         lines.forEach(l -> {
             boolean ok = (l.mode() != null && MODES.contains(l.mode())) || (allowCredit && CREDIT.equals(l.mode()));
-            if (!ok) {
-                throw new IllegalArgumentException(allowCredit
-                    ? "payment mode must be CASH, UPI or CARD (or CREDIT on a bill)" : "payment mode must be CASH, UPI or CARD");
-            }
+            if (!ok) throw new IllegalArgumentException(modeMessage(l.mode(), allowCredit));
             if (l.amountPaise() <= 0) {
                 throw new IllegalArgumentException("payment amounts must be positive");
             }

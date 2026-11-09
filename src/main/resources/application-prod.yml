@@ -1,3 +1,20 @@
+spring:
+  datasource:
+    # Production pools. PostgreSQL allows 100 connections by default: instances x DB_POOL_MAX must stay under that.
+    # Requests run on virtual threads, so the database pool is the real concurrency limit. Override with the environment variables.
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:10}
+      connection-timeout: ${DB_POOL_WAIT_MS:5000}
+      leak-detection-threshold: ${DB_POOL_LEAK_MS:0}
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULER_THREADS:4}
+server:
+  tomcat:
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:200}
 logging:
   level:
     # Change at runtime with LOG_LEVEL_ROOT / LOG_LEVEL_APP (for example DEBUG while chasing a problem), no rebuild needed.

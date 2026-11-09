@@ -129,8 +129,8 @@ class TokenServiceTest {
     var r = row(false, NOW.plusSeconds(5));
     when(refresh.findByHash(OtpHasher.sha256Hex("known"))).thenReturn(Optional.of(r));
     when(refresh.findByHash(OtpHasher.sha256Hex("unknown"))).thenReturn(Optional.empty());
-    service.logout("known");
-    service.logout("unknown");
+    assertThat(service.logout("known")).contains(r.userId());
+    assertThat(service.logout("unknown")).isEmpty();
     verify(refresh).revoke(r.id(), NOW);
     verify(refresh, Mockito.times(1)).revoke(any(), any());
   }

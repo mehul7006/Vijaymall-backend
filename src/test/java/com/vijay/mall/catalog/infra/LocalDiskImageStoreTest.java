@@ -98,8 +98,9 @@ class LocalDiskImageStoreTest {
   void bytesThatAreNotAnImageAreRejectedAsValidationErrors() {
     assertThatThrownBy(() -> store().save("hello".getBytes(StandardCharsets.UTF_8), "products"))
         .isInstanceOfSatisfying(ApiException.class, e -> {
-          assertThat(e.code()).isEqualTo("VALIDATION_FAILED");
-          assertThat(e.details().toString()).contains("file", "not an image");
+          assertThat(e.code()).isEqualTo("UNSUPPORTED_IMAGE");
+          assertThat(e.status().value()).isEqualTo(400);
+          assertThat(e.details()).isEqualTo(java.util.Map.of("fields", java.util.Map.of("file", "must be an image (JPEG, PNG or WebP)")));
         });
     assertThatThrownBy(() -> store().save(new byte[0], "products")).isInstanceOf(ApiException.class);
     assertThat(dir.resolve("products")).doesNotExist();
@@ -109,7 +110,10 @@ class LocalDiskImageStoreTest {
   void imageOverTwentyFiveMillionPixelsIsRejected() throws IOException {
     byte[] huge = encode(new BufferedImage(5001, 5001, BufferedImage.TYPE_BYTE_GRAY), "png"); // 25,010,001 px
     assertThatThrownBy(() -> store().save(huge, "products"))
-        .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.details().toString()).contains("too large"));
+        .isInstanceOfSatisfying(ApiException.class, e -> {
+          assertThat(e.code()).isEqualTo("FILE_TOO_LARGE");
+          assertThat(e.details().toString()).contains("file", "image is too large (max 25000000 pixels)");
+        });
     assertThat(dir.resolve("products")).doesNotExist();
   }
 

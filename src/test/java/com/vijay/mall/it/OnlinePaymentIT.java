@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.order.app.OrderService;
 import com.vijay.mall.payment.app.PaymentService;
+import com.vijay.mall.payment.domain.PaymentEvents;
 import com.vijay.mall.payment.infra.PaymentRepository;
 import com.vijay.mall.support.FakeGateway;
 import com.vijay.mall.support.IntegrationTestBase;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
@@ -40,6 +42,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
 
   @Autowired FakeGateway fake;
   @Autowired OrderService orders;
+  @Autowired ApplicationEventPublisher events;
   @Autowired PaymentService payments;
   @Autowired PaymentRepository paymentRepo;
 
@@ -274,6 +277,23 @@ class OnlinePaymentIT extends IntegrationTestBase {
     orders.expireUnpaid();
     assertThat(order(p)).containsEntry("status", "CANCELLED");
     assertThat(stock(p.productId())).isEqualTo(before);
+  }
+
+  @Test
+  void anExpiredOrderIsCancelledBySystemWithATimeoutCode() {
+    var p = placeOnline("Orange Juice", 1);
+    jdbc.update("UPDATE orders SET expires_at = ? WHERE id = ?::uuid", Timestamp.from(Instant.now().minusSeconds(60)), p.orderId());
+    orders.expireUnpaid();
+    assertThat(order(p)).containsEntry("cancelledBy", "SYSTEM").containsEntry("cancelCode", "PAYMENT_TIMEOUT");
+    assertThat(order(p).get("cancelReason")).isNull();
+  }
+
+  @Test
+  void aFailedPaymentCancelsTheOrderBySystemWithAFailureCode() {
+    var p = placeOnline("Orange Juice", 1);
+    events.publishEvent(new PaymentEvents.PaymentFailed(UUID.fromString(p.orderId()), "declined"));
+    assertThat(order(p)).containsEntry("status", "CANCELLED").containsEntry("cancelledBy", "SYSTEM")
+        .containsEntry("cancelCode", "PAYMENT_FAILED");
   }
 
   @Test

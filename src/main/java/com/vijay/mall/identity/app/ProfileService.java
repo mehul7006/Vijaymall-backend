@@ -41,11 +41,12 @@ public class ProfileService {
    * Saves the display name and mobile number.
    * <p>
    * The mobile must be 10 digits (or empty to clear it) and a number proven by OTP cannot be replaced here (409
-   * {@code MOBILE_VERIFIED}). A null name leaves the saved name unchanged.
+   * {@code MOBILE_VERIFIED}). A null name leaves the saved name unchanged; a blank one is refused (400 {@code fields.name}).
    * @return the saved profile
    */
   @Transactional
   public User update(UUID id, String name, String mobile) {
+    if (name != null && name.isBlank()) throw ApiException.validation("name", "must not be blank");
     if (mobile != null && !mobile.isBlank() && !mobile.matches("\\d{10}")) {
       throw ApiException.validation("mobile", "must be 10 digits");
     }
@@ -74,7 +75,7 @@ public class ProfileService {
   public Address addAddress(UUID userId, Address in) {
     boolean makeDefault = in.isDefault() || addresses.count(userId) == 0;
     if (makeDefault) addresses.clearDefault(userId);
-    return addresses.insert(userId, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), makeDefault), clock.instant());
+    return addresses.insert(userId, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), makeDefault, in.phone()), clock.instant());
   }
 
   /**
@@ -87,7 +88,7 @@ public class ProfileService {
     // The default only ever moves by marking another address as the default: leaving the flag out, or sending false on the
     // current default, keeps it, so a customer who has addresses always has exactly one default.
     if (in.isDefault()) addresses.clearDefault(userId);
-    addresses.update(userId, id, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), current.isDefault() || in.isDefault()));
+    addresses.update(userId, id, new Address(null, in.label(), in.line1(), in.area(), in.pincode(), current.isDefault() || in.isDefault(), in.phone()));
     return address(userId, id);
   }
 
@@ -100,7 +101,7 @@ public class ProfileService {
       // the customer always keeps a default address while they have any: the first one left takes over
       addresses.list(userId).stream().findFirst().ifPresent(a -> {
         addresses.clearDefault(userId);
-        addresses.update(userId, a.id(), new Address(a.id(), a.label(), a.line1(), a.area(), a.pincode(), true));
+        addresses.update(userId, a.id(), new Address(a.id(), a.label(), a.line1(), a.area(), a.pincode(), true, a.phone()));
       });
     }
   }
@@ -110,6 +111,10 @@ public class ProfileService {
   public void registerDevice(UUID userId, String token, String platform) {
     devices.upsert(userId, token, platform, clock.instant());
   }
+
+  /** Forgets one of the user's own push tokens (sign-out). Idempotent: an unknown token, or one that belongs to someone else, changes nothing. */
+  @Transactional
+  public void unregisterDevice(UUID userId, String token) { devices.deleteOwned(userId, token); }
 
   /** Ids of the active admins, for example to address "new order" notifications. */
   public List<UUID> adminIds() { return users.adminIds(); }

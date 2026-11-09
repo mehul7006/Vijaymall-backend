@@ -35,7 +35,8 @@ class CorsConfigCoverageTest {
     assertThat(api.getAllowedOriginPatterns()).containsExactly("https://shop.example", "http://localhost:*");
     assertThat(api.getAllowedMethods()).containsExactlyElementsOf(CorsConfig.METHODS);
     assertThat(api.getAllowedHeaders()).containsExactlyElementsOf(CorsConfig.HEADERS);
-    assertThat(api.getExposedHeaders()).containsExactly("X-Trace-Id");
+    assertThat(api.getExposedHeaders()).containsExactly("ETag", "Retry-After", "X-Trace-Id");
+    assertThat(api.getAllowedHeaders()).contains("If-None-Match", "Idempotency-Key", "Authorization");
     assertThat(api.getAllowCredentials()).isFalse();
     assertThat(api.getMaxAge()).isEqualTo(3600L);
 

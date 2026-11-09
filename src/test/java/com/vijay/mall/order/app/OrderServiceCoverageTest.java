@@ -133,7 +133,7 @@ class OrderServiceCoverageTest {
     OrderRepository.Row r = stub("PLACED", "COD", "NONE", 0);
     String reason = "y".repeat(200);
     service.adminReject(r.id(), "  " + reason + "  ", actor);
-    verify(repo).setCancelReason(r.id(), "Rejected by shop: " + reason);
+    verify(repo).setCancelInfo(r.id(), "SHOP", "REJECTED_BY_SHOP", reason);
   }
 
   @Test
@@ -282,7 +282,7 @@ class OrderServiceCoverageTest {
   void customerCancelKeepsTheTrimmedReasonAndCreditsNothing() {
     OrderRepository.Row r = stub("PLACED", "COD", "NONE", 5);
     service.customerCancel(user, r.id(), "  changed my mind ");
-    verify(repo).setCancelReason(r.id(), "changed my mind");
+    verify(repo).setCancelInfo(r.id(), "CUSTOMER", "CUSTOMER_CANCELLED", "changed my mind");
     verify(wallet, never()).credit(any(), anyInt(), any());
     verify(inventory, never()).release(anyList(), any());
     verify(repo, never()).markCoinsCredited(any());
