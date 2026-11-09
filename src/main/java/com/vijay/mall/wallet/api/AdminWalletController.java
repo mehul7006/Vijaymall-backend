@@ -1,5 +1,6 @@
 package com.vijay.mall.wallet.api;
 
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.wallet.app.WalletService;
@@ -9,9 +10,11 @@ import com.vijay.mall.wallet.domain.CoinSettings;
 import com.vijay.mall.wallet.domain.StoredRule;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -43,7 +46,7 @@ public class AdminWalletController {
 
   /**
    * Request body for creating or changing an earning rule. All money is in paise.
-   * @param name rule name shown to customers
+   * @param name rule name shown to customers (at most 120 characters)
    * @param spendPaise the spend step, at least 1
    * @param coins coins given for that spend, at least 1
    * @param mode {@code PRO_RATA} or {@code SLAB}
@@ -52,8 +55,9 @@ public class AdminWalletController {
    * @param endAt last moment the rule is live; null means no end limit
    * @param active whether the rule is switched on; null means true
    */
-  public record RuleBody(@NotBlank String name, @Min(1) long spendPaise, @Min(1) long coins, @NotNull CoinMode mode,
-                         @Min(0) Long minOrderPaise, Instant startAt, Instant endAt, Boolean active) {
+  public record RuleBody(@NotBlank @Size(max = Limits.NAME) String name, @Min(1) @Max(Limits.MAX_PRICE_PAISE) long spendPaise,
+                         @Min(1) @Max(Limits.MAX_QTY) long coins, @NotNull CoinMode mode,
+                         @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long minOrderPaise, Instant startAt, Instant endAt, Boolean active) {
     StoredRule toStored() {
       return new StoredRule(null, new CoinRule(name, spendPaise, coins, mode, minOrderPaise == null ? 0 : minOrderPaise),
           startAt, endAt, active == null || active);
@@ -120,5 +124,5 @@ public class AdminWalletController {
    * Saves the coin settings. Fails with 422 when a value is out of range (see {@link WalletService#saveSettings}).
    */
   @PutMapping("/coin-settings")
-  public CoinSettings save(@RequestBody CoinSettings s) { return wallet.saveSettings(s, CurrentUser.id()); }
+  public CoinSettings save(@Valid @RequestBody CoinSettings s) { return wallet.saveSettings(s, CurrentUser.id()); }
 }

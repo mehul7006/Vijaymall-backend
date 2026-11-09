@@ -74,6 +74,12 @@ class AdminShopProfileControllerTest {
   }
 
   @Test
+  void rebuildIconsDelegates() {
+    when(service.rebuildIcons(admin)).thenReturn(profile);
+    assertThat(controller.rebuildIcons()).isSameAs(profile);
+  }
+
+  @Test
   void removeLogoDelegates() {
     when(service.removeLogo(admin)).thenReturn(profile);
     assertThat(controller.removeLogo()).isSameAs(profile);

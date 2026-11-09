@@ -92,3 +92,6 @@ The full explanation, before/after examples and what changes for the app is in [
 | Docs (file 30) | **Documented** | Added complete text for `roundOffMode`, `refundMode`, the return (credit note) and credit repayment receipts with real sample text, `updatedSince`, and the `/pos/products` fields `packSize`, `unit`, `variantName`, `displayName`. | file 30 addendum |
 | Test env | **Documented** | The seeded dev admin is `ADMIN_EMAIL` (default `admin@vijaysupermall.local`; `admin@mall.com` on instances that set it); dev code `12345`. | file 00 section 6, deploy/README.md |
 
+## Round 3 (findings register)
+
+See [52-backend-response-findings-register.md](52-backend-response-findings-register.md).

@@ -231,6 +231,7 @@ class ControllerComponentTest {
         .andExpect(jsonPath("$.coins").value(120))
         .andExpect(jsonPath("$.valuePaise").value(12000))
         .andExpect(jsonPath("$.maxRedeemPercent").value(50))
+        .andExpect(jsonPath("$.expiryMonths").value(12))
         .andExpect(jsonPath("$.rules[0].mode").value("PRO_RATA"));
   }
 }

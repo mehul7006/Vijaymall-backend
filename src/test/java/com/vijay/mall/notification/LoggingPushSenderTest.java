@@ -7,6 +7,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.vijay.mall.notification.infra.LoggingPushSender;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -18,7 +19,7 @@ class LoggingPushSenderTest {
     appender.start();
     logger.addAppender(appender);
     try {
-      new LoggingPushSender().send(List.of("a", "b"), "Hello", "World");
+      new LoggingPushSender().send(List.of("a", "b"), "Hello", "World", Map.of());
     } finally {
       logger.detachAppender(appender);
     }

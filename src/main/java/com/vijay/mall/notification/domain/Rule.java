@@ -1,5 +1,6 @@
 package com.vijay.mall.notification.domain;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +30,10 @@ import tools.jackson.databind.json.JsonMapper;
  * @param source {@code APP} or {@code POS}
  * @param has yes/no
  */
-public record Rule(String type, Boolean negate, String op, Long value, Long paise, Long minPaise, Long maxPaise, Integer withinDays,
+public record Rule(@Schema(description = "The condition type; see the condition-types catalog", allowableValues = {
+    "ORDER_COUNT", "TOTAL_SPENT", "AVG_ORDER_VALUE", "LAST_ORDER", "FIRST_ORDER_WITHIN", "BOUGHT_PRODUCT", "BOUGHT_CATEGORY",
+    "USED_COUPON", "REGISTERED", "COIN_BALANCE", "CREDIT_OWED", "CART_ABANDONED", "WISHLIST_HAS", "HAS_REVIEWED", "PINCODE_IN",
+    "SOURCE", "HAS_DEVICE"}) String type, Boolean negate, String op, Long value, Long paise, Long minPaise, Long maxPaise, Integer withinDays,
                    Integer notWithinDays, Integer beforeDays, Integer days, Integer olderThanHours, UUID productId, UUID categoryId,
                    String code, List<String> pincodes, String source, Boolean has) {
   private static final JsonMapper MAPPER = JsonMapper.builder().build();

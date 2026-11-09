@@ -7,6 +7,7 @@ import com.vijay.mall.customers.app.CustomerAdminService.CustomerView;
 import com.vijay.mall.customers.app.CustomerAdminService;
 import com.vijay.mall.order.domain.OrderViews;
 import com.vijay.mall.wallet.infra.WalletRepository;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -53,7 +54,7 @@ public class AdminCustomerController {
 
   /** q matches part of a name, e-mail or mobile number; leave it out for everyone, newest first. */
   @GetMapping
-  public Page<CustomerAdminService.CustomerRow> search(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
+  public Page<CustomerAdminService.CustomerRow> search(@Parameter(schema = @Schema(maxLength = 100)) @RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
                                    @RequestParam(defaultValue = "20") int size) {
     return customers.search(q, page, size);
   }

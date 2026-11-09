@@ -6,15 +6,18 @@ import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.HotBanner;
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -58,11 +61,13 @@ public class AdminCatalogController {
    * a new product then starts with 0 stock and the default alert level of 5. {@code variantName} / {@code variantOrder} are
    * applied after the save when given.
    */
-  public record ProductBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu,
-                            String description, @NotNull @Min(0) Long mrpPaise, @NotNull @Min(0) Long pricePaise, String unit,
-                            String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
+  public record ProductBody(@NotNull UUID categoryId, @NotBlank @Size(max = Limits.NAME) String nameEn,
+                            @NotBlank @Size(max = Limits.NAME) String nameGu, @Size(max = Limits.DESCRIPTION) String description,
+                            @NotNull @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long mrpPaise,
+                            @NotNull @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long pricePaise, @Size(max = 30) String unit,
+                            @Size(max = 40) String packSize, Boolean active, Boolean hotSale, Instant hotStart, Instant hotEnd,
                             Boolean earnsCoins, Boolean coinRedeemable, @Min(0) Integer qtyOnHand, @Min(0) Integer lowThreshold,
-                            UUID productGroupId, String variantName, Integer variantOrder) {
+                            UUID productGroupId, @Size(max = 60) String variantName, Integer variantOrder) {
     CatalogService.ProductInput toInput() {
       return new CatalogService.ProductInput(categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit,
           packSize, active == null || active, Boolean.TRUE.equals(hotSale), hotStart, hotEnd,
@@ -80,13 +85,13 @@ public class AdminCatalogController {
   @Schema(name = "ProductPatchBody", description = "Partial product edit: only the keys present change; explicit null clears hotStart, hotEnd and description")
   public record ProductPatchBody(
       @Schema(description = "Move the product to this category") UUID categoryId,
-      @Schema(description = "English name; not blank when present") String nameEn,
-      @Schema(description = "Gujarati name; not blank when present") String nameGu,
-      @Schema(description = "Description; null clears it", nullable = true) String description,
-      @Schema(description = "MRP in paise (whole number, 0 or more, not below the price)") Long mrpPaise,
-      @Schema(description = "Selling price in paise (whole number, 0 or more)") Long pricePaise,
-      @Schema(description = "Unit such as kg, pack, piece") String unit,
-      @Schema(description = "Pack size label such as 500 g") String packSize,
+      @Schema(description = "English name; not blank when present") @Size(max = Limits.NAME) String nameEn,
+      @Schema(description = "Gujarati name; not blank when present") @Size(max = Limits.NAME) String nameGu,
+      @Schema(description = "Description; null clears it", nullable = true) @Size(max = Limits.DESCRIPTION) String description,
+      @Schema(description = "MRP in paise (whole number, 0 to 100,000,000, not below the price)") @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long mrpPaise,
+      @Schema(description = "Selling price in paise (whole number, 0 to 100,000,000)") @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long pricePaise,
+      @Schema(description = "Unit such as kg, pack, piece") @Size(max = 30) String unit,
+      @Schema(description = "Pack size label such as 500 g") @Size(max = 40) String packSize,
       @Schema(description = "false hides the product from the shop") Boolean active,
       @Schema(description = "Hot-sale flag") Boolean hotSale,
       @Schema(description = "Hot-sale window start (ISO instant with Z or offset, zone-less = India time, or a plain date); null clears it", nullable = true) Instant hotStart,
@@ -94,11 +99,12 @@ public class AdminCatalogController {
       @Schema(description = "Whether buying earns coins") Boolean earnsCoins,
       @Schema(description = "Whether coins can pay for it") Boolean coinRedeemable,
       @Schema(description = "Low-stock alert level (0 or more)") Integer lowThreshold,
-      @Schema(description = "Variant label such as Large; null clears it", nullable = true) String variantName,
+      @Schema(description = "Variant label such as Large; null clears it", nullable = true) @Size(max = 60) String variantName,
       @Schema(description = "Variant display order") Integer variantOrder) {}
   /** A new variant (size, flavour, colour) of an existing product; name, description and category are copied from it. */
-  public record VariantBody(String variantName, String packSize, String unit, @Min(0) long mrpPaise, @Min(0) long pricePaise,
-                            Boolean active, Integer qtyOnHand, Integer lowThreshold, Integer variantOrder) {
+  public record VariantBody(@Size(max = 60) String variantName, @Size(max = 40) String packSize, @Size(max = 30) String unit,
+                            @Min(0) @Max(Limits.MAX_PRICE_PAISE) long mrpPaise, @Min(0) @Max(Limits.MAX_PRICE_PAISE) long pricePaise,
+                            Boolean active, @Min(0) Integer qtyOnHand, @Min(0) Integer lowThreshold, Integer variantOrder) {
     CatalogService.VariantInput toInput() {
       return new CatalogService.VariantInput(variantName, packSize, unit, mrpPaise, pricePaise, active,
           qtyOnHand == null ? 0 : qtyOnHand, lowThreshold == null ? -1 : lowThreshold, variantOrder);
@@ -106,7 +112,8 @@ public class AdminCatalogController {
   }
 
   /** What every variant of a product shares. */
-  public record GroupBody(@NotNull UUID categoryId, @NotBlank String nameEn, @NotBlank String nameGu, String description,
+  public record GroupBody(@NotNull UUID categoryId, @NotBlank @Size(max = Limits.NAME) String nameEn,
+                          @NotBlank @Size(max = Limits.NAME) String nameGu, @Size(max = Limits.DESCRIPTION) String description,
                           Boolean hotSale, Instant hotStart, Instant hotEnd, Boolean earnsCoins, Boolean coinRedeemable,
                           Boolean active) {
     CatalogService.GroupInput toInput() {
@@ -117,18 +124,19 @@ public class AdminCatalogController {
 
   /**
    * Request body for a manual stock change: {@code delta} is relative (positive adds, negative removes) and {@code reason} is
-   * {@code ADJUST} for a correction, anything else is recorded as a restock.
+   * {@code ADJUST} for a correction, anything else is recorded as a restock. A delta is a whole number of at most 1,000,000 either way.
    */
-  public record StockBody(int delta, String reason) {}
+  public record StockBody(@Min(-Limits.MAX_STOCK_DELTA) @Max(Limits.MAX_STOCK_DELTA) int delta, @Size(max = 30) String reason) {}
   /**
    * Request body to create or update a category; a missing {@code sortOrder} means 0 and a missing {@code active} means active.
    */
-  public record CategoryBody(@NotBlank String nameEn, @NotBlank String nameGu, Integer sortOrder, Boolean active) {}
+  public record CategoryBody(@NotBlank @Size(max = Limits.NAME) String nameEn, @NotBlank @Size(max = Limits.NAME) String nameGu,
+                             Integer sortOrder, Boolean active) {}
   /**
    * Request body to create or update a hot-sale banner; a missing {@code active} means active and a null start or end means no limit.
    */
-  public record BannerBody(@NotBlank String title, String subtitle, String imageUrl, Instant startAt, Instant endAt,
-                           Boolean active) {}
+  public record BannerBody(@NotBlank @Size(max = Limits.TEXT) String title, @Size(max = Limits.TEXT) String subtitle,
+                           @Size(max = 500) String imageUrl, Instant startAt, Instant endAt, Boolean active) {}
 
   private final CatalogService catalog;
   private final ImageStore images;
@@ -230,7 +238,7 @@ public class AdminCatalogController {
    * <p>Because the change is relative, send an {@code Idempotency-Key} so that a double tap on "+50" is applied only once.
    */
   @PostMapping("/products/{id}/stock")
-  public AdminProduct stock(@PathVariable UUID id, @RequestBody StockBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+  public AdminProduct stock(@PathVariable UUID id, @Valid @RequestBody StockBody b, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     // a delta is relative, so a double tap on "+50" must not add 100: the same key applies it once
     return AdminOps.run(ops, key, "stock-adjust:" + id, CurrentUser.id(), AdminOps.fingerprint(id, b),
         () -> catalog.restock(id, b.delta(), b.reason(), CurrentUser.id()), p -> id.toString(), ref -> catalog.adminGet(id));

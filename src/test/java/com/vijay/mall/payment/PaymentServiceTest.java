@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -162,7 +164,18 @@ class PaymentServiceTest {
   @Test
   void settingsRejectUnknownCodes() {
     assertThrows(ApiException.class, () -> service.saveMethods(List.of(new PaymentRepository.Setting("BITCOIN", true)), UUID.randomUUID()));
-    service.saveMethods(List.of(new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID());
+    service.saveMethods(List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID());
     verify(repo).setEnabled("ONLINE", true);
+  }
+
+  @Test
+  void aSaveMustNameEveryMethodExactlyOnce() {
+    UUID admin = UUID.randomUUID();
+    for (var in : List.of(List.<PaymentRepository.Setting>of(), List.of(new PaymentRepository.Setting("COD", true)))) {
+      assertEquals(Map.of("fields", Map.of("methods", "must list every method")), assertThrows(ApiException.class, () -> service.saveMethods(in, admin)).details());
+    }
+    var twice = List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("COD", false));
+    assertEquals(Map.of("fields", Map.of("methods", "duplicate code \"COD\"")), assertThrows(ApiException.class, () -> service.saveMethods(twice, admin)).details());
+    verify(repo, never()).setEnabled(anyString(), anyBoolean());
   }
 }

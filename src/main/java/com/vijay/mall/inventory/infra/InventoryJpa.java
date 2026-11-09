@@ -43,11 +43,16 @@ interface InventoryJpa extends JpaRepository<InventoryEntity, UUID> {
   @Query("select i from InventoryEntity i where i.productId in :ids")
   List<InventoryEntity> byIds(@Param("ids") Collection<UUID> ids);
 
-  /** Number of products whose stock is at or below their own alert level. */
-  @Query("select count(i) from InventoryEntity i where i.qtyOnHand <= i.lowThreshold")
+  /** Number of active products whose stock is at or below their own alert level (retired products are not counted). */
+  @Query("select count(i) from InventoryEntity i where i.qtyOnHand <= i.lowThreshold "
+      + "and exists (select 1 from ProductEntity p where p.id = i.productId and p.active = true)")
   long countLow();
 
-  /** Products at or below their alert level, emptiest first, limited by the page request. */
-  @Query("select i from InventoryEntity i where i.qtyOnHand <= i.lowThreshold order by i.qtyOnHand asc")
+  /**
+   * Active products at or below their alert level, emptiest first, limited by the page request. Retired products are filtered out in the
+   * query, before the limit, so they cannot use up the list.
+   */
+  @Query("select i from InventoryEntity i where i.qtyOnHand <= i.lowThreshold "
+      + "and exists (select 1 from ProductEntity p where p.id = i.productId and p.active = true) order by i.qtyOnHand asc, i.productId asc")
   List<InventoryEntity> lowStock(Pageable page);
 }

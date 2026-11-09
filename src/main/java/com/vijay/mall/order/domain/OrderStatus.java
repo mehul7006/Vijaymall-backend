@@ -7,7 +7,9 @@ import java.util.Set;
  * Order life cycle. Staff may move an open order to any other status, in any order. Three statuses are closed:
  * a delivered or picked-up order has already paid out its coins, and a cancelled one has already given back its
  * stock, coupon use, coins and money, so none of them can be changed again. PAYMENT_PENDING is set by the system
- * when an online payment starts and cannot be chosen by hand.
+ * when an online payment starts and cannot be chosen by hand. OUT_FOR_DELIVERY and DELIVERED only fit DELIVERY orders,
+ * READY_FOR_PICKUP and PICKED_UP only PICKUP orders (see {@link #fitsFulfilment}), and an order whose stock is already set
+ * aside never goes back to PLACED; the order service refuses those moves with 422 {@code INVALID_TRANSITION}.
  */
 public enum OrderStatus {
   PAYMENT_PENDING, PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP, CANCELLED;
@@ -25,6 +27,18 @@ public enum OrderStatus {
 
   /** Whether a move from this status to {@code target} is allowed. */
   public boolean canMoveTo(OrderStatus target, Fulfilment f) { return next(f).contains(target); }
+
+  /**
+   * Whether this status makes sense for the way the order is handed over: OUT_FOR_DELIVERY and DELIVERED only for DELIVERY orders,
+   * READY_FOR_PICKUP and PICKED_UP only for PICKUP orders, every other status for both.
+   */
+  public boolean fitsFulfilment(Fulfilment f) {
+    return switch (this) {
+      case OUT_FOR_DELIVERY, DELIVERED -> f == Fulfilment.DELIVERY;
+      case READY_FOR_PICKUP, PICKED_UP -> f == Fulfilment.PICKUP;
+      default -> true;
+    };
+  }
 
   /** Delivered, picked up or cancelled: nothing can change any more. */
   public boolean isFinal() { return this == DELIVERED || this == PICKED_UP || this == CANCELLED; }

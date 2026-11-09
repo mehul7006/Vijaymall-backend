@@ -61,6 +61,7 @@ public class CustomerAdminService {
   /** A light list (no per-customer lookups), so a page of 50 is one query, not hundreds. Open one customer for the full picture. */
   @Transactional(readOnly = true)
   public Page<CustomerRow> search(String q, int page, int size) {
+    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
     Page<UserRepository.Detail> p = users.searchCustomers(q, Math.max(0, page), Page.clampSize(size));
     return p.withItems(p.items().stream().map(d -> new CustomerRow(d.user().id(), d.user().name(), d.user().email(), d.user().mobile(),
         !"BLOCKED".equals(d.status()), d.createdAt())).toList());

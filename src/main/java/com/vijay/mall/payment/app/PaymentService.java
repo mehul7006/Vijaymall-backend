@@ -17,10 +17,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -332,6 +334,9 @@ public class PaymentService {
   }
 
   // ---------- admin ----------
+  /** The payment methods that exist; a save must name each of them once. */
+  static final Set<String> METHOD_CODES = Set.of("COD", "ONLINE");
+
   /** Every method with its switch, read straight from the database. */
   public List<PaymentRepository.Setting> allMethods() { return repo.settings(); }
 
@@ -348,14 +353,21 @@ public class PaymentService {
 
   /**
    * Switches methods on or off. Online payment cannot be switched on until the provider keys are set, and at least one
-   * method must stay on so customers can always check out.
+   * method must stay on so customers can always check out. The list must name every method (COD and ONLINE) exactly once.
+   *
+   * @throws ApiException 400 {@code fields.methods} when the list is empty, misses a method or repeats one
    */
   @Transactional
   public List<PaymentRepository.Setting> saveMethods(List<PaymentRepository.Setting> in, UUID actor) {
     Map<String, Boolean> result = new LinkedHashMap<>();
     repo.settings().forEach(s -> result.put(s.code(), s.enabled()));
+    Set<String> named = new HashSet<>();
     for (PaymentRepository.Setting s : in) {
-      if (!List.of("COD", "ONLINE").contains(s.code())) throw ApiException.validation("code", "unknown method");
+      if (!METHOD_CODES.contains(s.code())) throw ApiException.validation("code", "unknown method");
+      if (!named.add(s.code())) throw ApiException.validation("methods", "duplicate code \"" + s.code() + "\"");
+    }
+    if (!named.equals(METHOD_CODES)) throw ApiException.validation("methods", "must list every method");
+    for (PaymentRepository.Setting s : in) {
       if (s.enabled() && !usable(s.code())) {
         throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PAYMENT_NOT_CONFIGURED",
             "Online payment cannot be switched on until the payment provider keys are set");

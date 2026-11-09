@@ -271,7 +271,7 @@ OTP rate limits (429 `RATE_LIMITED`, `details.retryAfterSeconds`): per email 5 s
 | status | code | when |
 |---|---|---|
 | 400 | VALIDATION_FAILED | blank/malformed email or blank otp |
-| 422 | OTP_INVALID | `details.reason` is `EXPIRED` (no open code, or older than 5 min, or already used), `LOCKED` (5 wrong tries used up), or `WRONG` (code mismatch; the attempt is counted) |
+| 422 | OTP_INVALID | `details.reason` is `EXPIRED` (no open code, or older than 5 min, or already used; but replaying a used code while an earlier code locked by 5 wrong tries is still inside its 5 minutes answers `LOCKED`), `LOCKED` (5 wrong tries used up), or `WRONG` (code mismatch; the attempt is counted) |
 | 403 | FORBIDDEN | the account is blocked by an admin (or deleted) |
 
 - **UI notes**: Map `reason`: WRONG -> "Wrong code, try again" (max 5 tries); LOCKED/EXPIRED -> "Request a new code". After 5 wrong tries the user must request a new code. A deleted account is blocked and its email is renamed to a placeholder, so signing in again with the old email creates a brand-new empty account.
@@ -1473,3 +1473,57 @@ Several response/request records used to share a simple name (`View`, `Row`, `Re
 
 ### Plain dates in range-end fields
 - A plain date (for example `2026-12-31`) sent for a range-**end** instant field such as `hotEnd` means the **start** of that day in India time, so to say "through the end of that day" send a full timestamp (`2026-12-31T23:59:59+05:30`).
+
+## Addendum 3 (validation limits and consistency, round 3)
+
+**Images.** `/img/**` answers `Cache-Control: public, max-age=31536000, immutable` (no `no-store`, no `Expires: 0`), `Last-Modified`, and 304 for a conditional repeat. A picture with an alpha channel (a transparent PNG, for example the shop logo uploaded to `POST /admin/shop-profile/logo`) is stored as PNG: the returned path ends in `_400.png` (and `_1000.png`) instead of `_400.jpg`. Opaque pictures stay JPEG.
+
+**Whole numbers.** An integer field (stock `delta`, `paisePerCoin`, coin `delta`, quantities, paise) that receives `1.5` is a 400 `VALIDATION_FAILED` with `fields.<name>` = `must be a whole number`; it is no longer cut to `1`. `5.0` is rejected too (send `5`).
+
+**Same wording and checks across sibling endpoints.**
+- Variant (`POST /admin/products/{id}/variants`): `qtyOnHand` and `lowThreshold` below 0 are 400 `must be 0 or more` (they used to be stored as 0).
+- Coupon: `minOrderPaise` and `maxDiscountPaise` below 0 are 400 `must be 0 or more`.
+- Coin rule (`POST/PUT /admin/coin-rules`) and hot banner (`POST/PUT /admin/hot-banners`): an `endAt` before `startAt` is 400 `fields.endAt` = `must be after startAt`, exactly like coupons.
+
+**Size limits** (all 400 `VALIDATION_FAILED` on the field; also published in Swagger as `maxLength`, `minimum`, `maximum`). Constants live in `com.vijay.mall.common.Limits`.
+
+| Field | Limit |
+|---|---|
+| product `nameEn`, `nameGu`; category, unit and coin-rule names | 120 characters |
+| product `description` | 2000 characters |
+| `pricePaise`, `mrpPaise`, coupon `value` (FLAT), `minOrderPaise`, `maxDiscountPaise`, coin-rule `spendPaise`/`minOrderPaise`, `paisePerCoin` | 0 to 100,000,000 paise (Rs 10 lakh) |
+| `unit` / `packSize` / `variantName` | 30 / 40 / 60 characters |
+| coupon `code` | at most 30; after trimming and upper-casing only `A-Z 0-9 - _` (no spaces) |
+| coin settings `expiryMonths` | 1 to 120 |
+| coin-rule `coins` | 1 to 1,000,000 |
+| stock adjust `delta` (`POST /admin/products/{id}/stock`) | -1,000,000 to 1,000,000 |
+| hot banner `title`, `subtitle` / `imageUrl` | 200 / 500 characters |
+| purchase line `qty` | 1 to 1,000,000; `unitCostPaise` as before |
+| flash sale `name` / `description` / `bannerText`, item `maxQty` | 80 / 300 / 80 characters, 1 to 1,000,000 (file 40) |
+| shop `shopName` / `address` / `receiptFooter` | 80 / 300 / 200 characters |
+| shop `phone` | empty, or only digits, spaces, `+` and `-` with 7 to 15 digits |
+| shop `shortName` / `promise` / `details` / `holidayNote` | 20 / 200 / 500 / 200 characters |
+| Gujarati `shopNameGu` / `addressGu` / `promiseGu` / `detailsGu` / `holidayNoteGu` | 80 / 300 / 200 / 500 / 200 characters |
+
+(Profile name, address lines, holds, credit, staff and POS fields have their own limits in files 20 and 30.) A coupon has no description field, so there is nothing to limit there.
+
+## Addendum 5 (shop app icon)
+`GET /api/v1/shop-settings` (public) and `GET/PUT /api/v1/admin/shop-profile` (and the profile returned by the logo calls) have two new fields next to `logoUrl`:
+
+| field | meaning |
+|---|---|
+| `iconUrl` | square PNG icon, 512 x 512 px, e.g. `/img/shop/<uuid>_icon512.png` |
+| `icon192Url` | the same icon at 192 x 192 px, e.g. `/img/shop/<uuid>_icon192.png` |
+
+Both are `null` when the shop has no logo, and for a logo uploaded before this change until the admin rebuilds them (below). The icons are made when the admin uploads the logo (`POST /admin/shop-profile/logo`): the picture is cut to the largest centred square, scaled, and saved as PNG with its transparency kept (a wide logo loses its left and right edges, so tell admins to upload a logo that is near square or has its mark in the centre). They are served like all `/img` files: `Cache-Control: public, max-age=31536000, immutable`, so a new logo always gets new addresses.
+
+**Web-app manifest.** Use them for the installable web app and favicon, for example:
+```json
+{ "icons": [ { "src": "<api-origin>/img/shop/<uuid>_icon192.png", "sizes": "192x192", "type": "image/png" },
+             { "src": "<api-origin>/img/shop/<uuid>_icon512.png", "sizes": "512x512", "type": "image/png" } ] }
+```
+Read `icon192Url` and `iconUrl` from `GET /shop-settings` when generating the manifest (the manifest and `<link rel="icon">` can be built at start-up or server-side); when both are `null`, keep the app's built-in icon. The address changes only when the logo changes.
+
+**Rebuilding for an existing logo.** `POST /api/v1/admin/shop-profile/logo/icon` (admin, no body) makes the icons again from the stored large copy of the current logo and returns the updated profile. `404 NOT_FOUND` when there is no logo (or its file is gone). Reads never create icons; show a "Create app icon" button in the admin shop screen when `logoUrl` is set and `iconUrl` is `null`.
+
+**Cleanup.** Replacing the logo or deleting it (`DELETE /admin/shop-profile/logo`) now also deletes the old logo files (both sizes and the icons) from disk after the change is saved, so an old `logoUrl` or icon address stops working (404) once the logo is replaced. Do not store these addresses long-term; always take them from the current settings.

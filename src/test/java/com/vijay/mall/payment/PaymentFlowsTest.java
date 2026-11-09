@@ -106,7 +106,7 @@ class PaymentFlowsTest {
     assertThatThrownBy(() -> svc.requireEnabled("ONLINE")).isInstanceOf(ApiException.class);
     assertThat(svc.adminMethods()).containsExactly(new PaymentService.AdminMethod("COD", true, true),
         new PaymentService.AdminMethod("ONLINE", true, false));
-    assertThatThrownBy(() -> svc.saveMethods(List.of(new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID()))
+    assertThatThrownBy(() -> svc.saveMethods(List.of(new PaymentRepository.Setting("COD", true), new PaymentRepository.Setting("ONLINE", true)), UUID.randomUUID()))
         .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("PAYMENT_NOT_CONFIGURED"));
     verify(repo, never()).setEnabled(anyString(), ArgumentMatchers.anyBoolean());
   }

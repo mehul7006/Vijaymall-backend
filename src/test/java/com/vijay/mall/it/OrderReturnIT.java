@@ -42,7 +42,7 @@ class OrderReturnIT extends IntegrationTestBase {
   @BeforeEach
   void ready() {
     restock("Orange Juice", 40);
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken(), List.of(Map.of("code", "ONLINE", "enabled", true)), null);
+    setPaymentMethod(adminToken(), "ONLINE", true);
   }
 
   private record Delivered(String token, String orderId, long total, Object productId) {}
@@ -93,6 +93,15 @@ class OrderReturnIT extends IntegrationTestBase {
     assertThat(((Number) one.getBody().get("refundPaise")).longValue()).isEqualTo(d.total() / 3);
     assertThat(one.getBody().get("refundMode")).as("paid in cash at the door, so the shop hands it back").isEqualTo("CASH");
     assertThat(stock(d.productId())).isEqualTo(afterSale + 1);
+
+    // the stock history can trace the return: refId is the return, ref the number of the order it came from
+    String orderNo = (String) get("/api/v1/orders/" + d.orderId(), d.token()).getBody().get("orderNo");
+    var moves = (List<Map>) get("/api/v1/admin/stock-movements?productId=" + d.productId() + "&size=50", admin).getBody().get("items");
+    assertThat(moves).anySatisfy(m -> {
+      assertThat(m.get("reason")).isEqualTo("ORDER_RETURN");
+      assertThat(m.get("refId")).isEqualTo(one.getBody().get("id"));
+      assertThat(m.get("ref")).isEqualTo(orderNo);
+    });
 
     var again = giveBack(admin, d, 1, true, key);
     assertThat(again.getBody().get("id")).as("same key, same return").isEqualTo(one.getBody().get("id"));

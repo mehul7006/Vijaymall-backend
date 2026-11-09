@@ -114,6 +114,7 @@ public class PosCatalogService {
    * @param updatedSince keep only products changed at or after this instant (null = all)
    */
   public Page<PosProduct> search(String q, int page, int size, Instant updatedSince) {
+    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
     Set<UUID> exact = exactMatches(q);
     Page<ProductData> found = exact.isEmpty() && updatedSince == null ? catalog.posSearch(q, page, size)
         : catalog.posSearch(q, exact, updatedSince, page, size);

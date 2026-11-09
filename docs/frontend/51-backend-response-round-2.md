@@ -24,7 +24,7 @@ All money is paise. Times are UTC with `Z` in responses.
 | R2-12 hot-sale lacks `totalExact`/`hasMore` | Our gap | Added. |
 | R2-08 `coinMode: PERCENT` without `percent` | **Clarification plus one fix.** The default is 100 (all coins). | Documented. We also found the saved basket stored 0 instead of 100; it now defaults to 100 like the quote and the order. |
 | R2-03 PUT product clears `hotEnd` | **Clarification (by design).** PUT replaces the whole record. | Documented per field (file 10): omitted `hotStart`, `hotEnd`, `description`, `packSize` are cleared; `active`, `earnsCoins`, `coinRedeemable` reset to true and `hotSale` to false; `qtyOnHand`, `lowThreshold`, `unit`, `productGroupId`, `variantName`, `variantOrder` are kept. For partial edits use `PATCH`, which you already do. |
-| R2-14 low stock is a plain array | **Clarification.** We keep the array because the app already reads it. | Documented: cap 200 (`limit` 1..200, default 50), sorted by `qty` ascending, no paging. Note: inactive products are **not** filtered out; the old text said they were. |
+| R2-14 low stock is a plain array | **Clarification.** We keep the array because the app already reads it. | Documented: cap 200 (`limit` 1..200, default 50), sorted by `qty` ascending, no paging. Update (round 3): inactive products are now filtered out before the cap, so every row can still be sold. |
 | R2-13, D1, D2, D3 documentation | Our gap | File 30 now has `refundMode`, `roundOffMode`, the return and credit-repayment receipts with real sample text, `updatedSince` and the `/pos/products` fields. Both POS payment-mode error texts are listed. Date formats are in files 00 and 10. |
 | Test environment (admin e-mail) | **Configuration, not a bug.** | The seeded dev admin is whatever `ADMIN_EMAIL` is (default `admin@vijaysupermall.local`; your instance sets `admin@mall.com`). Documented in file 00 section 6 and `deploy/README.md`. |
 
@@ -81,11 +81,11 @@ For translation you asked for stable machine-readable details: `code`, the field
 Our own code review (reading only, then fixing) found things worth sharing:
 
 - A product's cached rating or availability could stay stale for minutes in the shop list; we are making every change that can alter a listed product clear the cache immediately. No app change needed.
-- Admin order search by customer name, mobile or e-mail used only the 200 newest matching customers, so an old customer's orders could be missed. We are removing that limit (or, if a cap must stay, the response will say so). Not released yet; the behaviour above is current until we confirm.
-- The coupon picker (`POST /cart/coupons`) prices the basket once per offered coupon; we are bounding it to at most 20 coupons and keeping one failing coupon from breaking the list. Not released yet.
+- Admin order search by customer name, mobile or e-mail used only the 200 newest matching customers, so an old customer's orders could be missed. The limit is removed: every matching customer now counts (measured at about 30 ms on 257,000 orders). Released.
+- The coupon picker (`POST /cart/coupons`) prices the basket once per offered coupon; it now tries at most 20 coupons (those open to every category with the lowest minimum order first), and one failing coupon no longer breaks the list. Released.
 - The new admin push-notification module (broadcasts and segments) has its own guide: file 60.
 
-Items marked "not released yet" are in progress; do not build against them until we confirm in file 50.
+All three items above are now in the code; the stale-cache fix needs no app change.
 
 ## 6. Your leftover test data
 

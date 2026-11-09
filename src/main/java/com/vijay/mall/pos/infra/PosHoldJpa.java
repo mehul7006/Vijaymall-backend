@@ -16,4 +16,9 @@ import org.springframework.data.repository.query.Param;
 /** Spring Data access to {@code pos_hold}, the parked baskets, newest first. */
 interface PosHoldJpa extends JpaRepository<PosHoldEntity, UUID> {
   List<PosHoldEntity> findAllByOrderByCreatedAtDesc(Pageable limit);
+
+  /** Deletes the baskets parked before {@code cutoff} and returns how many were removed. */
+  @Modifying
+  @Query("delete from PosHoldEntity h where h.createdAt < :cutoff")
+  int deleteCreatedBefore(@Param("cutoff") Instant cutoff);
 }

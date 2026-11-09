@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -38,7 +40,23 @@ public class ShopProfileService implements OnlineOrdering {
 
   /** What is stored and edited. */
   public record Profile(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
-                        List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {}
+                        List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt,
+                        String holidayNoteGu, String iconUrl, String icon192Url) {
+    /** A profile without the app icons (null). */
+    public Profile(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
+                   List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt,
+                   String holidayNoteGu) {
+      this(logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote, onlineOrdersEnabled, onlineOrdersMessage,
+          updatedAt, holidayNoteGu, null, null);
+    }
+
+    /** A profile without the Gujarati holiday note. */
+    public Profile(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
+                   List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {
+      this(logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote, onlineOrdersEnabled, onlineOrdersMessage,
+          updatedAt, "");
+    }
+  }
 
   /** What the apps get, with the parts worked out from the clock. */
   public record PublicView(Profile profile, boolean openNow, String todayHours, boolean onlineOrdersOpen, String timezone) {}
@@ -47,7 +65,11 @@ public class ShopProfileService implements OnlineOrdering {
   private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
   private static final Pattern PHONE = Pattern.compile("^\\+?[0-9]{10,15}$");
   private static final List<String> DAYS = List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
-  static final String DEFAULT_PAUSED = "We are not taking online orders right now. Please visit the shop or try again later.";
+  /** What customers read while online orders are paused and the admin left the message blank. */
+  public static final String DEFAULT_PAUSED = "We are not taking online orders right now. Please visit the shop or try again later.";
+
+  /** The message to show while orders are paused: the admin's text, or {@link #DEFAULT_PAUSED} when it is blank. */
+  public static String pausedMessage(String stored) { return stored == null || stored.isBlank() ? DEFAULT_PAUSED : stored; }
 
   private final ShopProfileRepository repo;
   private final ImageStore images;
@@ -84,7 +106,7 @@ public class ShopProfileService implements OnlineOrdering {
       hours = List.of();
     }
     return new Profile(r.logoUrl(), r.email(), r.whatsapp(), r.mapUrl(), r.website(), r.instagram(), r.facebook(), hours, r.holidayNote(),
-        r.onlineOrdersEnabled(), r.onlineOrdersMessage(), r.updatedAt());
+        r.onlineOrdersEnabled(), r.onlineOrdersMessage(), r.updatedAt(), r.holidayNoteGu(), r.iconUrl(), r.icon192Url());
   }
 
   /**
@@ -111,7 +133,7 @@ public class ShopProfileService implements OnlineOrdering {
   public void requireOpen() {
     Profile p = get();
     if (!p.onlineOrdersEnabled()) {
-      String msg = p.onlineOrdersMessage() == null || p.onlineOrdersMessage().isBlank() ? DEFAULT_PAUSED : p.onlineOrdersMessage();
+      String msg = pausedMessage(p.onlineOrdersMessage());
       throw ApiException.unprocessable("ORDERS_PAUSED", msg, Map.of());
     }
   }
@@ -127,38 +149,80 @@ public class ShopProfileService implements OnlineOrdering {
     String note = clean(in.holidayNote(), "holidayNote", 200);
     String message = clean(in.onlineOrdersMessage(), "onlineOrdersMessage", 200);
     ShopProfileRepository.Row old = repo.get();
+    String noteGu = in.holidayNoteGu() == null ? old.holidayNoteGu() : clean(in.holidayNoteGu(), "holidayNoteGu", 200);
     ShopProfileRepository.Row row = new ShopProfileRepository.Row(old.logoUrl(), email, whatsapp, link(in.mapUrl(), "mapUrl"), link(in.website(), "website"),
-        link(in.instagram(), "instagram"), link(in.facebook(), "facebook"), hoursJson(in.hours()), note, in.onlineOrdersEnabled(), message, null);
+        link(in.instagram(), "instagram"), link(in.facebook(), "facebook"), hoursJson(in.hours()), note, in.onlineOrdersEnabled(), message, null, noteGu, old.iconUrl(), old.icon192Url());
     repo.save(row, clock.instant());
     audit.log(actor, "UPDATE", "shop_profile", 1, in.onlineOrdersEnabled() ? "profile" : "online ordering paused");
     changed();
     return load();
   }
 
-  /** Stores the logo (two sizes) and returns the profile with its new address. */
+  /**
+   * Stores the logo (two sizes) and its square app icons, drops the files of the logo it replaces once the change is saved, and
+   * returns the profile with the new addresses.
+   */
   @Transactional
   public Profile setLogo(byte[] image, UUID actor) {
     if (image == null || image.length == 0) throw ApiException.validation("file", "file is empty");
+    String old = repo.get().logoUrl();
     String url = images.save(image, "shop");
-    updateLogo(url);
+    ImageStore.Icons icons = images.saveIcons(image, url);
+    updateLogo(url, icons);
+    deleteAfterCommit(old);
     audit.log(actor, "UPDATE", "shop_profile", 1, "logo");
     changed();
     return load();
   }
 
-  /** Removes the shop logo (the profile then shows no logo), audits the change and tells open app screens. */
+  /** Removes the shop logo and its icons (the profile then shows none), audits the change and tells open app screens. */
   @Transactional
   public Profile removeLogo(UUID actor) {
-    updateLogo("");
+    String old = repo.get().logoUrl();
+    updateLogo("", null);
+    deleteAfterCommit(old);
     audit.log(actor, "UPDATE", "shop_profile", 1, "logo removed");
     changed();
     return load();
   }
 
-  private void updateLogo(String url) {
+  /**
+   * Makes the app icons again from the stored large copy of the current logo, for logos uploaded before icons existed.
+   * Not found when there is no logo or its file is gone.
+   */
+  @Transactional
+  public Profile rebuildIcons(UUID actor) {
+    String logo = repo.get().logoUrl();
+    if (logo == null || logo.isBlank()) throw ApiException.notFound("shop logo");
+    ImageStore.Icons icons = images.rebuildIcons(logo).orElseThrow(() -> ApiException.notFound("shop logo file"));
     ShopProfileRepository.Row o = repo.get();
-    repo.save(new ShopProfileRepository.Row(url, o.email(), o.whatsapp(), o.mapUrl(), o.website(), o.instagram(), o.facebook(), o.hours(),
-        o.holidayNote(), o.onlineOrdersEnabled(), o.onlineOrdersMessage(), null), clock.instant());
+    repo.save(withLogo(o, o.logoUrl(), icons), clock.instant());
+    audit.log(actor, "UPDATE", "shop_profile", 1, "logo icons rebuilt");
+    changed();
+    return load();
+  }
+
+  private void updateLogo(String url, ImageStore.Icons icons) {
+    repo.save(withLogo(repo.get(), url, icons), clock.instant());
+  }
+
+  private static ShopProfileRepository.Row withLogo(ShopProfileRepository.Row o, String url, ImageStore.Icons icons) {
+    return new ShopProfileRepository.Row(url, o.email(), o.whatsapp(), o.mapUrl(), o.website(), o.instagram(), o.facebook(), o.hours(),
+        o.holidayNote(), o.onlineOrdersEnabled(), o.onlineOrdersMessage(), null, o.holidayNoteGu(),
+        icons == null ? null : icons.icon512Url(), icons == null ? null : icons.icon192Url());
+  }
+
+  /** Deletes the files of a replaced or removed logo once the transaction has committed (at once when there is none). */
+  private void deleteAfterCommit(String oldUrl) {
+    if (oldUrl == null || oldUrl.isBlank()) return;
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() { images.delete(oldUrl); }
+      });
+    } else {
+      images.delete(oldUrl);
+    }
   }
 
   private void changed() {

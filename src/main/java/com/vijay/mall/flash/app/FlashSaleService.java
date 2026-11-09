@@ -23,6 +23,9 @@ import com.vijay.mall.flash.infra.FlashRepository.Item;
 import com.vijay.mall.flash.infra.FlashRepository.Sale;
 import com.vijay.mall.flash.infra.FlashRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,10 +39,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.spi.LoggingEventBuilder;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,14 +70,15 @@ public class FlashSaleService {
 
   /** discountKind/discountValue/maxQty/perCustomerLimit may be null: follow the sale, no cap, follow the sale. */
   @Schema(name = "FlashItemInput")
-  public record ItemInput(UUID productId, String discountKind, Long discountValue, Integer maxQty, Integer perCustomerLimit) {}
+  public record ItemInput(UUID productId, String discountKind, Long discountValue, @Min(1) @Max(MAX_QTY) Integer maxQty,
+                          @Min(0) @Max(MAX_CUSTOMER_LIMIT) Integer perCustomerLimit) {}
 
   /** startsAt null = start now. channel null = BOTH. A null discountKind means NONE (every item then needs its own discount). */
-  public record CreateInput(String name, String description, String bannerText, Instant startsAt, Instant endsAt, String channel,
+  public record CreateInput(@Size(max = MAX_NAME) String name, @Size(max = MAX_DESCRIPTION) String description, @Size(max = MAX_NAME) String bannerText, Instant startsAt, Instant endsAt, String channel,
                             String discountKind, Long discountValue, Integer perCustomerLimit, List<ItemInput> items) {}
 
   /** Only the fields that are not null change. */
-  public record UpdateInput(String name, String description, String bannerText, Instant startsAt, Instant endsAt, String channel,
+  public record UpdateInput(@Size(max = MAX_NAME) String name, @Size(max = MAX_DESCRIPTION) String description, @Size(max = MAX_NAME) String bannerText, Instant startsAt, Instant endsAt, String channel,
                             String discountKind, Long discountValue, Integer perCustomerLimit) {}
 
   /** A copy of a sale on a new schedule. startsAt null = now; endsAt null = same length as the original. */
@@ -109,18 +115,23 @@ public class FlashSaleService {
   public SaleView create(CreateInput in, UUID actor) {
     Instant now = clock.instant();
     repo.lockSchedule();
-    String name = name(in.name());
-    FlashKind kind = kind("discountKind", in.discountKind());
-    long value = ruleValue("discountValue", kind, in.discountValue());
+    Map<String, Object> problems = new LinkedHashMap<>();
+    String name = collect(problems, () -> name(in.name()), "");
+    FlashKind kind = collect(problems, () -> kind("discountKind", in.discountKind()), null);
+    long value = kind == null ? 0 : collect(problems, () -> ruleValue("discountValue", kind, in.discountValue()), 0L);
     List<ItemInput> items = in.items() == null ? List.of() : in.items();
-    if (items.isEmpty()) throw ApiException.validation("items", "choose at least one product");
-    if (items.size() > MAX_ITEMS) throw ApiException.validation("items", "at most " + MAX_ITEMS + " products in one sale");
+    if (items.isEmpty()) problems.put("items", "choose at least one product");
+    else if (items.size() > MAX_ITEMS) problems.put("items", "at most " + MAX_ITEMS + " products in one sale");
     Instant start = in.startsAt() == null ? now : in.startsAt();
-    window(start, in.endsAt(), now, false);
-    Sale sale = new Sale(UUID.randomUUID(), name, text("description", in.description(), MAX_DESCRIPTION), text("bannerText", in.bannerText(), MAX_NAME),
-        start, in.endsAt(), channel(in.channel()), kind.name(), value, limit("perCustomerLimit", in.perCustomerLimit(), 0), null, actor,
-        now, now);
-    List<Item> built = buildItems(sale, items, null);
+    collect(problems, () -> { window(start, in.endsAt(), now, false); return null; }, null);
+    String description = collect(problems, () -> text("description", in.description(), MAX_DESCRIPTION), "");
+    String banner = collect(problems, () -> text("bannerText", in.bannerText(), MAX_NAME), "");
+    String channel = collect(problems, () -> channel(in.channel()), "BOTH");
+    int custLimit = collect(problems, () -> limit("perCustomerLimit", in.perCustomerLimit(), 0), 0);
+    Sale sale = new Sale(UUID.randomUUID(), name, description, banner, start, in.endsAt(), channel,
+        kind == null ? FlashKind.NONE.name() : kind.name(), value, custLimit, null, actor, now, now);
+    List<Item> built = problems.isEmpty() ? collect(problems, () -> buildItems(sale, items, null), List.<Item>of()) : List.of();
+    if (!problems.isEmpty()) throw invalid(problems);
     requireNoClash(built.stream().map(Item::productId).toList(), sale.startsAt(), sale.endsAt(), new UUID(0, 0));
     repo.insertSale(sale);
     built.forEach(i -> repo.insertItem(i, now));
@@ -183,16 +194,21 @@ public class FlashSaleService {
     FlashStatus status = status(s, now);
     requireOpen(status);
     List<Item> items = repo.items(id);
-    String name = in.name() == null ? s.name() : name(in.name());
-    String description = in.description() == null ? s.description() : text("description", in.description(), MAX_DESCRIPTION);
-    String banner = in.bannerText() == null ? s.bannerText() : text("bannerText", in.bannerText(), MAX_NAME);
+    Map<String, Object> problems = new LinkedHashMap<>();
+    String name = in.name() == null ? s.name() : collect(problems, () -> name(in.name()), s.name());
+    String description = in.description() == null ? s.description()
+        : collect(problems, () -> text("description", in.description(), MAX_DESCRIPTION), s.description());
+    String banner = in.bannerText() == null ? s.bannerText() : collect(problems, () -> text("bannerText", in.bannerText(), MAX_NAME), s.bannerText());
     Instant start = in.startsAt() == null ? s.startsAt() : in.startsAt();
     Instant end = in.endsAt() == null ? s.endsAt() : in.endsAt();
-    String channel = in.channel() == null ? s.channel() : channel(in.channel());
-    FlashKind kind = in.discountKind() == null ? FlashKind.valueOf(s.discountKind()) : kind("discountKind", in.discountKind());
+    String channel = in.channel() == null ? s.channel() : collect(problems, () -> channel(in.channel()), s.channel());
+    FlashKind kind = in.discountKind() == null ? FlashKind.valueOf(s.discountKind())
+        : collect(problems, () -> kind("discountKind", in.discountKind()), FlashKind.valueOf(s.discountKind()));
     long value = in.discountKind() == null && in.discountValue() == null ? s.discountValue()
-        : ruleValue("discountValue", kind, in.discountValue() == null ? s.discountValue() : in.discountValue());
-    int custLimit = in.perCustomerLimit() == null ? s.perCustomerLimit() : limit("perCustomerLimit", in.perCustomerLimit(), 0);
+        : collect(problems, () -> ruleValue("discountValue", kind, in.discountValue() == null ? s.discountValue() : in.discountValue()), s.discountValue());
+    int custLimit = in.perCustomerLimit() == null ? s.perCustomerLimit()
+        : collect(problems, () -> limit("perCustomerLimit", in.perCustomerLimit(), 0), s.perCustomerLimit());
+    collect(problems, () -> { window(start, end, now, status == FlashStatus.ACTIVE); return null; }, null);
     if (status == FlashStatus.ACTIVE) {
       boolean touchesRules = !start.equals(s.startsAt()) || !channel.equals(s.channel()) || kind != FlashKind.valueOf(s.discountKind())
           || value != s.discountValue() || custLimit != s.perCustomerLimit();
@@ -200,7 +216,7 @@ public class FlashSaleService {
         throw ApiException.conflict("FLASH_RUNNING", "A running sale can only be renamed or have its end time changed", Map.of());
       }
     }
-    window(start, end, now, status == FlashStatus.ACTIVE);
+    if (!problems.isEmpty()) throw invalid(problems);
     Sale changed = new Sale(id, name, description, banner, start, end, channel, kind.name(), value, custLimit, null, s.createdBy(),
         s.createdAt(), now);
     if (kind != FlashKind.valueOf(s.discountKind()) || value != s.discountValue()) revalidate(changed, items);
@@ -363,6 +379,28 @@ public class FlashSaleService {
     logEvent("flash-cancelled", s, actor).addKeyValue("wasStatus", st).log();
     changed();
     return get(id);
+  }
+
+  /**
+   * Deletes a sale that has not started and has no orders or counter bills behind it. A sale that started (running, ended or cancelled
+   * after running) or has any recorded use is history and stays: cancel it instead.
+   * @throws ApiException {@code NOT_FOUND} for an unknown sale, conflict {@code FLASH_NOT_ALLOWED} when it started or was used
+   */
+  @Transactional
+  public void delete(UUID id, UUID actor) {
+    Instant now = clock.instant();
+    repo.lockSchedule();
+    Sale s = sale(id);
+    if (!now.isBefore(s.startsAt())) {
+      throw notAllowed("This sale has already started, so it cannot be deleted. End or cancel it instead.");
+    }
+    if (repo.saleHasHistory(id) || repo.items(id).stream().anyMatch(i -> i.soldQty() > 0)) {
+      throw notAllowed("Units of this sale have already been sold, so it cannot be deleted. Cancel it instead.");
+    }
+    repo.deleteSale(id);
+    audit.log(actor, "FLASH_DELETE", "flash_sale", id, s.name() + " " + s.startsAt() + " -> " + s.endsAt());
+    logEvent("flash-deleted", s, actor).log();
+    changed();
   }
 
   /**
@@ -537,6 +575,27 @@ public class FlashSaleService {
   private static LoggingEventBuilder logEvent(String event, Sale s, UUID actor) {
     return log.atInfo().setMessage("Flash sale " + event.substring("flash-".length())).addKeyValue("event", event).addKeyValue("saleId", s.id())
         .addKeyValue("name", s.name()).addKeyValue("startsAt", s.startsAt()).addKeyValue("endsAt", s.endsAt()).addKeyValue("actor", actor);
+  }
+
+  /**
+   * Runs one field check; a validation failure is recorded under its field name(s) in {@code problems} and the fallback is returned, so the
+   * caller can go on checking the other fields and report every problem at once.
+   */
+  private static <T> T collect(Map<String, Object> problems, Supplier<T> check, T fallback) {
+    try {
+      return check.get();
+    } catch (ApiException e) {
+      ((Map<?, ?>) e.details().get("fields")).forEach((k, v) -> problems.putIfAbsent(String.valueOf(k), v));
+      return fallback;
+    }
+  }
+
+  private static ApiException invalid(Map<String, Object> problems) {
+    if (problems.size() == 1) {
+      var only = problems.entrySet().iterator().next();
+      return ApiException.validation(only.getKey(), String.valueOf(only.getValue()));
+    }
+    return new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Please check the highlighted fields", Map.of("fields", problems));
   }
 
   private static String name(String raw) {

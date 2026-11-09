@@ -78,14 +78,18 @@ class LocalDiskImageStoreTest {
   }
 
   @Test
-  void transparentPixelsBecomeWhiteBecauseJpegHasNoAlpha() throws IOException {
-    BufferedImage clear = new BufferedImage(50, 50, BufferedImage.TYPE_INT_ARGB); // fully transparent
-    String url = store().save(encode(clear, "png"), "products");
-    String id = url.substring(url.lastIndexOf('/') + 1, url.length() - "_400.jpg".length());
-    int px = read(dir.resolve("products").resolve(id + "_400.jpg")).getRGB(25, 25);
-    assertThat((px >> 16) & 0xFF).isGreaterThan(240);
-    assertThat((px >> 8) & 0xFF).isGreaterThan(240);
-    assertThat(px & 0xFF).isGreaterThan(240);
+  void transparentPictureStaysPngWithItsAlphaInBothSizes() throws IOException {
+    BufferedImage clear = new BufferedImage(1200, 50, BufferedImage.TYPE_INT_ARGB); // fully transparent
+    String url = store().save(encode(clear, "png"), "shop");
+    assertThat(url).endsWith("_400.png");
+    String id = url.substring(url.lastIndexOf('/') + 1, url.length() - "_400.png".length());
+    BufferedImage small = read(dir.resolve("shop").resolve(id + "_400.png"));
+    BufferedImage big = read(dir.resolve("shop").resolve(id + "_1000.png"));
+    assertThat(small.getWidth()).isEqualTo(400);
+    assertThat(big.getWidth()).isEqualTo(1000);
+    assertThat(small.getColorModel().hasAlpha()).isTrue();
+    assertThat((small.getRGB(25, 5) >>> 24)).isZero();
+    assertThat(dir.resolve("shop").resolve(id + "_400.jpg")).doesNotExist();
   }
 
   @Test
@@ -149,5 +153,87 @@ class LocalDiskImageStoreTest {
     Files.writeString(blocker, "i am a file, not a folder");
     byte[] png = encode(rgb(10, 10), "png");
     assertThatThrownBy(() -> store(blocker).save(png, "products")).isInstanceOf(UncheckedIOException.class);
+  }
+
+  // ---------- square app icons ----------
+  @Test
+  void aWideTransparentLogoBecomesTwoSquareTransparentPngIcons() throws IOException {
+    BufferedImage logo = new BufferedImage(1200, 600, BufferedImage.TYPE_INT_ARGB);
+    for (int x = 300; x < 900; x++) for (int y = 0; y < 600; y++) logo.setRGB(x, y, 0xFFFF0000);
+    LocalDiskImageStore store = store();
+    String url = store.save(encode(logo, "png"), "shop");
+
+    var icons = store.saveIcons(encode(logo, "png"), url);
+
+    String base = url.replace("_400.png", "");
+    assertThat(icons.icon192Url()).isEqualTo(base + "_icon192.png");
+    assertThat(icons.icon512Url()).isEqualTo(base + "_icon512.png");
+    BufferedImage small = read(dir.resolve(icons.icon192Url().substring("/img/".length())));
+    BufferedImage large = read(dir.resolve(icons.icon512Url().substring("/img/".length())));
+    assertThat(small.getWidth()).isEqualTo(192);
+    assertThat(small.getHeight()).isEqualTo(192);
+    assertThat(large.getWidth()).isEqualTo(512);
+    assertThat(large.getHeight()).isEqualTo(512);
+    assertThat(large.getColorModel().hasAlpha()).isTrue();
+    assertThat(large.getRGB(256, 256) >>> 24).as("the centre is opaque").isEqualTo(255);
+    assertThat(large.getRGB(256, 256) & 0xFFFFFF).as("the centre is the red part").isEqualTo(0xFF0000);
+  }
+
+  @Test
+  void aTallOpaqueLogoIsCentreCroppedAndASmallOneIsEnlarged() {
+    BufferedImage tall = rgb(100, 300);
+    for (int y = 100; y < 200; y++) for (int x = 0; x < 100; x++) tall.setRGB(x, y, 0x00FF00);
+    BufferedImage icon = LocalDiskImageStore.squareIcon(tall, 192);
+    assertThat(icon.getWidth()).isEqualTo(192);
+    assertThat(icon.getHeight()).isEqualTo(192);
+    assertThat(icon.getRGB(96, 5) & 0xFFFFFF).as("top of the crop is green, the cut-off parts are gone").isEqualTo(0x00FF00);
+    assertThat(icon.getRGB(96, 186) & 0xFFFFFF).isEqualTo(0x00FF00);
+  }
+
+  @Test
+  void aBigPictureIsHalvedDownToTheIconSize() {
+    BufferedImage icon = LocalDiskImageStore.squareIcon(new BufferedImage(3000, 2000, BufferedImage.TYPE_INT_ARGB), 512);
+    assertThat(icon.getWidth()).isEqualTo(512);
+    assertThat(icon.getRGB(10, 10) >>> 24).as("empty stays transparent").isZero();
+  }
+
+  @Test
+  void iconsCanBeRebuiltFromTheStoredLargeCopyOrReportNothingWhenItIsGone() throws IOException {
+    LocalDiskImageStore store = store();
+    String url = store.save(encode(new BufferedImage(800, 400, BufferedImage.TYPE_INT_ARGB), "png"), "shop");
+    assertThat(store.rebuildIcons(url)).hasValueSatisfying(i -> assertThat(Files.exists(dir.resolve(i.icon512Url().substring(5)))).isTrue());
+    Path big = dir.resolve(url.substring(5).replace("_400", "_1000"));
+    Files.write(big, "not an image".getBytes(StandardCharsets.UTF_8));
+    assertThat(store.rebuildIcons(url)).as("unreadable").isEmpty();
+    Files.delete(big);
+    assertThat(store.rebuildIcons(url)).as("missing").isEmpty();
+  }
+
+  @Test
+  void deleteRemovesEveryFileOfAPictureAndIgnoresOtherPaths() throws IOException {
+    LocalDiskImageStore store = store();
+    byte[] png = encode(new BufferedImage(300, 300, BufferedImage.TYPE_INT_ARGB), "png");
+    String url = store.save(png, "shop");
+    store.saveIcons(png, url);
+    String keep = store.save(png, "shop");
+    Path shop = dir.resolve("shop");
+    try (var files = Files.list(shop)) { assertThat(files.count()).isEqualTo(4 + 2); }
+
+    store.delete(url);
+    store.delete(null);
+    store.delete("/img/shop/../../etc/passwd_400.png");
+    store.delete(url);
+
+    try (var files = Files.list(shop)) { assertThat(files.map(f -> f.getFileName().toString())).allMatch(n -> keep.contains(n.substring(0, 36))); }
+  }
+
+  @Test
+  void iconsRefuseAMalformedPathAndANonImage() {
+    LocalDiskImageStore store = store();
+    assertThatThrownBy(() -> store.saveIcons(new byte[] {1}, "/img/shop/x.png")).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> store.saveIcons(new byte[] {1}, null)).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> store.rebuildIcons("bad")).isInstanceOf(IllegalArgumentException.class);
+    String ok = "/img/shop/" + java.util.UUID.randomUUID() + "_400.png";
+    assertThatThrownBy(() -> store.saveIcons(new byte[] {1, 2}, ok)).isInstanceOf(ApiException.class);
   }
 }

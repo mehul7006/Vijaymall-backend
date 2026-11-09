@@ -4,6 +4,7 @@ import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
 import com.vijay.mall.notification.app.PushSender;
 import java.util.List;
+import java.util.Map;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -26,7 +27,7 @@ public class PushSenderRouter implements PushSender {
   public boolean isConfigured() { return settings.isSet(Settings.FCM_SERVICE_ACCOUNT); }
 
   @Override
-  public void send(List<String> deviceTokens, String title, String body) {
-    (isConfigured() ? fcm : logging).send(deviceTokens, title, body);
+  public void send(List<String> deviceTokens, String title, String body, Map<String, String> data) {
+    (isConfigured() ? fcm : logging).send(deviceTokens, title, body, data);
   }
 }

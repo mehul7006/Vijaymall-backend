@@ -43,8 +43,9 @@ public class WalletController {
    * @param paisePerCoin value of one coin in paise
    * @param maxRedeemPercent the largest share of an order that coins may pay, in percent
    * @param rules the earning rules currently active
+   * @param expiryMonths how many months earned coins stay valid, from the coin settings the shop admin edits (always positive: coins always expire)
    */
-  public record WalletView(int coins, long valuePaise, long paisePerCoin, int maxRedeemPercent, List<RuleView> rules) {}
+  public record WalletView(int coins, long valuePaise, long paisePerCoin, int maxRedeemPercent, List<RuleView> rules, int expiryMonths) {}
 
   /**
    * One line of the coin history.
@@ -76,7 +77,7 @@ public class WalletController {
     int coins = wallet.balance(u);
     List<RuleView> rules = wallet.activeRules(clock.instant()).stream()
         .map(r -> new RuleView(r.name(), r.spendPaise(), r.coins(), r.mode().name())).toList();
-    return new WalletView(coins, coins * s.paisePerCoin(), s.paisePerCoin(), s.maxRedeemPercent(), rules);
+    return new WalletView(coins, coins * s.paisePerCoin(), s.paisePerCoin(), s.maxRedeemPercent(), rules, s.expiryMonths());
   }
 
   /** Returns a page of the coin history, newest first. {@code page} starts at 0; the default size is 20. */

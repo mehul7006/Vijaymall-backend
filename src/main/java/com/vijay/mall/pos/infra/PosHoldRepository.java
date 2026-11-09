@@ -33,8 +33,11 @@ public class PosHoldRepository {
     return toDomain(jpa.save(e));
   }
 
-  /** The most baskets the list returns: a counter never has this many parked at once, and the list must stay quick if forgotten ones pile up. */
+  /** The most baskets the list returns: at most this many can exist (creating one more is refused), so the list always shows every parked basket. */
   public static final int MAX_LISTED = 100;
+
+  /** How many baskets are parked right now. */
+  public long count() { return jpa.count(); }
 
   /** The newest {@link #MAX_LISTED} parked baskets, newest first (shared by all cashiers). */
   public List<HoldRecord> all() {
@@ -51,4 +54,8 @@ public class PosHoldRepository {
     if (exists) jpa.deleteById(id);
     return exists;
   }
+
+  /** Deletes every basket parked before {@code cutoff} and returns how many were removed (running it twice removes nothing more). */
+  @Transactional
+  public int deleteCreatedBefore(Instant cutoff) { return jpa.deleteCreatedBefore(cutoff); }
 }

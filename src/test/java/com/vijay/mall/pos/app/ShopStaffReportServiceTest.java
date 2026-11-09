@@ -68,17 +68,38 @@ class ShopStaffReportServiceTest {
     UUID id = UUID.randomUUID();
     when(users.findByEmail("asha@shop.in")).thenReturn(Optional.empty());
     when(users.upsertStaff("asha@shop.in", "Asha", null, "CASHIER", NOW)).thenReturn(new User(id, "asha@shop.in", "Asha", null, "CASHIER"));
-    assertThat(service.create("  Asha@Shop.in ", "Asha", null, admin).id()).isEqualTo(id);
-    verify(users).setStatus(id, "ACTIVE");
+    assertThat(service.create("  Asha@Shop.in ", "Asha", null, false, admin).id()).isEqualTo(id);
+  }
+
+  @Test void staff_existingAccountIsRefusedUnlessAnActiveCustomerIsConfirmed() {
+    var users = mock(UserRepository.class);
+    var service = new StaffService(users, mock(AuditService.class), clock);
+    UUID id = UUID.randomUUID();
+    User customer = new User(id, "c@shop.in", "C", "9000000001", "CUSTOMER");
+    when(users.findByEmail("c@shop.in")).thenReturn(Optional.of(customer));
+    when(users.upsertStaff("c@shop.in", null, null, "CASHIER", NOW)).thenReturn(new User(id, "c@shop.in", "C", "9000000001", "CASHIER"));
+    when(users.detail(id)).thenReturn(Optional.of(new UserRepository.Detail(customer, "ACTIVE", true, "APP", NOW)));
+    assertThatThrownBy(() -> service.create("c@shop.in", null, null, false, admin))
+        .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("EMAIL_ALREADY_REGISTERED"));
+    assertThat(service.create("c@shop.in", null, null, true, admin).role()).isEqualTo("CASHIER");
+
+    when(users.detail(id)).thenReturn(Optional.of(new UserRepository.Detail(customer, "BLOCKED", true, "APP", NOW)));
+    assertThatThrownBy(() -> service.create("c@shop.in", null, null, true, admin)).isInstanceOf(ApiException.class);
+    when(users.detail(id)).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.create("c@shop.in", null, null, true, admin)).isInstanceOf(ApiException.class);
+
+    UUID cashierId = UUID.randomUUID();
+    when(users.findByEmail("k@shop.in")).thenReturn(Optional.of(new User(cashierId, "k@shop.in", null, null, "CASHIER")));
+    assertThatThrownBy(() -> service.create("k@shop.in", null, null, true, admin)).isInstanceOf(ApiException.class);
   }
 
   @Test void staff_rejectsBadEmail_andAdmins() {
     var users = mock(UserRepository.class);
     var service = new StaffService(users, mock(AuditService.class), clock);
-    assertThatThrownBy(() -> service.create("nope", null, null, admin)).isInstanceOf(ApiException.class);
-    assertThatThrownBy(() -> service.create(null, null, null, admin)).isInstanceOf(ApiException.class);
+    assertThatThrownBy(() -> service.create("nope", null, null, false, admin)).isInstanceOf(ApiException.class);
+    assertThatThrownBy(() -> service.create(null, null, null, false, admin)).isInstanceOf(ApiException.class);
     when(users.findByEmail("boss@shop.in")).thenReturn(Optional.of(new User(UUID.randomUUID(), "boss@shop.in", null, null, "ADMIN")));
-    assertThatThrownBy(() -> service.create("boss@shop.in", null, null, admin)).hasMessageContaining("admin");
+    assertThatThrownBy(() -> service.create("boss@shop.in", null, null, true, admin)).hasMessageContaining("admin");
     verify(users, never()).upsertStaff(any(), any(), any(), any(), any());
   }
 

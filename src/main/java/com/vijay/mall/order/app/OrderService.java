@@ -324,6 +324,13 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
       String why = from.isFinal() ? "Order is " + from + " and can no longer be changed" : "Cannot move from " + from + " to " + target;
       throw ApiException.conflict("ILLEGAL_TRANSITION", why, Map.of());
     }
+    if (!target.fitsFulfilment(f)) {
+      throw ApiException.unprocessable("INVALID_TRANSITION", target + " does not apply to a " + f + " order", Map.of("fulfilment", f.name()));
+    }
+    if (target == OrderStatus.PLACED && row.stockReserved()) {
+      throw ApiException.unprocessable("INVALID_TRANSITION", "Stock is already set aside for this order, so it cannot go back to PLACED",
+          Map.of("from", from.name()));
+    }
     Instant now = clock.instant();
     // Confirming is the moment the shop commits its shelf stock. If it is gone, this throws OUT_OF_STOCK, the whole
     // change rolls back and the order stays where it was, so staff can reject it (which refunds the customer).
@@ -457,6 +464,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
 
   /** q filters by order number, customer name, mobile or e-mail (part of it is enough, any case). */
   public Page<OrderViews.AdminSummary> adminList(String status, String q, int page, int size) {
+    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
     Page<OrderRepository.SummaryRow> p = repo.adminList(status, q, Math.max(0, page), Page.clampSize(size));
     Map<UUID, User> customers = profiles.users(p.items().stream().map(OrderRepository.SummaryRow::userId).distinct().toList());
     return p.withItems(p.items().stream().map(r -> {
@@ -499,10 +507,18 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     PaymentSession session = OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? payments.sessionFor(r.id()).orElse(null) : null;
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
         repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
-        r.deliveryFee(), r.total(), r.coinsEarned(), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
+        r.deliveryFee(), r.total(), coinsKept(r), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
         r.deliverySlot(), plainReason(r.cancelReason()), wallet.balance(r.userId()),
         OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? r.expiresAt() : null, // the app shows a countdown to this
         r.cancelledBy(), r.cancelCode());
+  }
+
+  /**
+   * The coins this order really gives: coins are credited only when the order is delivered or picked up, and a cancelled order can never
+   * have got there, so a cancelled order keeps none (the stored figure is what it would have earned).
+   */
+  private static int coinsKept(OrderRepository.Row r) {
+    return OrderStatus.CANCELLED.name().equals(r.status()) ? 0 : r.coinsEarned();
   }
 
   /** The reason without the English prefix that old rows were saved with. */

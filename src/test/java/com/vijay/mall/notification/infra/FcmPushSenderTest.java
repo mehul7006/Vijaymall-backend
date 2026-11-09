@@ -137,8 +137,8 @@ class FcmPushSenderTest {
   // ---------- token ----------
   @Test
   void tokenIsFetchedOnceAndCached_andJwtIsCorrectlySigned() throws Exception {
-    sender.send(List.of("t1"), "Hi", "There");
-    sender.send(List.of("t2", "t3"), "Hi", "There");
+    sender.send(List.of("t1"), "Hi", "There", Map.of());
+    sender.send(List.of("t2", "t3"), "Hi", "There", Map.of());
 
     assertThat(tokenCalls.get()).isEqualTo(1);
     assertThat(sendCalls).hasSize(3).allSatisfy(c -> assertThat(c[0]).isEqualTo("Bearer AT-1"));
@@ -165,24 +165,24 @@ class FcmPushSenderTest {
 
   @Test
   void tokenIsRefreshedFiveMinutesBeforeExpiry() {
-    sender.send(List.of("t1"), "a", "b");
+    sender.send(List.of("t1"), "a", "b", Map.of());
     clock.now = clock.now.plusSeconds(3600 - 301); // still inside the safe window
-    sender.send(List.of("t1"), "a", "b");
+    sender.send(List.of("t1"), "a", "b", Map.of());
     assertThat(tokenCalls.get()).isEqualTo(1);
 
     tokenBody = "{\"access_token\":\"AT-2\",\"expires_in\":3600}";
     clock.now = clock.now.plusSeconds(2); // now within 5 minutes of expiry
-    sender.send(List.of("t1"), "a", "b");
+    sender.send(List.of("t1"), "a", "b", Map.of());
     assertThat(tokenCalls.get()).isEqualTo(2);
     assertThat(sendCalls.get(2)[0]).isEqualTo("Bearer AT-2");
   }
 
   @Test
   void tokenIsDiscardedWhenTheSettingChanges() {
-    sender.send(List.of("t1"), "a", "b");
+    sender.send(List.of("t1"), "a", "b", Map.of());
     tokenBody = "{\"access_token\":\"AT-9\"}"; // no expires_in: defaults to an hour
     when(settings.get(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(account(base + "/token").replace("demo-proj.iam", "other.iam"));
-    sender.send(List.of("t1"), "a", "b");
+    sender.send(List.of("t1"), "a", "b", Map.of());
     assertThat(tokenCalls.get()).isEqualTo(2);
     assertThat(sendCalls.get(1)[0]).isEqualTo("Bearer AT-9");
   }
@@ -190,8 +190,8 @@ class FcmPushSenderTest {
   @Test
   void anExpiredTokenAnswer401DropsTheCachedToken() {
     sendAnswers.put("bad", new Object[] {401, "{\"error\":{\"status\":\"UNAUTHENTICATED\"}}"});
-    sender.send(List.of("bad"), "a", "b");
-    sender.send(List.of("ok"), "a", "b");
+    sender.send(List.of("bad"), "a", "b", Map.of());
+    sender.send(List.of("ok"), "a", "b", Map.of());
     assertThat(tokenCalls.get()).isEqualTo(2);
     verify(devices, never()).deleteToken(anyString());
   }
@@ -199,7 +199,7 @@ class FcmPushSenderTest {
   // ---------- message shape ----------
   @Test
   void requestBodyHasTheFcmV1Shape() {
-    sender.send(List.of("device-1"), "Order packed", "Your order is ready");
+    sender.send(List.of("device-1"), "Order packed", "Your order is ready", Map.of());
     JsonNode m = parse(sendCalls.get(0)[1]).path("message");
     assertThat(m.path("token").asString()).isEqualTo("device-1");
     assertThat(m.path("notification").path("title").asString()).isEqualTo("Order packed");
@@ -209,8 +209,29 @@ class FcmPushSenderTest {
   }
 
   @Test
+  void dataPayloadIsCarriedAsStringsAndMissingValuesAreDropped() {
+    java.util.Map<String, String> data = new java.util.LinkedHashMap<>();
+    data.put("type", "ORDER");
+    data.put("ref", "VSM-1001");
+    data.put("empty", null);
+    sender.send(List.of("device-1"), "t", "b", data);
+    JsonNode d = parse(sendCalls.get(0)[1]).path("message").path("data");
+    assertThat(d.path("type").asString()).isEqualTo("ORDER");
+    assertThat(d.path("ref").asString()).isEqualTo("VSM-1001");
+    assertThat(d.has("empty")).isFalse();
+  }
+
+  @Test
+  void noDataMeansNoDataField() {
+    sender.send(List.of("device-1"), "t", "b", null);
+    sender.send(List.of("device-2"), "t", "b", Map.of());
+    assertThat(parse(sendCalls.get(0)[1]).path("message").has("data")).isFalse();
+    assertThat(parse(sendCalls.get(1)[1]).path("message").has("data")).isFalse();
+  }
+
+  @Test
   void longTextIsTruncated() {
-    sender.send(List.of("d"), "T".repeat(150), "B".repeat(500));
+    sender.send(List.of("d"), "T".repeat(150), "B".repeat(500), Map.of());
     JsonNode n = parse(sendCalls.get(0)[1]).path("message").path("notification");
     assertThat(n.path("title").asString()).hasSize(100);
     assertThat(n.path("body").asString()).hasSize(400);
@@ -218,7 +239,7 @@ class FcmPushSenderTest {
 
   @Test
   void nullTextBecomesEmptyAndShortTextIsKept() {
-    sender.send(List.of("d"), null, "short");
+    sender.send(List.of("d"), null, "short", Map.of());
     JsonNode n = parse(sendCalls.get(0)[1]).path("message").path("notification");
     assertThat(n.path("title").asString()).isEmpty();
     assertThat(n.path("body").asString()).isEqualTo("short");
@@ -226,8 +247,8 @@ class FcmPushSenderTest {
 
   @Test
   void emptyOrNullTokenListDoesNothing() {
-    sender.send(List.of(), "a", "b");
-    sender.send(null, "a", "b");
+    sender.send(List.of(), "a", "b", Map.of());
+    sender.send(null, "a", "b", Map.of());
     assertThat(tokenCalls.get()).isZero();
     assertThat(sendCalls).isEmpty();
   }
@@ -235,7 +256,7 @@ class FcmPushSenderTest {
   @Test
   void sendsInParallelButNeverMoreThanEightAtOnce() {
     List<String> tokens = IntStream.range(0, 40).mapToObj(i -> "tok" + i).toList();
-    sender.send(tokens, "a", "b");
+    sender.send(tokens, "a", "b", Map.of());
     assertThat(sendCalls).hasSize(40);
     assertThat(maxInFlight.get()).isBetween(2, 8);
   }
@@ -247,7 +268,7 @@ class FcmPushSenderTest {
     sendAnswers.put("gone-unreg", new Object[] {400, "{\"error\":{\"status\":\"UNREGISTERED\"}}"});
     sendAnswers.put("gone-invalid", new Object[] {400, "{\"error\":{\"status\":\"INVALID_ARGUMENT\"}}"});
     sendAnswers.put("gone-nobody", new Object[] {404, "not json"});
-    sender.send(List.of("gone404", "gone-unreg", "gone-invalid", "gone-nobody", "alive"), "a", "b");
+    sender.send(List.of("gone404", "gone-unreg", "gone-invalid", "gone-nobody", "alive"), "a", "b", Map.of());
     verify(devices).deleteToken("gone404");
     verify(devices).deleteToken("gone-unreg");
     verify(devices).deleteToken("gone-invalid");
@@ -259,7 +280,7 @@ class FcmPushSenderTest {
   void otherFailuresAreSwallowedAndTheRestIsStillSent() {
     sendAnswers.put("boom", new Object[] {500, "{\"error\":{\"status\":\"INTERNAL\"}}"});
     sendAnswers.put("quota", new Object[] {429, "<html>busy</html>"});
-    sender.send(List.of("boom", "quota", "fine"), "a", "b");
+    sender.send(List.of("boom", "quota", "fine"), "a", "b", Map.of());
     assertThat(sendCalls).hasSize(3);
     verify(devices, never()).deleteToken(anyString());
   }
@@ -268,23 +289,23 @@ class FcmPushSenderTest {
   void aFailingTokenDeleteDoesNotEscape() {
     sendAnswers.put("gone", new Object[] {404, "{}"});
     Mockito.doThrow(new IllegalStateException("db down")).when(devices).deleteToken("gone");
-    sender.send(List.of("gone", "next"), "a", "b");
+    sender.send(List.of("gone", "next"), "a", "b", Map.of());
     assertThat(sendCalls).hasSize(2);
   }
 
   @Test
   void unreachableFirebaseIsSwallowed() {
     server.stop(0);
-    sender.send(List.of("d"), "a", "b"); // token endpoint unreachable too
+    sender.send(List.of("d"), "a", "b", Map.of()); // token endpoint unreachable too
     assertThat(sendCalls).isEmpty();
   }
 
   @Test
   void unreachableSendEndpointIsSwallowed() {
-    sender.send(List.of("warm"), "a", "b"); // caches the access token
+    sender.send(List.of("warm"), "a", "b", Map.of()); // caches the access token
     FcmPushSender dead = new FcmPushSender(settings, devices, JSON, clock, "http://127.0.0.1:1");
     // fetches a token from the live fake server, then fails to reach FCM itself
-    dead.send(List.of("d"), "a", "b");
+    dead.send(List.of("d"), "a", "b", Map.of());
     verify(devices, never()).deleteToken(anyString());
   }
 
@@ -292,21 +313,21 @@ class FcmPushSenderTest {
   void tokenEndpointRefusalIsSwallowed() {
     tokenStatus = 400;
     tokenBody = "{\"error\":\"invalid_grant\",\"error_description\":\"Invalid JWT\"}";
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
     assertThat(sendCalls).isEmpty();
     tokenBody = "<html>nope</html>";
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
     tokenBody = "{\"error\":\"\"}";
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
     assertThat(sendCalls).isEmpty();
   }
 
   @Test
   void tokenAnswerWithoutAccessTokenOrNotJsonIsSwallowed() {
     tokenBody = "{\"expires_in\":10}";
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
     tokenBody = "garbage";
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
     assertThat(sendCalls).isEmpty();
   }
 
@@ -315,7 +336,7 @@ class FcmPushSenderTest {
     for (String bad : new String[] {"", "   ", "not json", "{}", "{\"project_id\":\"p\",\"client_email\":\"e\",\"private_key\":\"zzz\"}",
         "{\"project_id\":\"p\",\"client_email\":\"e\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\\nAAAA\\n-----END PRIVATE KEY-----\"}"}) {
       when(settings.get(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(bad);
-      sender.send(List.of("d"), "a", "b");
+      sender.send(List.of("d"), "a", "b", Map.of());
     }
     assertThat(sendCalls).isEmpty();
     assertThat(tokenCalls.get()).isZero();
@@ -400,7 +421,7 @@ class FcmPushSenderTest {
     m.put("token_uri", base + "/token");
     when(settings.get(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(JSON.writeValueAsString(m));
 
-    sender.send(List.of("d"), "a", "b");
+    sender.send(List.of("d"), "a", "b", Map.of());
 
     assertThat(sendCalls).isEmpty();
     assertThat(tokenCalls.get()).isZero();

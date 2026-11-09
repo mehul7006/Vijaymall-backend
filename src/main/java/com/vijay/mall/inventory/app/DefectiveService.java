@@ -113,7 +113,8 @@ public class DefectiveService {
   @Transactional
   public DefectiveRepository.Row resolve(UUID id, String action, String note, UUID actor) {
     String a = action == null ? "" : action.strip().toUpperCase();
-    if (!RESOLVE_ACTIONS.contains(a)) throw ApiException.validation("action", "WRITE_OFF or RETURN_TO_SUPPLIER");
+    if (!RESOLVE_ACTIONS.contains(a)) throw ApiException.validation("action", "must be WRITE_OFF or RETURN_TO_SUPPLIER (got "
+        + (action == null ? "none" : "\"" + action + "\"") + ")");
     String n = checkedNote(note);
     DefectiveRepository.Row row = repo.find(id).orElseThrow(() -> ApiException.notFound("Defective batch"));
     String status = "WRITE_OFF".equals(a) ? "WRITTEN_OFF" : "RETURNED_TO_SUPPLIER";

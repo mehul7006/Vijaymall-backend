@@ -33,7 +33,7 @@ class AdminConfigIT extends IntegrationTestBase {
   void restore() {
     save(adminToken(), change("razorpay.keyId", ""), change("razorpay.keySecret", ""), change("gst.roundOff", ""), change("pos.cashierDiscountPercent", ""),
         change("log.level.app", ""));
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken(), List.of(Map.of("code", "ONLINE", "enabled", false)), null);
+    setPaymentMethod(adminToken(), "ONLINE", false);
   }
 
   @Test
@@ -70,7 +70,7 @@ class AdminConfigIT extends IntegrationTestBase {
     assertThat(jdbc.queryForObject("select value from app_setting where name = 'razorpay.keySecret'", String.class)).doesNotContain("super-secret-value-9");
     assertThat(jdbc.queryForObject("select count(*) from audit_log where entity = 'app_setting'", Integer.class)).isGreaterThanOrEqualTo(2);
 
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", admin, List.of(Map.of("code", "ONLINE", "enabled", true)), null);
+    setPaymentMethod(admin, "ONLINE", true);
     assertThat(getList("/api/v1/payment-methods", cust)).extracting(m -> m.get("code")).contains("ONLINE");
 
     // a secret that is not listed stays as it is

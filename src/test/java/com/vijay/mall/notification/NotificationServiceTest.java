@@ -51,8 +51,8 @@ class NotificationServiceTest {
 
     verify(repo).insert(customer, "Order placed", "Your order VM-7 has been placed.", "ORDER", "VM-7", NOW);
     verify(repo).insert(admin, "New order", "Order VM-7 just arrived.", "ORDER", "VM-7", NOW);
-    verify(push).send(List.of("c-token"), "Order placed", "Your order VM-7 has been placed.");
-    verify(push).send(List.of("a1", "a2"), "New order", "Order VM-7 just arrived.");
+    verify(push).send(List.of("c-token"), "Order placed", "Your order VM-7 has been placed.", Map.of("type", "ORDER", "ref", "VM-7"));
+    verify(push).send(List.of("a1", "a2"), "New order", "Order VM-7 just arrived.", Map.of("type", "ORDER", "ref", "VM-7"));
   }
 
   @Test
@@ -69,7 +69,7 @@ class NotificationServiceTest {
     when(profiles.deviceTokens(customer)).thenReturn(List.of("t"));
     service.on(msg("ORDER_STATUS", "{\"orderNo\":\"VM-9\",\"userId\":\"" + customer + "\",\"status\":\"OUT_FOR_DELIVERY\"}"));
     verify(repo).insert(customer, "Order update", "Order VM-9 is now out for delivery.", "ORDER", "VM-9", NOW);
-    verify(push).send(List.of("t"), "Order update", "Order VM-9 is now out for delivery.");
+    verify(push).send(List.of("t"), "Order update", "Order VM-9 is now out for delivery.", Map.of("type", "ORDER", "ref", "VM-9"));
     verify(profiles, never()).staffIds();
   }
 
@@ -115,7 +115,7 @@ class NotificationServiceTest {
   @Test
   void aFailingPushSenderDoesNotEscape() {
     when(profiles.deviceTokens(customer)).thenReturn(List.of("t"));
-    doThrow(new IllegalStateException("fcm down")).when(push).send(any(), any(), any());
+    doThrow(new IllegalStateException("fcm down")).when(push).send(any(), any(), any(), any());
     service.on(msg("ORDER_STATUS", "{\"orderNo\":\"1\",\"userId\":\"" + customer + "\",\"status\":\"PACKED\"}"));
     verify(repo).insert(eq(customer), any(), any(), any(), any(), any());
   }

@@ -62,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -72,6 +73,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -704,14 +706,24 @@ public class PosService implements ReferenceLookup {
   }
 
   // ---------- held baskets ----------
+  /** The most lines one parked basket may hold. */
+  static final int MAX_HOLD_LINES = 50;
+
   /**
    * Parks a basket (with an optional label and customer mobile) so the cashier can serve someone else.
    *
-   * @throws ApiException 400 if the basket is empty
+   * @throws ApiException 400 if the basket is empty or has more than 50 lines; 409 {@code HOLD_LIMIT} when 100 baskets are already parked (the message says how long baskets are kept)
    */
   @Transactional
   public HoldView hold(UUID cashierId, String label, Cart cart) {
     if (cart.items() == null || cart.items().isEmpty()) throw ApiException.validation("items", "basket is empty");
+    if (cart.items().size() > MAX_HOLD_LINES) throw ApiException.validation("items", "must have at most " + MAX_HOLD_LINES + " lines");
+    checkHoldQuantities(cart.items());
+    if (holds.count() >= PosHoldRepository.MAX_LISTED) {
+      String expiry = holdExpiryDays > 0 ? ". Parked baskets are removed automatically after " + holdExpiryDays + (holdExpiryDays == 1 ? " day" : " days") : "";
+      throw ApiException.conflict("HOLD_LIMIT", "Too many parked baskets: resume or discard some first" + expiry,
+          Map.of("max", PosHoldRepository.MAX_LISTED, "expiryDays", holdExpiryDays));
+    }
     String mobile = mobile(cart.customerMobile());
     try {
       HoldRecord r = holds.insert(cashierId, label == null ? "" : label.strip(), mobile, json.writeValueAsString(cart), clock.instant());
@@ -721,7 +733,51 @@ public class PosService implements ReferenceLookup {
     }
   }
 
-  /** The newest 100 parked baskets, newest first (the list is capped so forgotten baskets cannot slow the counter). */
+  /**
+   * A parked basket keeps to the same quantity bounds as a bill: 1 to 9999 pieces, or 1 to 100000 grams for a weighed item. Products
+   * the till does not know yet are treated as counted items (a hold never checks that products exist).
+   */
+  private void checkHoldQuantities(List<Item> items) {
+    Map<UUID, ProductPos> attrs = catalog.attributesFor(items.stream().map(Item::productId).filter(Objects::nonNull).collect(Collectors.toSet()));
+    for (int i = 0; i < items.size(); i++) {
+      ProductPos a = attrs.get(items.get(i).productId());
+      int max = a != null && a.soldBy() == SoldBy.WEIGHT ? MAX_GRAMS : MAX_UNITS;
+      if (items.get(i).qty() < 1 || items.get(i).qty() > max) {
+        throw ApiException.validation("cart.items[" + i + "].qty", "must be 1 to " + max);
+      }
+    }
+  }
+
+  private int holdExpiryDays = 7;
+
+  /** Days after which a parked basket is removed automatically ({@code app.pos.hold-expiry-days}, 0 = never). */
+  @Autowired(required = false)
+  void setHoldExpiryDays(@Value("${app.pos.hold-expiry-days:7}") int days) { this.holdExpiryDays = Math.max(0, days); }
+
+  /**
+   * Daily clean-up (03:00 shop time) of baskets parked longer than the expiry, so forgotten ones cannot fill the 100-basket limit. Does
+   * nothing when the expiry is 0. Safe to run on several instances at once (the delete is idempotent); an audit entry, a log line and the
+   * {@code mall.pos.holds.expired} counter record how many were removed.
+   *
+   * @return how many baskets were removed
+   */
+  @Scheduled(cron = "0 0 3 * * *", zone = "Asia/Kolkata")
+  public int purgeExpiredHolds() {
+    if (holdExpiryDays <= 0) return 0;
+    Instant cutoff = clock.instant().minus(holdExpiryDays, ChronoUnit.DAYS);
+    int removed = tx.execute(s -> {
+      int n = holds.deleteCreatedBefore(cutoff);
+      if (n > 0) audit.log(null, "HOLD_EXPIRED", "pos_hold", null, n + " parked basket(s) older than " + holdExpiryDays + " day(s) removed");
+      return n;
+    });
+    if (removed > 0) {
+      log.info("Expired parked baskets removed count={} olderThanDays={}", removed, holdExpiryDays);
+      Metrics.count(metrics, "mall.pos.holds.expired", "Parked baskets removed after expiry", "reason", "age", removed);
+    }
+    return removed;
+  }
+
+  /** Every parked basket, newest first; at most 100 can exist, so none is ever left out. */
   public List<HoldView> holds() { return holds.all().stream().map(this::toView).toList(); }
 
   /**
@@ -743,7 +799,8 @@ public class PosService implements ReferenceLookup {
 
   private HoldView toView(HoldRecord r) {
     try {
-      return new HoldView(r.id(), r.label(), r.customerMobile(), r.cashierId(), r.createdAt(), json.readValue(r.payload(), Cart.class));
+      return new HoldView(r.id(), r.label(), r.customerMobile(), r.cashierId(), r.createdAt(), json.readValue(r.payload(), Cart.class),
+          holdExpiryDays > 0 ? r.createdAt().plus(holdExpiryDays, ChronoUnit.DAYS) : null);
     } catch (JacksonException e) {
       throw new IllegalStateException("stored basket is unreadable: " + r.id(), e);
     }

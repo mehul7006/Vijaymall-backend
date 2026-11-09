@@ -40,7 +40,7 @@ class FlashSaleOnlineIT extends FlashTestBase {
 
   @BeforeEach
   void enableOnlinePayment() {
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken(), List.of(Map.of("code", "ONLINE", "enabled", true)), null);
+    setPaymentMethod(adminToken(), "ONLINE", true);
   }
 
   private String placeOnline(String token, Object pid, int qty) {

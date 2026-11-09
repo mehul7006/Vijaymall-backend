@@ -46,4 +46,11 @@ class PublicShopAndStaffTest {
     assertThat(service.isActive(blocked)).isFalse();
     assertThat(service.isActive(fine)).isTrue();
   }
+
+  @Test
+  void pausedMessageFallsBackToTheDefaultWhenBlank() {
+    assertThat(ShopProfileService.pausedMessage(null)).isEqualTo(ShopProfileService.DEFAULT_PAUSED);
+    assertThat(ShopProfileService.pausedMessage("  ")).isEqualTo(ShopProfileService.DEFAULT_PAUSED);
+    assertThat(ShopProfileService.pausedMessage("Back at 9")).isEqualTo("Back at 9");
+  }
 }

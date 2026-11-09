@@ -13,12 +13,14 @@ public class ShopSettingRepository {
 
   ShopSettingRepository(PosShopJpa jpa) { this.jpa = jpa; }
 
+  private static String nz(String s) { return s == null ? "" : s; }
+
   /** The shop settings. */
   public ShopSetting get() {
     ShopSettingEntity e = jpa.findById(1).orElseThrow();
     return new ShopSetting(e.shopName, e.address, e.phone, e.gstin, e.stateCode, e.upiId, e.invoicePrefix,
         e.receiptFooter, e.weighedPrefix, WeighedMode.valueOf(e.weighedMode), e.promise == null ? "" : e.promise,
-        e.details == null ? "" : e.details);
+        e.details == null ? "" : e.details, nz(e.shortName), nz(e.shopNameGu), nz(e.addressGu), nz(e.promiseGu), nz(e.detailsGu));
   }
 
   /** Overwrites the shop settings. */
@@ -30,6 +32,11 @@ public class ShopSettingRepository {
     e.phone = s.phone();
     e.promise = s.promise() == null ? "" : s.promise();
     e.details = s.details() == null ? "" : s.details();
+    e.shortName = nz(s.shortName());
+    e.shopNameGu = nz(s.shopNameGu());
+    e.addressGu = nz(s.addressGu());
+    e.promiseGu = nz(s.promiseGu());
+    e.detailsGu = nz(s.detailsGu());
     e.gstin = s.gstin();
     e.stateCode = s.stateCode();
     e.upiId = s.upiId();

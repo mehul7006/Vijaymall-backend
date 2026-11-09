@@ -110,6 +110,14 @@ public class AdminFlashController {
   public FlashViews.SaleView cancel(@PathVariable UUID id) { return sales.cancel(id, CurrentUser.id()); }
 
   /**
+   * Deletes a sale that has not started and has no orders behind it; answers 204. 404 when unknown, 409 {@code FLASH_NOT_ALLOWED} when
+   * the sale already started or sold anything (cancel it instead). Open to ADMIN and CASHIER like the other flash calls.
+   */
+  @DeleteMapping("/{id}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void delete(@PathVariable UUID id) { sales.delete(id, CurrentUser.id()); }
+
+  /**
    * Copies a sale and its items onto a new schedule (body optional: new name, start and end); answers 201 Created. Sold counts start at zero.
    */
   @PostMapping("/{id}/duplicate")

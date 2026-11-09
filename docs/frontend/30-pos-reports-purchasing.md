@@ -25,7 +25,7 @@ Counter (cashier + admin, `/pos/**`)
 10. `GET /api/v1/pos/sales/{id}/returns` - returns already made on a bill
 11. `GET /api/v1/pos/upi-link` - UPI deep link to render as a QR
 12. `POST /api/v1/pos/holds` - park a basket
-13. `GET /api/v1/pos/holds` - list the newest 100 parked baskets
+13. `GET /api/v1/pos/holds` - list the parked baskets (at most 100 can exist)
 14. `GET /api/v1/pos/holds/{id}` - one parked basket
 15. `DELETE /api/v1/pos/holds/{id}` - discard a parked basket
 16. `GET /api/v1/pos/reports/day` - cash-up report for a day
@@ -99,7 +99,7 @@ Cross-references (documented in the catalog document, not here): `POST /api/v1/a
 - Pack barcode: any code of 4-32 letters/digits/dashes registered on a product (normally EAN-13). Exact match. Maps to quantity 1 piece. A `WEIGHT` product cannot be scanned by a pack barcode (400 "weighed item: enter the weight").
 - Weighed scale label: a 13-digit all-numeric code that starts with the shop's `weighedPrefix` (1 or 2 digits, default `2`), with a valid EAN-13 check digit. Layout: `[prefix][PLU][5-digit value][check digit]` where the PLU occupies the digits from after the prefix up to and including position 7 (1-based, i.e. characters 2..7 for a 1-digit prefix = 6 digits; 5 digits for a 2-digit prefix) and the value is characters 8..12. Leading zeros of the PLU are ignored when matching the product's PLU. The value means **grams** when the shop's `weighedMode` is `WEIGHT_GRAMS`, or **price in paise** when `PRICE_PAISE` (the server converts price to grams using the product price). A 13-digit code starting with the prefix but with a bad check digit is 400 "Invalid check digit on weighed label".
 
-**Payment modes.** On a bill: `CASH`, `UPI`, `CARD` (exact upper-case strings) and at most one `CREDIT` line (pay later / udhar). On refunds and credit repayments only `CASH`, `UPI`, `CARD`. Every payment amount > 0. The sum of a bill's payments must equal the payable total exactly (zero-value bill: send no payments). `reference` is optional free text (UPI transaction id, card slip no.). Cash handed over: `cashTenderedPaise` must be >= the CASH payment amount and a CASH line must exist; `changePaise = cashTendered - cashPayment`. A bill is classified `paymentType`: `NONE`, `CASH`/`UPI`/`CARD` (one mode), `SPLIT` (several modes, no credit), `CREDIT` (all credit), `HYBRID` (credit plus other modes).
+**Payment modes.** On a bill: `CASH`, `UPI`, `CARD` (upper-case is the canonical form; a lower-case or mixed-case mode such as `cash` or `Upi` is accepted and treated as `CASH` / `UPI`) and at most one `CREDIT` line (pay later / udhar). On refunds and credit repayments only `CASH`, `UPI`, `CARD`. Every payment amount > 0. The sum of a bill's payments must equal the payable total exactly (zero-value bill: send no payments). `reference` is optional free text (UPI transaction id, card slip no.). Cash handed over: `cashTenderedPaise` must be >= the CASH payment amount and a CASH line must exist; `changePaise = cashTendered - cashPayment`. A bill is classified `paymentType`: `NONE`, `CASH`/`UPI`/`CARD` (one mode), `SPLIT` (several modes, no credit), `CREDIT` (all credit), `HYBRID` (credit plus other modes).
 
 **Manual discount and manager PIN.** `manualDiscount = { amountPaise, reason, approverPin }`. Needs a reason (1-100 chars after trimming), amount <= what the bill still costs after coupon and coins. An ADMIN may give any amount without a PIN (recorded as approved by themself). A CASHIER may give it alone only if `amount * 100 <= subtotal * cashierDiscountPercent` (admin config `pos.cashierDiscountPercent`, 0-100, default 0 which means every manual discount needs a PIN). Above that the cashier needs `approverPin`: the 4-8 digit PIN of any admin (set by `PUT /admin/me/approval-pin`). Wrong or missing PIN gives 422 `DISCOUNT_NEEDS_APPROVAL`. PIN guesses are rate limited to 5 per 10 minutes per cashier (429 `RATE_LIMITED`).
 
@@ -239,7 +239,7 @@ Period rules shared by the three period reports (`summary`, `credit`, `counter-c
 ### GET /api/v1/pos/products
 - **Who**: both.
 - **Purpose / when the UI calls it**: manual product search at the counter (type a name), and paging through all products to build the offline copy.
-- **Request**: query `q` (string, optional; case-insensitive "contains" match on English or Gujarati name; barcode and PLU are **not** matched), `page` (int, default 0), `size` (int, default 20, clamped 1..50). Sorted by English name. Only active products; counter-only items included.
+- **Request**: query `q` (string, optional; case-insensitive "contains" match on English or Gujarati name, and also an exact barcode or item code (PLU): a product whose barcode or PLU equals `q` is listed first; at most 100 characters, else 400 `q`), `page` (int, default 0), `size` (int, default 20, clamped 1..50). Sorted by English name. Only active products; counter-only items included.
 - **Response**: 200 page object whose `items` are the `product` objects shown above (`PosProduct`).
 - **Errors**: none specific.
 - **UI notes**: debounce typing.
@@ -425,13 +425,13 @@ The "pay-out amount" = refund total minus any part that just reduces the custome
 ### POST /api/v1/pos/holds
 - **Who**: both.
 - **Purpose**: park a basket while the customer fetches something; resume later (any till can resume).
-- **Request**: body `{ "label": "Mrs Shah", "cart": { ...same cart object... } }`. `cart` required with non-empty `items`; `label` optional free text (trimmed, no length rule). Customer mobile, if present, must be valid. Prices/stock are not checked and nothing is reserved. Holds are not tied to a shift.
-- **Response**: 201 `{ "id": "uuid", "label": "Mrs Shah", "customerMobile": "9876543210", "cashierId": "uuid", "createdAt": "...", "cart": { "items": [...], "customerMobile": ..., "couponCode": ..., "coinMode": ..., "percent": ... } }`.
-- **Errors**: 400 `VALIDATION_FAILED` (`cart.items` empty/missing; bad mobile).
+- **Request**: body `{ "label": "Mrs Shah", "cart": { ...same cart object... } }`. `cart` required with non-empty `items`; `label` optional free text (trimmed, at most 60 characters). At most 50 lines per basket; each line `qty` is 1 to 9999 pieces (1 to 100000 grams for a weighed item), else 400 with `details.fields["cart.items[N].qty"]` "must be 1 to 9999" ("must be 1 to 100000" for weighed). Customer mobile, if present, must be valid. Prices/stock are not checked and nothing is reserved. Holds are not tied to a shift.
+- **Response**: 201 `{ "id": "uuid", "label": "Mrs Shah", "customerMobile": "9876543210", "cashierId": "uuid", "createdAt": "...", "expiresAt": "...", "cart": { "items": [...], "customerMobile": ..., "couponCode": ..., "coinMode": ..., "percent": ... } }`. `expiresAt` is when the basket is removed automatically (see Addendum 5), `null` when baskets never expire.
+- **Errors**: 400 `VALIDATION_FAILED` (`cart.items` empty/missing; more than 50 lines (`items` "must have at most 50 lines"); a `qty` out of range; `label` over 60; bad mobile). 409 `HOLD_LIMIT` ("Too many parked baskets: resume or discard some first. Parked baskets are removed automatically after 7 days", `details.max` = 100, `details.expiryDays` = 7) when 100 baskets are already parked: resume or discard one first, so no basket ever drops out of the list. The last sentence of the message is left out when baskets never expire.
 - **UI notes**: the cart is stored as sent, the product may be gone/changed later: re-quote on resume.
 
 ### GET /api/v1/pos/holds
-- **Who**: both. Returns the **newest 100** held baskets from every cashier, newest first (not paged; older ones are not listed, so discard baskets you no longer need).
+- **Who**: both. Returns **every** held basket from every cashier, newest first (not paged). At most 100 can exist (creating the 101st is refused with 409 `HOLD_LIMIT`), so none is ever missing from the list.
 - **Response**: 200 array of hold objects as above. **Errors**: none.
 
 ### GET /api/v1/pos/holds/{id}
@@ -596,13 +596,13 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 
 ### POST /api/v1/admin/credit/accounts/{customerId}/adjust
 - **Who**: admin. **Purpose**: correction or write-off of a customer's debt, recorded in the ledger as `ADJUST` and in the audit log.
-- **Request**: body `{ "amountPaise": -5000, "note": "Written off, old balance" }`. `amountPaise` long, non-zero (negative lowers what they owe, positive raises it); `note` required (`@NotBlank`), max 200 chars.
+- **Request**: body `{ "amountPaise": -5000, "note": "Written off, old balance" }`. `amountPaise` long, non-zero, from -100,000,000 to 100,000,000 paise (negative lowers what they owe, positive raises it); `note` required (`@NotBlank`), max 200 chars.
 - **Response**: 200 `AccountView`.
 - **Errors**:
 
 | status | code | when |
 |---|---|---|
-| 400 | VALIDATION_FAILED | amount 0; blank note; note > 200 |
+| 400 | VALIDATION_FAILED | `amountPaise` beyond the bound (`fields.amountPaise` "must be at most 100000000" / "must be at least -100000000"); amount 0; blank note; note > 200 |
 | 404 | NOT_FOUND | customer |
 | 422 | CREDIT_ADJUST_TOO_LARGE | would make the balance negative; `details.balancePaise` |
 - **UI notes**: confirm dialog; irreversible except by a counter-adjustment.
@@ -716,10 +716,11 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 
 ### POST /api/v1/admin/staff
 - **Who**: admin only. **Purpose**: add a cashier; they then sign in with the normal e-mail OTP flow.
-- **Request**: body `{ "email": "c@x.com", "name": "Asha", "mobile": "9876543210" }`. `email` required, must look like an e-mail (stored lower-case); `name`, `mobile` optional (blank ignored).
+- **Request**: body `{ "email": "c@x.com", "name": "Asha", "mobile": "9876543210" }`. `email` required, must look like an e-mail (stored lower-case); `name` optional, 1 to 80 characters; `mobile` optional, exactly 10 digits (else 400 `mobile` "must be 10 digits"); `confirmPromote` optional boolean (see below).
 - **Response**: 201 staff object (`active: true`).
-- **Errors**: 400 `VALIDATION_FAILED` (`email` invalid, or "this email belongs to an admin").
-- **UI notes**: creating with an e-mail that already belongs to a non-admin user (e.g. a customer) turns that account into a cashier and unblocks it (upsert) **(inferred from code)**; the cashier does not need a password.
+- **Errors**: 400 `VALIDATION_FAILED` (`email` invalid, "this email belongs to an admin", bad `name` or `mobile`). 409 `EMAIL_ALREADY_REGISTERED` when the e-mail already has any account (customer, cashier, blocked or deleted) and the request does not qualify for promotion below; `details.role` tells what the account is.
+- **Promoting an existing customer**: send `"confirmPromote": true` after asking the admin "this e-mail already belongs to a customer: make them a cashier?". Only an **active customer** is promoted (201, the account becomes a cashier and keeps its history; a `name`/`mobile` in the request replaces the stored one). A blocked or deleted account, an existing cashier and an admin are never promoted: they stay 409 (admin: 400). Without `confirmPromote` nothing is changed.
+- **UI notes**: the cashier does not need a password; they sign in with the e-mail code. Show the 409 as a confirmation dialog, not as an error.
 
 ### PATCH /api/v1/admin/staff/{id}
 - **Who**: admin only. **Purpose**: block or unblock a cashier; a blocked cashier loses access on the next request.
@@ -741,17 +742,19 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 |---|---|---|---|
 | supplierName | string | yes | 1..120 chars after trimming |
 | invoiceNo | string | no | supplier's invoice number, max 60 |
-| note | string | no | max 300 |
+| note | string | no | max 200 |
 | items | array | yes | 1..200 lines; a product may appear only once per delivery |
 | items[].productId | uuid | yes | must exist |
-| items[].qty | int | yes | 1..10,000,000 (pieces; grams for weighed products) |
+| items[].qty | int | yes | 1..1,000,000 (pieces; grams for weighed products) |
 | items[].unitCostPaise | long | yes | 0..100,000,000 paise (Rs 10 lakh per unit upper bound); cost per stock unit **(unsure how cost is expressed for weighed items)** |
 - **Response**: 201.
 ```json
 { "id": "uuid", "supplierName": "Shah Traders", "invoiceNo": "ST-2231", "note": "Morning delivery", "totalCostPaise": 228000,
   "createdBy": "uuid", "createdAt": "2026-11-08T08:00:00Z",
-  "items": [ { "productId": "uuid", "name": "Basmati Rice 1kg", "qty": 24, "unitCostPaise": 9500, "lineCostPaise": 228000 } ] }
+  "items": [ { "productId": "uuid", "name": "Basmati Rice 1kg", "qty": 24, "unitCostPaise": 9500, "lineCostPaise": 228000 } ],
+  "warnings": [] }
 ```
+`warnings` is a list of texts; it is non-empty when the same invoice number was already recorded for the same supplier (see Addendum 5). The delivery is recorded either way.
 - **Errors**: 400 `VALIDATION_FAILED` (fields `supplierName`, `invoiceNo`, `note`, `items` incl. "a product appears twice: add its quantities together", `productId` required / "a product does not exist", `qty`, `unitCostPaise`; missing key header).
 - **UI notes**: generate the key when the admin opens the "new delivery" form, keep it until success. Never let the admin submit twice with new keys.
 
@@ -842,9 +845,9 @@ Sorted by `salesPaise` descending. Percentages are of that cashier's own sales, 
 - **Errors**: 400 as in shared period rules.
 
 ### GET /api/v1/admin/stock/low
-- **Who**: admin only. **Purpose**: reorder list.
+- **Who**: admin only. **Purpose**: reorder list. Retired (inactive) products are not listed (they are filtered before the cap), so every row is a product that can still be sold.
 - **Request**: query `limit` int, default 50. **The hard cap is 200 rows**: a `limit` above 200 returns 200 and one below 1 returns 1, silently (no error). There is no `page` parameter and no `hasMore`, so this endpoint can never show more than the 200 emptiest products; the dashboard's `lowStock` list is the same list cut to 10.
-- **Response**: 200 plain array (deliberately not a paged object) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: products whose stock is at or below their own alert level (`lowThreshold`), **sorted by `qty` ascending** (emptiest first; products with the same `qty` come in no guaranteed order). Retired (inactive) products are not filtered out of this list. Set the alert level per product in the catalog admin screens.
+- **Response**: 200 plain array (deliberately not a paged object) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: products whose stock is at or below their own alert level (`lowThreshold`), **sorted by `qty` ascending** (emptiest first; products with the same `qty` come in no guaranteed order). Retired (inactive) products are filtered out before the cap. Set the alert level per product in the catalog admin screens.
 
 ### GET /api/v1/admin/audit-log
 - **Who**: admin only. **Purpose**: "who changed what", newest first.
@@ -1043,9 +1046,8 @@ Money is in paise everywhere below. Everything here is read from the code; nothi
 ### Flash-sale prices at the counter
 Documented in the addendum "flash-sale prices at the counter" above and in `40-flash-sales.md`: sale-price lines, split lines, `flashSaleId`, `listPricePaise`, `flashDiscountPaise`; grams items never discounted; offline bills record the till's price and show it as a `PRICE_CHANGED` exception.
 
-### GET /api/v1/pos/holds (changed): newest 100 only
-- Returns **at most the newest 100** held baskets, newest first, from every cashier. There is no paging: older baskets beyond the 100th are not returned (they still exist and `GET /pos/holds/{id}` and `DELETE /pos/holds/{id}` still work for them). Discard baskets you no longer need.
-- `POST /pos/holds` is unchanged.
+### GET /api/v1/pos/holds (changed): at most 100 exist
+- Returns every held basket, newest first, from every cashier. There is no paging. Since the 101st basket is refused (`POST /pos/holds` answers 409 `HOLD_LIMIT`), the list can no longer hide older baskets. Baskets parked before this rule that already number more than 100 still show only the newest 100 until some are discarded.
 
 ### Paging fields: stock movements and audit log
 `GET /api/v1/admin/stock-movements` and `GET /api/v1/admin/audit-log` (and the other paged lists) now return `{ "items": [...], "page": 0, "size": 20, "total": 123, "totalExact": true, "hasMore": false }`.
@@ -1149,3 +1151,35 @@ Request and response are in the section above (the response `id` is the id for t
 
 ### GET /api/v1/admin/stock/low
 Plain array, unchanged. Cap 200 rows (`limit` 1..200, default 50), sorted by `qty` ascending. See the report section above.
+
+## Addendum: input limits (counter, credit, purchasing)
+Every limit below is also in the Swagger schema. A value outside it answers `400 VALIDATION_FAILED` with the field in `details.fields` (the field name is the JSON path, for example `cart.items[0].qty`), so a huge number never reaches the business rules.
+
+| input | limit |
+|---|---|
+| Basket line `qty` (quote, sale, hold) | 1 to 9999 pieces, 1 to 100000 grams for a weighed item (a hold names the bound: "must be 1 to 9999") |
+| Held basket | label at most 60 characters, at most 50 lines, at most 100 baskets in all (409 `HOLD_LIMIT`) |
+| Payment / refund / repayment `amountPaise` | 0 to 100,000,000 paise (and the usual rules: more than 0 where the guide says so) |
+| `cashTenderedPaise` | at most 100,000,000 paise |
+| Manual discount `amountPaise` | 0 to 100,000,000 paise; `reason` at most 200 characters |
+| Return line `qty` | 1 to 100000 (grams for a weighed item); `reason` at most 200 characters |
+| Credit limit (`limitPaise`) | 0 to 100,000,000 paise |
+| Credit adjust `amountPaise` | -100,000,000 to 100,000,000 paise, not 0 (`fields.amountPaise` "must be at most 100000000" / "must be at least -100000000") |
+| Credit adjust / repayment `note` | at most 200 characters |
+| Purchase `supplierName` | 1 to 120 characters |
+| Purchase `invoiceNo` / `note` | at most 60 / 200 characters |
+| Purchase line | `qty` 1 to 1,000,000; `unitCostPaise` 0 to 100,000,000; at most 200 lines |
+| Staff `name` / `mobile` | 1 to 80 characters / exactly 10 digits |
+| Search `q` (`GET /pos/products`, `GET /admin/customers`, `GET /admin/orders`) | at most 100 characters (`fields.q` "must be at most 100 characters") |
+
+Supplier invoice numbers: recording the same `invoiceNo` twice for one supplier is allowed, and the answer carries a `warnings` entry (see Addendum 5).
+
+## Addendum 5 (duplicate invoice warning, held basket expiry)
+
+### POST /api/v1/admin/purchases: `warnings` (new response field)
+The delivery is always recorded (legitimate re-entries exist), but when an earlier delivery has the same supplier and the same `invoiceNo` the 201 body carries a text in the new `warnings` array, for example `"invoice number ST-2231 was already recorded for this supplier on 2026-11-01 (purchase 5f0c...)"`. The date is the shop-time day of the earlier delivery (the oldest one if there are several) and the id is that delivery. `warnings` is `[]` otherwise, and always `[]` in `GET /admin/purchases` and `GET /admin/purchases/{id}`. Supplier and invoice number are compared after trimming and ignoring upper/lower case (`" st-2231 "` equals `ST-2231`); a blank invoice number never warns. A repeat of the same request (same `Idempotency-Key`) returns the same body, warning included. Show the warning as a confirmation banner ("Same invoice entered on 1 Nov: check you are not counting this delivery twice") with a link to that purchase; do not block the user or undo the delivery.
+
+### Held baskets expire
+- Parked baskets older than `app.pos.hold-expiry-days` (environment variable `HOLD_EXPIRY_DAYS`, default 7, `0` = never expire) are deleted automatically every night at 03:00 shop time (Asia/Kolkata), so forgotten baskets cannot fill the 100-basket limit. The clean-up writes an audit entry (`HOLD_EXPIRED`) with the number removed, logs it and counts it in the metric `mall.pos.holds.expired`.
+- `expiresAt` (new, in every hold object of `POST /pos/holds`, `GET /pos/holds` and `GET /pos/holds/{id}`) is the moment the basket becomes eligible for removal (`createdAt` plus the expiry days, removed at the next 03:00 run after that); `null` when baskets never expire. Show "expires in N days" and warn when a basket is close to expiring.
+- The 409 `HOLD_LIMIT` message now ends with "Parked baskets are removed automatically after N days" and `details.expiryDays` holds N (0 when baskets never expire, in which case the sentence is left out). A basket removed this way answers 404 on `GET /pos/holds/{id}` like a discarded one, so a till that tries to resume an old basket should refresh its list.

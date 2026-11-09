@@ -326,10 +326,16 @@ public class OrderRepository {
     return orders.expiredPending(now, PageRequest.of(0, limit)).stream().map(e -> e.id).toList();
   }
 
-  /** Order numbers for the given ids; ids that do not exist are left out. */
+  /**
+   * Order numbers for the given ids; ids that do not exist are left out. The id of a return of an online order answers with the number
+   * of the order it belongs to, so the stock history can show which order a returned item came from.
+   */
   public Map<UUID, String> numbers(Collection<UUID> ids) {
     if (ids.isEmpty()) return Map.of();
-    return orders.numbers(ids).stream().collect(Collectors.toMap(r -> (UUID) r[0], r -> (String) r[1]));
+    Map<UUID, String> out = new HashMap<>();
+    orders.returnNumbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
+    orders.numbers(ids).forEach(r -> out.put((UUID) r[0], (String) r[1]));
+    return out;
   }
 
   private Page<SummaryRow> summaries(org.springframework.data.domain.Page<OrderEntity> page, int pageNo, int size) {

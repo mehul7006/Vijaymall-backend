@@ -5,6 +5,8 @@ import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.order.app.OrderService;
 import com.vijay.mall.order.domain.OrderStatus;
 import com.vijay.mall.order.domain.OrderViews;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -30,7 +32,7 @@ public class AdminOrderController {
    * @param status the status to move to; {@code PAYMENT_PENDING} cannot be chosen
    * @param note optional note kept in the order's status history
    */
-  public record StatusBody(@NotNull OrderStatus status, String note) {}
+  public record StatusBody(@NotNull OrderStatus status, @Size(max = 200) String note) {}
 
   /**
    * Body of a rejection.
@@ -52,7 +54,7 @@ public class AdminOrderController {
    */
   @GetMapping
   public Page<OrderViews.AdminSummary> list(@RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String q,
+                                            @Parameter(schema = @Schema(maxLength = 100)) @RequestParam(required = false) String q,
                                             @RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "20") int size) {
     return orders.adminList(status, q, page, size);

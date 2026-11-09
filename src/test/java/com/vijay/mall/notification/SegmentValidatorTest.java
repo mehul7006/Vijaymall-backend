@@ -123,6 +123,28 @@ class SegmentValidatorTest {
     assertThat(fieldsOf(all("{\"type\":\"ORDER_COUNT\"}", "{\"type\":\"NOPE\"}"))).containsKeys("rules[0].op", "rules[0].value", "rules[1].type");
   }
 
+  private static boolean gujarati(String text) {
+    return text != null && !text.isBlank() && text.codePoints().anyMatch(c -> c >= 0x0A80 && c <= 0x0AFF);
+  }
+
+  @Test
+  void everyConditionParameterAndEnumOptionHasGujaratiText() {
+    assertThat(ConditionType.catalog()).hasSize(17);
+    for (ConditionType.Entry e : ConditionType.catalog()) {
+      assertThat(gujarati(e.labelGu())).as(e.type() + ".labelGu").isTrue();
+      assertThat(gujarati(e.descriptionGu())).as(e.type() + ".descriptionGu").isTrue();
+      for (Param p : e.params()) {
+        assertThat(gujarati(p.labelGu())).as(e.type() + "." + p.name() + ".labelGu").isTrue();
+        if (p.kind() == Param.Kind.ENUM) {
+          assertThat(p.optionLabelsGu().keySet()).as(e.type() + "." + p.name()).containsExactlyInAnyOrderElementsOf(p.options());
+          p.optionLabelsGu().forEach((k, v) -> assertThat(gujarati(v)).as(e.type() + "." + p.name() + "." + k).isTrue());
+        } else {
+          assertThat(p.optionLabelsGu()).isNull();
+        }
+      }
+    }
+  }
+
   @Test
   void theCatalogAndTheValidatorDescribeTheSameTypes() {
     Set<String> catalog = ConditionType.catalog().stream().map(ConditionType.Entry::type).collect(Collectors.toSet());

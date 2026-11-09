@@ -5,6 +5,8 @@ import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.pos.app.CreditService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
@@ -24,6 +26,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/credit")
 public class AdminCreditController {
+  /** The largest amount (paise) a limit or an adjustment may carry: 100,000,000 paise (10 lakh rupees). */
+  static final long LIMIT_MAX = 100_000_000L;
+
   private AdminOps ops;
 
   /** Makes repeats of an admin action with the same Idempotency-Key harmless (plain unit tests build the controller without it). */
@@ -33,13 +38,13 @@ public class AdminCreditController {
   /**
    * Request body for changing a known customer's credit limit. {@code limitPaise} is in paise; 0 switches credit off.
    */
-  public record LimitBody(@PositiveOrZero long limitPaise) {}
+  public record LimitBody(@PositiveOrZero @Max(value = LIMIT_MAX, message = "must be at most 100000000") long limitPaise) {}
 
   /** Approves credit for a customer by mobile number, creating the customer if the shop has not seen them yet. */
-  public record MobileLimitBody(@NotBlank String mobile, @PositiveOrZero long limitPaise) {}
+  public record MobileLimitBody(@NotBlank String mobile, @PositiveOrZero @Max(value = LIMIT_MAX, message = "must be at most 100000000") long limitPaise) {}
 
   /** amountPaise below 0 lowers what the customer owes (a write-off); above 0 raises it. A note is required. */
-  public record AdjustBody(long amountPaise, @NotBlank @Size(max = 200) String note) {}
+  public record AdjustBody(@Min(value = -LIMIT_MAX, message = "must be at least -100000000") @Max(value = LIMIT_MAX, message = "must be at most 100000000") long amountPaise, @NotBlank @Size(max = 200) String note) {}
 
   private final CreditService credit;
 

@@ -5,9 +5,13 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.inventory.app.InventoryService;
+import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.purchasing.infra.PurchaseRepository.Header;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
@@ -29,7 +33,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class PurchaseService {
   /** One product received: quantity (1 to {@link #MAX_QTY}) and the cost of each unit in paise. */
   @Schema(name = "PurchaseItemInput")
-  public record ItemInput(UUID productId, int qty, long unitCostPaise) {}
+  public record ItemInput(@NotNull UUID productId,
+                          @Min(value = 1, message = "must be 1 to 1000000") @Max(value = 1_000_000, message = "must be 1 to 1000000") int qty,
+                          @Min(value = 0, message = "must be at least 0") @Max(value = 100_000_000, message = "must be at most 100000000") long unitCostPaise) {}
 
   /** A supplier delivery to record: supplier name, optional invoice number and note, and the product lines. */
   public record Input(String supplierName, String invoiceNo, String note, List<ItemInput> items) {}
@@ -38,14 +44,27 @@ public class PurchaseService {
   @Schema(name = "PurchaseItemView")
   public record ItemView(UUID productId, String name, int qty, long unitCostPaise, long lineCostPaise) {}
 
-  /** A recorded delivery with its lines. Money is paise. */
+  /**
+   * A recorded delivery with its lines. Money is paise. {@code warnings} is filled only in the answer to recording a delivery (an empty
+   * list otherwise): it says when the same invoice number was already recorded for the same supplier.
+   */
   public record PurchaseView(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
-                             Instant createdAt, List<ItemView> items) {}
+                             Instant createdAt, List<ItemView> items, List<String> warnings) {
+    /** A delivery without warnings. */
+    public PurchaseView(UUID id, String supplierName, String invoiceNo, String note, long totalCostPaise, UUID createdBy,
+                        Instant createdAt, List<ItemView> items) {
+      this(id, supplierName, invoiceNo, note, totalCostPaise, createdBy, createdAt, items, List.of());
+    }
+
+    PurchaseView withWarnings(List<String> found) {
+      return new PurchaseView(id, supplierName, invoiceNo, note, totalCostPaise, createdBy, createdAt, items, found);
+    }
+  }
 
   /** Most product lines in one delivery. */
   public static final int MAX_LINES = 200;
   /** Largest quantity of one product in a delivery. */
-  public static final int MAX_QTY = 10_000_000;
+  public static final int MAX_QTY = 1_000_000;
   /** Rs 10 lakh per unit: anything above is a typing mistake */
   public static final long MAX_UNIT_COST = 1_000_000_00L;
 
@@ -76,7 +95,7 @@ public class PurchaseService {
     if (existing.isPresent()) return replay(existing.get(), in);
     try {
       UUID id = tx.execute(s -> doReceive(actor, idemKey, in));
-      return view(repo.find(id).orElseThrow());
+      return recorded(repo.find(id).orElseThrow());
     } catch (DataIntegrityViolationException e) {
       return replay(repo.findByIdem(idemKey).orElseThrow(() -> e), in);
     }
@@ -96,7 +115,20 @@ public class PurchaseService {
     if (!same) {
       throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED", "This Idempotency-Key was already used for a different delivery: use a new key", Map.of());
     }
-    return view(stored);
+    return recorded(stored);
+  }
+
+  private PurchaseView recorded(Header h) { return view(h).withWarnings(warnings(h)); }
+
+  /**
+   * Warns (never blocks) when an earlier delivery has the same supplier and invoice number, compared trimmed and ignoring case. Worked
+   * out from the stored delivery, so a repeated request answers with the same warning.
+   */
+  private List<String> warnings(Header h) {
+    return repo.earlierWithInvoice(h.supplierName(), h.invoiceNo(), h.id(), h.createdAt())
+        .map(e -> List.of("invoice number " + h.invoiceNo().strip() + " was already recorded for this supplier on "
+            + e.createdAt().atZone(InvoiceNumbers.SHOP_ZONE).toLocalDate() + " (purchase " + e.id() + ")"))
+        .orElse(List.of());
   }
 
   private UUID doReceive(UUID actor, String idemKey, Input in) {
@@ -105,7 +137,7 @@ public class PurchaseService {
     String note = in.note() == null ? "" : in.note().strip();
     if (supplier.isEmpty() || supplier.length() > 120) throw ApiException.validation("supplierName", "1 to 120 characters");
     if (invoice.length() > 60) throw ApiException.validation("invoiceNo", "at most 60 characters");
-    if (note.length() > 300) throw ApiException.validation("note", "at most 300 characters");
+    if (note.length() > 200) throw ApiException.validation("note", "at most 200 characters");
     List<ItemInput> lines = in.items() == null ? List.of() : in.items();
     if (lines.isEmpty() || lines.size() > MAX_LINES) throw ApiException.validation("items", "1 to " + MAX_LINES + " products");
 

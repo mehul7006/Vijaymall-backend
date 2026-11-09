@@ -50,8 +50,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
   void enableOnlinePayment() {
     restock("Orange Juice", 20);
     // ONLINE ships switched off; the shop owner turns it on from the admin screen
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken(),
-        List.of(Map.of("code", "ONLINE", "enabled", true)), null);
+    setPaymentMethod(adminToken(), "ONLINE", true);
   }
 
   private record Placed(String token, String orderId, long total, Object productId) {}
@@ -321,8 +320,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
     var list = getList("/api/v1/admin/payment-methods", admin);
     assertThat(list).extracting(m -> m.get("code")).contains("COD", "ONLINE");
 
-    var off = call(HttpMethod.PUT, "/api/v1/admin/payment-methods", admin,
-        List.of(Map.of("code", "ONLINE", "enabled", false)), null);
+    var off = setPaymentMethod(admin, "ONLINE", false);
     assertThat(off.getStatusCode()).isEqualTo(HttpStatus.OK);
     try {
       String token = token(freshEmail());
@@ -333,7 +331,7 @@ class OnlinePaymentIT extends IntegrationTestBase {
           "coinMode", "NONE", "paymentMethod", "ONLINE", "expectedTotalPaise", 1), UUID.randomUUID().toString());
       assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     } finally {
-      call(HttpMethod.PUT, "/api/v1/admin/payment-methods", admin, List.of(Map.of("code", "ONLINE", "enabled", true)), null);
+      setPaymentMethod(admin, "ONLINE", true);
     }
     assertThat(getList("/api/v1/payment-methods", token(freshEmail()))).extracting(m -> m.get("code")).contains("ONLINE");
   }

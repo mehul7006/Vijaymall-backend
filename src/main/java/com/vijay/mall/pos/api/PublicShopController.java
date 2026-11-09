@@ -20,11 +20,35 @@ import org.springframework.web.context.request.WebRequest;
 @RestController
 @RequestMapping("/api/v1/shop-settings")
 public class PublicShopController {
-  /** details is the longer "about the shop" text; every field is the admin's setting, nothing is kept in the app. */
+  /** details is the longer "about the shop" text; every field is the admin's setting, nothing is kept in the app.
+   * The {@code ...Gu} fields are the Gujarati versions (empty = show the English one) and shortName is for tight spaces.
+   * iconUrl (512 px) and icon192Url (192 px) are square PNG app icons made from the logo, null when there is none. */
   public record PublicShop(String shopName, String phone, String address, String promise, String details, String logoUrl, String email,
                            String whatsapp, String mapUrl, String website, String instagram, String facebook,
                            List<ShopProfileService.DayHours> hours, String holidayNote, boolean openNow, String todayHours,
-                           boolean onlineOrdersOpen, String onlineOrdersMessage, String timezone) {
+                           boolean onlineOrdersOpen, String onlineOrdersMessage, String timezone, String shortName,
+                           String shopNameGu, String addressGu, String promiseGu, String detailsGu, String holidayNoteGu,
+                           String iconUrl, String icon192Url) {
+    /** Creates the shop details without the square app icons (null). */
+    public PublicShop(String shopName, String phone, String address, String promise, String details, String logoUrl, String email,
+                      String whatsapp, String mapUrl, String website, String instagram, String facebook,
+                      List<ShopProfileService.DayHours> hours, String holidayNote, boolean openNow, String todayHours,
+                      boolean onlineOrdersOpen, String onlineOrdersMessage, String timezone, String shortName,
+                      String shopNameGu, String addressGu, String promiseGu, String detailsGu, String holidayNoteGu) {
+      this(shopName, phone, address, promise, details, logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote,
+          openNow, todayHours, onlineOrdersOpen, onlineOrdersMessage, timezone, shortName, shopNameGu, addressGu, promiseGu, detailsGu,
+          holidayNoteGu, null, null);
+    }
+
+    /** Creates the shop details without the short name and the Gujarati texts. */
+    public PublicShop(String shopName, String phone, String address, String promise, String details, String logoUrl, String email,
+                      String whatsapp, String mapUrl, String website, String instagram, String facebook,
+                      List<ShopProfileService.DayHours> hours, String holidayNote, boolean openNow, String todayHours,
+                      boolean onlineOrdersOpen, String onlineOrdersMessage, String timezone) {
+      this(shopName, phone, address, promise, details, logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote,
+          openNow, todayHours, onlineOrdersOpen, onlineOrdersMessage, timezone, "", "", "", "", "", "");
+    }
+
     /**
      * Creates the shop details with only the settings fields; the profile fields (logo, links, hours) are left empty
      * and online ordering is shown as open.
@@ -69,12 +93,16 @@ public class PublicShopController {
     ShopSetting s = shop.get();
     String promise = s.promise() == null ? "" : s.promise();
     String details = s.details() == null ? "" : s.details();
-    if (profile == null) return new PublicShop(s.shopName(), s.phone(), s.address(), promise, details);
+    if (profile == null) {
+      return new PublicShop(s.shopName(), s.phone(), s.address(), promise, details, "", "", "", "", "", "", "", List.of(), "", false, "", true, "",
+          "", s.shortName(), s.shopNameGu(), s.addressGu(), s.promiseGu(), s.detailsGu(), "", null, null);
+    }
     var v = profile.view();
     var p = v.profile();
     return new PublicShop(s.shopName(), s.phone(), s.address(), promise, details, p.logoUrl(), p.email(), p.whatsapp(), p.mapUrl(), p.website(),
         p.instagram(), p.facebook(), p.hours(), p.holidayNote(), v.openNow(), v.todayHours(), v.onlineOrdersOpen(),
-        p.onlineOrdersEnabled() ? "" : p.onlineOrdersMessage(), v.timezone());
+        p.onlineOrdersEnabled() ? "" : ShopProfileService.pausedMessage(p.onlineOrdersMessage()), v.timezone(), s.shortName(), s.shopNameGu(),
+        s.addressGu(), s.promiseGu(), s.detailsGu(), p.holidayNoteGu(), p.iconUrl(), p.icon192Url());
   }
 
   /** 304 (nothing sent) when the app already has this exact version, otherwise the shop details with their ETag. */

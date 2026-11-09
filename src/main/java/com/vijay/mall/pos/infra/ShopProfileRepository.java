@@ -9,7 +9,23 @@ import org.springframework.transaction.annotation.Transactional;
 public class ShopProfileRepository {
   /** hours is the stored JSON list of seven days; the service turns it into objects. */
   public record Row(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
-                    String hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {}
+                    String hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt,
+                    String holidayNoteGu, String iconUrl, String icon192Url) {
+    /** A row without the app icons (null). */
+    public Row(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
+               String hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt,
+               String holidayNoteGu) {
+      this(logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote, onlineOrdersEnabled, onlineOrdersMessage,
+          updatedAt, holidayNoteGu, null, null);
+    }
+
+    /** A row without the Gujarati holiday note. */
+    public Row(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
+               String hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {
+      this(logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote, onlineOrdersEnabled, onlineOrdersMessage,
+          updatedAt, "");
+    }
+  }
 
   private final ShopProfileJpa jpa;
 
@@ -19,7 +35,7 @@ public class ShopProfileRepository {
   public Row get() {
     ShopProfileEntity e = jpa.findById(1).orElseThrow();
     return new Row(e.logoUrl, e.email, e.whatsapp, e.mapUrl, e.website, e.instagram, e.facebook, e.hours, e.holidayNote,
-        e.onlineOrdersEnabled, e.onlineOrdersMessage, e.updatedAt);
+        e.onlineOrdersEnabled, e.onlineOrdersMessage, e.updatedAt, e.holidayNoteGu == null ? "" : e.holidayNoteGu, e.iconUrl, e.icon192Url);
   }
 
   /** Overwrites the shop profile. */
@@ -35,6 +51,9 @@ public class ShopProfileRepository {
     e.facebook = r.facebook();
     e.hours = r.hours();
     e.holidayNote = r.holidayNote();
+    e.holidayNoteGu = r.holidayNoteGu() == null ? "" : r.holidayNoteGu();
+    e.iconUrl = r.iconUrl();
+    e.icon192Url = r.icon192Url();
     e.onlineOrdersEnabled = r.onlineOrdersEnabled();
     e.onlineOrdersMessage = r.onlineOrdersMessage();
     e.updatedAt = now;

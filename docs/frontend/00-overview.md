@@ -19,10 +19,10 @@ The backend is one REST API over HTTPS. Base path: `/api/v1`. All bodies are JSO
 |---|---|---|
 | Guest (no token) | Anyone browsing | Catalog, product details, reviews list, public shop details, units, coupons list, hot sale |
 | `CUSTOMER` | A shopper signed in with e-mail or mobile OTP | Cart, orders, wallet, wishlist, addresses, notifications, reviews |
-| `CASHIER` | Counter staff | POS screens (`/pos/**`) and order handling (`/admin/orders/**`) |
+| `CASHIER` | Counter staff | POS screens (`/pos/**`), order handling (`/admin/orders/**`) and flash sales (`/admin/flash-sales/**`, file 40) |
 | `ADMIN` | Shop owner | Everything, including all other `/admin/**` screens |
 
-Rules the UI should mirror: `/api/v1/admin/orders*` is open to ADMIN and CASHIER; every other `/api/v1/admin/**` is ADMIN only (this includes `/api/v1/admin/notifications/**`: broadcasts, audience size, segments, segment preview and the condition catalog, see file 60); `/api/v1/pos/**` is CASHIER and ADMIN. A CUSTOMER token on those paths gets 403. After login, the response carries `user.role`, so the app can choose which home screen to show. Hide screens a role cannot use, but never rely on hiding: the server enforces it.
+Rules the UI should mirror: `/api/v1/admin/orders*` and `/api/v1/admin/flash-sales/**` (including the new `DELETE`) are open to ADMIN and CASHIER; every other `/api/v1/admin/**` is ADMIN only (this includes `/api/v1/admin/notifications/**`: broadcasts, audience size, segments, segment preview and the condition catalog, see file 60); `/api/v1/pos/**` is CASHIER and ADMIN. A CUSTOMER token on those paths gets 403. After login, the response carries `user.role`, so the app can choose which home screen to show. Hide screens a role cannot use, but never rely on hiding: the server enforces it.
 
 ## 2. Authentication (passwordless OTP)
 
@@ -86,6 +86,8 @@ All of these are `400 VALIDATION_FAILED` with `details.fields[<field>]` set. The
 | A word that is not one of the allowed values (`fulfilment`, `coinMode`) | the field | `must be DELIVERY or PICKUP`, `must be NONE, ALL or PERCENT`; for long lists `must be one of PLACED, CONFIRMED, ...` |
 | Text where a whole number goes (`items[0].qty: "two"`) | `items[0].qty` | `must be a whole number` |
 | A decimal where a number goes | the field | `must be a number` |
+| A fraction or a decimal point where a whole number goes (stock `delta: 1.5`, coin `paisePerCoin: 1.5`; `5.0` is refused too, send `5`) | the field | `must be a whole number` (never silently cut down) |
+| Text longer than the field allows (name, description, address ...) | the field | `size must be between 0 and 120` |
 | A bad id (`items[0].productId: "abc"`, or `/admin/orders/not-a-uuid` in the path) | `items[0].productId` / `id` | `must be a valid id` |
 | A bad true/false | the field | `must be true or false` |
 | A bad date or date and time | the field | `must be a valid date` / `must be a valid date and time` |
@@ -121,13 +123,13 @@ Per IP and per account, for example one-time-code requests per hour. A 429 inclu
 `GET /api/v1/shop-settings` returns an `ETag`; send `If-None-Match` and treat 304 as "unchanged". Catalog lists are cached on the server for a short time and change immediately when an admin edits data; the apps should refresh when they receive a live event (below) or on pull-to-refresh.
 
 ### Images
-Product, category and shop images are served from `/img/**` (public, no token). API fields give a path like `/img/product/abc_400.jpg`: prefix with the server origin. A `_400` and `_1000` variant exist for uploaded images (small and large). Uploads use `multipart/form-data` with a part named `file`; files over 5 MB (6 MB per request) or non-images are refused.
+Product, category and shop images are served from `/img/**` (public, no token). API fields give a path like `/img/product/abc_400.jpg`: prefix with the server origin. A `_400` and `_1000` variant exist for uploaded images (small and large). A picture without transparency is stored as JPEG (`..._400.jpg`); a picture with an alpha channel (a transparent PNG logo) is stored as PNG (`..._400.png`), so always use the exact path the API returns and only swap `_400` for `_1000`. Image files are served with `Cache-Control: public, max-age=31536000, immutable` (each upload has a new UUID name, so a path never changes its content): cache them for good, and also send `If-None-Match`/`If-Modified-Since` if your HTTP client does not cache by itself (`Last-Modified` is set; a repeat gets 304). Uploads use `multipart/form-data` with a part named `file`; files over 5 MB (6 MB per request) or non-images are refused.
 
 ### Live updates (Server-Sent Events)
 The server can push "something changed" events so screens stay fresh (catalog, coupons, units, shop details, payment methods; orders). The stream endpoints and event names are in `20-orders-payments-admin-config.md`. Treat an event as a hint to re-fetch the affected list; do not trust it as data. Reconnect with back-off on drop.
 
 ### Push notifications
-Register the device token with the devices endpoint (see `10-customer-and-catalog.md`) after sign-in and remove it on logout. Pushes carry an order or alert reference; open the matching screen then fetch fresh data.
+Register the device token with the devices endpoint (see `10-customer-and-catalog.md`) after sign-in and remove it on logout. Every push carries a string-only `data` payload: `type` (`ORDER`, `PAYMENT`, `STOCK`, `FLASH` or `ANNOUNCEMENT`, the same as the inbox `kind`) and `ref` (order number such as `VSM-1001`, product id for `STOCK`, sale id for `FLASH`, the admin's free text for `ANNOUNCEMENT`; the key is left out when there is none), plus `broadcastId` for announcements. Open the matching screen from `type` and `ref`, then fetch fresh data; ignore unknown types and keys. Details in file 60.
 
 ## 4. Health of the integration (for testers)
 

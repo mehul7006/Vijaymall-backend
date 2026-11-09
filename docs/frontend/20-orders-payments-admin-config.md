@@ -78,7 +78,7 @@ Statuses (exact strings in `status` fields): `PAYMENT_PENDING`, `PLACED`, `CONFI
 Transition rules (from `OrderStatus.next`):
 
 - From `PAYMENT_PENDING` only `PLACED` (done by the system when the payment is captured) and `CANCELLED` are possible. Staff can cancel/reject it but cannot push it forward: `POST …/status` with any target other than `CANCELLED` answers 409 `AWAITING_PAYMENT`.
-- From `PLACED`, `CONFIRMED`, `PACKED`, `OUT_FOR_DELIVERY`, `READY_FOR_PICKUP` staff may move to **any other status except `PAYMENT_PENDING`**, in any order, forwards or backwards (the code enforces no fixed sequence and does not tie `OUT_FOR_DELIVERY` to DELIVERY or `READY_FOR_PICKUP` to PICKUP; the UI should offer sensible next steps only: DELIVERY: PLACED to CONFIRMED to PACKED to OUT_FOR_DELIVERY to DELIVERED; PICKUP: PLACED to CONFIRMED to PACKED to READY_FOR_PICKUP to PICKED_UP).
+- From `PLACED`, `CONFIRMED`, `PACKED`, `OUT_FOR_DELIVERY`, `READY_FOR_PICKUP` staff may move to any other status except `PAYMENT_PENDING`, forwards or backwards (no fixed sequence), with two limits: a status must fit the order's fulfilment (`OUT_FOR_DELIVERY` and `DELIVERED` only for DELIVERY orders, `READY_FOR_PICKUP` and `PICKED_UP` only for PICKUP orders) and an order whose stock is already deducted (any status from `CONFIRMED` on) cannot go back to `PLACED`; both answer 422 `INVALID_TRANSITION`. The table in Addendum 4 lists every allowed move.
 - `DELIVERED`, `PICKED_UP`, `CANCELLED` are final: any change answers 409 `ILLEGAL_TRANSITION`. Requesting the status the order is already in via `…/status` is a no-op that returns 200 with the current order (not an error).
 - Customer cancel: only from `PAYMENT_PENDING`, `PLACED`, `CONFIRMED` (`customerCanCancel`). Otherwise 409 `ILLEGAL_TRANSITION` "This order can no longer be cancelled".
 
@@ -156,7 +156,7 @@ A cancel or reject never waits for or fails because of Razorpay: the refund is q
 |---|---|---|---|---|
 | `items` | array | yes | non-empty (`@NotEmpty`, else 400 `VALIDATION_FAILED` field `items`) | cart lines |
 | `items[].productId` | UUID | yes | `@NotNull`; must be an active, customer-visible product (not counter-only), else 400 `VALIDATION_FAILED` field `productId` "product is not available: <id>" | product (pack) id |
-| `items[].qty` | int | yes (default 0 if absent, which is rejected) | must be 1..99, else 400 field `qty` "quantity must be 1 to 99". Repeated productIds are merged (quantities summed) before the 1..99 check is NOT re-applied, so the merged sum can exceed 99 | quantity |
+| `items[].qty` | int | yes (default 0 if absent, which is rejected) | must be 1..99, else 400 field `qty` "quantity must be 1 to 99". Repeated productIds are merged (quantities summed) and the 1..99 limit applies to the merged sum, so 60 + 60 of one product is 400 | quantity |
 | `couponCode` | string | no | blank/null = none. Case-insensitive (normalised). Unknown/unusable coupon gives 422 `COUPON_INVALID` | coupon |
 | `coinMode` | enum `NONE`/`ALL`/`PERCENT` | no | null = `NONE`. Other value = 400 `Bad request` | how many coins to spend |
 | `percent` | int | no | used only for `PERCENT`; null = 100; values are clamped to 0..100 by the maths (no 400) | percent of the maximum redeemable coins |
@@ -210,7 +210,7 @@ Calculation order: subtotal, coupon, coins (max redeemable limited by a coin-set
 | 400 | `VALIDATION_FAILED` | empty items; qty outside 1..99; product not available/unknown/counter-only; bad enum or JSON |
 | 422 | `COUPON_INVALID` | coupon unusable; `details.reason` is one of `NOT_FOUND`, `EXPIRED` (inactive or outside dates), `MIN_ORDER`, `CATEGORY` (no cart item in the coupon's categories), `LIMIT_REACHED`, `FIRST_ORDER_ONLY` |
 
-- **UI notes**: Debounce calls (quantity steppers). Never compute totals in the app; render the response. If the call fails with `COUPON_INVALID`, show the reason and offer to remove the coupon, then re-quote. Always keep the last `totalPaise` to send as `expectedTotalPaise` when placing. Cap qty at 99 in the stepper (the saved basket allows more but the quote does not).
+- **UI notes**: Debounce calls (quantity steppers). Never compute totals in the app; render the response. If the call fails with `COUPON_INVALID`, show the reason and offer to remove the coupon, then re-quote. Always keep the last `totalPaise` to send as `expectedTotalPaise` when placing. Cap qty at 99 in the stepper (the saved basket allows at most 99 per line too).
 
 ### GET /api/v1/cart
 - **Who**: customer.
@@ -231,7 +231,7 @@ Calculation order: subtotal, coupon, coins (max redeemable limited by a coin-set
 | `updatedAt` | ISO instant or null | null for a never-saved basket |
 
 - **Errors**: only the common ones.
-- **UI notes**: Saved products may since have become unavailable or out of stock; always run the quote and drop lines that fail (a 400 `productId` from the quote names the bad product id in the message).
+- **UI notes**: Lines of products that are inactive, unknown or out of stock (stock 0) are left out of this answer and come back after a restock (they stay stored). Saved products may also have become unavailable since; always run the quote and drop lines that fail (a 400 `productId` from the quote names the bad product id in the message).
 
 ### PUT /api/v1/cart
 - **Who**: customer.
@@ -296,7 +296,7 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `items`, `couponCode`, `coinMode`, `percent`, `fulfilment` | | | same as `POST /cart/quote` (including qty 1..99 and the product rules) | exactly the cart you quoted |
 | `addressId` | UUID | required when `fulfilment` is `DELIVERY` (or omitted, the default) | missing: 400 field `addressId` "address is required for delivery"; not the user's address: 404 `NOT_FOUND` "Address not found". Ignored for PICKUP | delivery address; a snapshot is stored on the order |
 | `paymentMethod` | string | yes | `@NotNull`; must be exactly `COD` or `ONLINE`. `CREDIT`/`HYBRID` give 400 field `paymentMethod`; other values 400 "COD or ONLINE"; a method switched off by the admin (or ONLINE without Razorpay keys) gives 400 field `paymentMethod` "<method> is not available" | payment choice |
-| `expectedTotalPaise` | long | yes (absent = 0) | must equal the server's freshly computed total, else 409 `PRICE_CHANGED` | the `totalPaise` the customer saw |
+| `expectedTotalPaise` | long | no (absent or null skips the check) | when sent, must equal the server's freshly computed total, else 409 `PRICE_CHANGED` | the `totalPaise` the customer saw |
 | `slot` | string | no | max 40 chars after trimming (400 field `slot`); blank = none | free text time window, stored and shown back |
 
 - **Response** 201 (`OrderView`, see GET one below). Example for ONLINE:
@@ -353,7 +353,7 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `coinsUsed` | int | coins spent |
 | `placedAt` | ISO instant | when placed |
 
-- **Errors**: only the common ones.
+- **Errors**: only the common ones. Query parameters other than `page` and `size` (for example `q` or `status`, which exist only on the admin list `GET /admin/orders`) are ignored, not rejected.
 - **UI notes**: Refetch page 0 on an SSE `order` event and after any reconnect. Group "open" vs "past" client-side from `status`.
 
 ### GET /api/v1/orders/{id}
@@ -371,7 +371,7 @@ Server normalisation: repeated `productId`s are merged (first position wins, qua
 | `paymentStatus` | `NONE`/`INITIATED`/`CAPTURED`/`REFUNDED`/`FAILED` | |
 | `items[]` | array | `productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, couponDiscountPaise`, frozen at order time |
 | `subtotalPaise`, `couponCode` (nullable), `couponDiscountPaise`, `coinsUsed`, `coinDiscountPaise`, `deliveryFeePaise`, `totalPaise` | | same as the quote at order time |
-| `coinsEarned` | int | coins this order will credit (credited on DELIVERED/PICKED_UP) |
+| `coinsEarned` | int | coins this order will credit (credited on DELIVERED/PICKED_UP); always `0` once the order is `CANCELLED` (a cancelled order keeps no coins) |
 | `address` | object or null | `{id,label,line1,area,pincode,isDefault}` snapshot; null for PICKUP |
 | `paymentSession` | object or null | only while `PAYMENT_PENDING` (and the payment is still open): `{type:"RAZORPAY", payload:{keyId, razorpayOrderId, amountPaise, currency}}` |
 | `timeline[]` | array | `{status, at}` oldest first; every status the order has entered |
@@ -659,7 +659,7 @@ Newest first by `placedAt`.
 ### PUT /api/v1/admin/payment-methods
 - **Who**: admin.
 - **Purpose / when the UI calls it**: Save the on/off switches.
-- **Request**: body is a JSON **array** of settings (can list one or both):
+- **Request**: body is a JSON **array** that must list **both** methods exactly once (an empty or partial list is 400 `methods` "must list every method"):
 
 ```json
 [ { "code": "ONLINE", "enabled": true }, { "code": "COD", "enabled": true } ]
@@ -667,7 +667,7 @@ Newest first by `placedAt`.
 
 | field | type | required | validation | meaning |
 |---|---|---|---|---|
-| `code` | string | yes | must be `COD` or `ONLINE` else 400 field `code` "unknown method" | method |
+| `code` | string | yes | must be `COD` or `ONLINE` else 400 field `code` "unknown method"; each code once | method |
 | `enabled` | boolean | yes (absent = false) | enabling ONLINE needs configured keys | switch |
 
 - **Response** 200: same array shape as the admin GET (re-read after save).
@@ -675,7 +675,7 @@ Newest first by `placedAt`.
 
 | status | code | when |
 |---|---|---|
-| 400 | `VALIDATION_FAILED` | unknown code; or the result would leave no method on (field `methods` "keep at least one payment method on") |
+| 400 | `VALIDATION_FAILED` | unknown code; a list that is empty or does not name both methods (field `methods` "must list every method"); a repeated code (`methods` `duplicate code "COD"`); or the result would leave no method on (field `methods` "keep at least one payment method on") |
 | 422 | `PAYMENT_NOT_CONFIGURED` | enabling ONLINE without Razorpay key id and secret |
 
 - **UI notes**: Customers' apps are told through the live `catalog` event (`PAYMENT_METHODS`).
@@ -1224,7 +1224,7 @@ The coupon addendum above matches the code. Details worth adding:
   "traceId": "…", "details": { "reason": "MIN_ORDER", "minOrderPaise": 99900, "shortfallPaise": 66900 } }
 ```
 - For a category coupon the shortfall counts only what is spent in the coupon's categories. `LIMIT_REACHED` message is "You have already used this coupon the allowed number of times." when this customer hit the per-customer limit, otherwise "This coupon has been used up."
-- `POST /cart/coupons`: `reason` is one of `EXPIRED`, `MIN_ORDER`, `CATEGORY`, `LIMIT_REACHED`, `FIRST_ORDER_ONLY` (`NOT_FOUND` cannot occur: only coupons on offer are tried). `message`/`reason` are `null` and `shortfallPaise` is 0 for an applicable coupon; `shortfallPaise` is 0 for every reason except `MIN_ORDER`. If the **cart itself** cannot be priced (for example `OUT_OF_STOCK`, unknown product), the call answers that error (the same error `POST /cart/quote` would give), not a list. Empty or missing `items` is `400 VALIDATION_FAILED`.
+- `POST /cart/coupons`: `reason` is one of `EXPIRED`, `MIN_ORDER`, `CATEGORY`, `LIMIT_REACHED`, `FIRST_ORDER_ONLY` (`NOT_FOUND` cannot occur: only coupons on offer are tried). `message`/`reason` are `null` and `shortfallPaise` is 0 for an applicable coupon; `shortfallPaise` is 0 for every reason except `MIN_ORDER`. If the **cart itself** cannot be priced (an unknown, inactive or counter-only product, or a bad quantity; the quote never checks stock), the call answers that error (the same error `POST /cart/quote` would give), not a list. Empty or missing `items` is `400 VALIDATION_FAILED`.
 
 ### 429 and the `Retry-After` header
 Every `429` (`RATE_LIMITED`) now has the standard `Retry-After: <seconds>` response header, always equal to `details.retryAfterSeconds` in the JSON body (both from the global per-IP limit and from endpoint limits such as login codes). Use either; wait that long before retrying and do not retry sooner. The header is readable by browser/web clients (CORS exposes `ETag`, `Retry-After`, `X-Trace-Id`). Other statuses never carry it. Login-code requests that hit the limit keep code `RATE_LIMITED` but the message now reads "Too many codes requested. Try again in N seconds." (or "...Try again later." if no wait is known).
@@ -1290,3 +1290,36 @@ No endpoint, field or behaviour of `POST /admin/refunds/{id}/retry`, `GET /admin
 - **Addresses**: `pincode` must be exactly 6 digits on `POST/PUT /me/addresses`: `400`, `details.fields.pincode` "must be 6 digits". Existing saved addresses are not changed.
 - **Image upload over 5 MB**: `FILE_TOO_LARGE`, `message` "File too large: must be 5 MB or smaller", `details.fields.file` "must be 5 MB or smaller".
 - **Dev servers only**: the hourly login-code limits (normally 5 per e-mail and 20 per client address) are raised to 1000 and 10000 so testers behind one proxy are not locked out. Production keeps the strict limits.
+
+## Addendum 3 (shop Gujarati fields)
+`GET /shop-settings` (public), `GET/PUT /admin/shop-settings` and `GET/PUT /admin/shop-profile` gain optional text fields, all strings that are empty when not set (empty means the app falls back to English): `shopNameGu` (80), `addressGu` (300), `promiseGu` (200), `detailsGu` (500) on shop settings and `holidayNoteGu` (200) on the profile, plus `shortName` (20, for tight spaces) on shop settings. On the PUTs a key that is left out keeps the stored text; send `""` to clear it. The public `GET /shop-settings` returns all six next to the English ones. The logo returned by `POST /admin/shop-profile/logo` ends in `_400.png` when the uploaded picture has transparency, otherwise `_400.jpg`. Limits for the English shop texts are in file 10, Addendum 3.
+
+## Addendum 4: orders, cart, account and payment-method fixes (third review)
+- **Deleting the account signs the token out at once.** After `DELETE /me` (204) the access token used for the call, and every other token of that account, is refused on the very next request with `401 UNAUTHENTICATED` (it used to work until it expired, up to 15 minutes). Refresh tokens are revoked as before, and the anonymised account can never sign in again (its e-mail is a placeholder and its mobile number is cleared; signing up again with the old e-mail or number makes a new, empty account). Send the customer to the sign-in screen when the delete call succeeds.
+- **Order status moves (`POST /admin/orders/{id}/status`).** Staff still have no fixed sequence, but a move must fit the order and may not undo reserved stock. Both refusals are `422 INVALID_TRANSITION` (`message` says why, ready to show); nothing is changed. Closed orders (`DELIVERED`, `PICKED_UP`, `CANCELLED`) still answer `409 ILLEGAL_TRANSITION`, and an unpaid online order still answers `409 AWAITING_PAYMENT`. Allowed targets (the current status itself is a no-op 200):
+
+| from | DELIVERY order may go to | PICKUP order may go to |
+|---|---|---|
+| `PAYMENT_PENDING` | `CANCELLED` (the system moves it to `PLACED` when the payment arrives) | same |
+| `PLACED` | `CONFIRMED`, `PACKED`, `OUT_FOR_DELIVERY`, `DELIVERED`, `CANCELLED` | `CONFIRMED`, `PACKED`, `READY_FOR_PICKUP`, `PICKED_UP`, `CANCELLED` |
+| `CONFIRMED` | `PACKED`, `OUT_FOR_DELIVERY`, `DELIVERED`, `CANCELLED` | `PACKED`, `READY_FOR_PICKUP`, `PICKED_UP`, `CANCELLED` |
+| `PACKED` | `CONFIRMED`, `OUT_FOR_DELIVERY`, `DELIVERED`, `CANCELLED` | `CONFIRMED`, `READY_FOR_PICKUP`, `PICKED_UP`, `CANCELLED` |
+| `OUT_FOR_DELIVERY` | `CONFIRMED`, `PACKED`, `DELIVERED`, `CANCELLED` | not applicable |
+| `READY_FOR_PICKUP` | not applicable | `CONFIRMED`, `PACKED`, `PICKED_UP`, `CANCELLED` |
+| `DELIVERED`, `PICKED_UP`, `CANCELLED` | nothing (409) | nothing (409) |
+
+  `OUT_FOR_DELIVERY` / `DELIVERED` on a PICKUP order and `READY_FOR_PICKUP` / `PICKED_UP` on a DELIVERY order are `422 INVALID_TRANSITION`. Going back to `PLACED` is refused once the order's stock is deducted, which is from `CONFIRMED` on (the stock is only given back by cancelling or rejecting the order); other backward moves such as `PACKED` to `CONFIRMED` stay allowed. Offer in the UI only the moves in the table.
+- **`coinsEarned` of a cancelled order is 0** in every order view (customer `GET /orders/{id}`, admin `GET /admin/orders/{id}`, the status/reject answers). Coins are credited only when an order is delivered or picked up and a cancelled order never was, so a cancelled order keeps none. (List rows never carried `coinsEarned`.)
+- **`POST /cart/coupons` and an unknown product.** The picker now answers the same `400 VALIDATION_FAILED` (`fields.productId` "product is not available: <id>") as `POST /cart/quote`, instead of `200` with every coupon `applicable: false`. A cart that prices is unchanged: a coupon that fails for a business reason is still listed as not applicable.
+- **`POST /cart/quote` never checks stock.** It prices any active product, even one with stock 0 or fewer units than asked (12 of a 10-stock pack); only `POST /orders` (and moving an order to `CONFIRMED`) answers `409 OUT_OF_STOCK`. A product listed twice is added together and the 1..99 limit applies to the sum (60 + 60 is `400`). `PUT /cart` also allows at most 99 per line (the older "999" in the notes was wrong). Use the product's `inStock` / stock fields to warn before checkout.
+- **`GET /cart` hides unavailable lines.** Lines whose pack is inactive, unknown or out of stock (stock 0) are left out of `GET /cart` and of the `PUT /cart` answer, but they stay stored and reappear after a restock or re-activation. A later `PUT /cart` sends back only what the app holds, so lines the app never saw are dropped by that save.
+- **`POST /cart/quote` warning for coins.** With `coinMode` `ALL` or `PERCENT` and no item that coins can pay for, `coinsUsed` is 0 and `warnings` now says "None of the items in the cart can be paid with coins" (a mixed cart still says "Some items cannot be paid with coins" when coins are used).
+- **`POST /orders`: `expectedTotalPaise`** is optional (absent or `null` skips the price check); the older tables that said "required, absent = 0" were wrong.
+- **`GET /orders`** only reads `page` and `size`; any other query parameter (`q`, `status`...) is ignored without an error. `q` and `status` exist only on the admin list `GET /admin/orders`.
+- **Stock history of a return.** In `GET /admin/stock-movements`, a row with `reason` `ORDER_RETURN` has `refId` = the id of the return and `ref` = the number of the order it came from (for example `VSM-1032`). Counter returns (`POS_RETURN`) carry the credit note id and its number (`VSM-CN/2026-27/000003`).
+- **`GET /wallet` has `expiryMonths`**: how many months earned coins stay valid (the admin's coin setting, always a positive number; coins always expire). Use it instead of a hard-coded 12.
+- **`PUT /admin/payment-methods`** must list **both** methods (`COD` and `ONLINE`) exactly once: an empty or partial list is `400` `fields.methods` "must list every method"; a repeated code is `400` `fields.methods` `duplicate code "COD"`. Send the current state of the method you did not change.
+- **`GET /shop-settings`**: while online orders are paused, `onlineOrdersMessage` is the admin's text, or the default "We are not taking online orders right now. Please visit the shop or try again later." when the admin left it blank (the same text `422 ORDERS_PAUSED` carries). It is `""` only while orders are open.
+- **Staff accounts**: `POST /admin/staff` with an e-mail that already has an account is `409 EMAIL_ALREADY_REGISTERED`; an active customer can be promoted by repeating the call with `confirmPromote: true`. Details in `30-pos-reports-purchasing.md`.
+- **Size limits**: profile `name` 1 to 80 characters; address `label` at most 30, `line1` at most 200, `area` at most 80, `phone` blank or exactly 10 digits (`must be 10 digits`, like the profile mobile); admin order `note` at most 200. Search `q` is at most 100 characters on the admin customer and order lists (`400` `fields.q`). Counter, credit and purchasing limits are in `30-pos-reports-purchasing.md`.
+- **Correction for `10-customer-and-catalog.md` (login code errors):** replaying a code that was already used answers `LOCKED`, not `EXPIRED`, when an earlier code for that e-mail was locked by 5 wrong tries and is still within its 5 minutes (a locked code stays the newest open one); `EXPIRED` is only for no open code or an old one.

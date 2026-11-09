@@ -109,6 +109,17 @@ class QuoteStepsCoverageTest {
   }
 
   @Test
+  void coinStepSaysSoWhenNoItemInTheCartCanBePaidWithCoins() {
+    var user = UUID.randomUUID();
+    coins(user, 1000);
+    var none = ctx(user, null, CoinRedemption.Mode.ALL);
+    none.lines = List.of(line(6000, false), line(4000, false));
+    new CoinRedemptionStep(wallet).apply(none);
+    assertThat(none.coinsUsed).isZero();
+    assertThat(none.warnings).containsExactly("None of the items in the cart can be paid with coins");
+  }
+
+  @Test
   void coinStepSkipsWhenModeIsNoneOrCouponBlocksCoins() {
     var step = new CoinRedemptionStep(wallet);
     var none = ctx(UUID.randomUUID(), null, CoinRedemption.Mode.NONE);

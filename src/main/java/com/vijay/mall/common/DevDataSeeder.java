@@ -76,7 +76,7 @@ public class DevDataSeeder implements CommandLineRunner {
     }
     AdminProduct sugar = p(grocery, "Loose Sugar", "છૂટી ખાંડ", 5000, 4500, "kg", "per kg", false, 25000);
     posCatalog.save(sugar.id(), SoldBy.WEIGHT, "101", 5, "1701", List.of(), null);
-    staff.create("cashier@vijaysupermall.local", "Counter 1", null, null);
+    staff.create("cashier@vijaysupermall.local", "Counter 1", null, false, null);
 
     wallet.createRule(new StoredRule(null, new CoinRule("Spend 1000 get 10", 100000, 10, CoinMode.PRO_RATA, 0),
         null, null, true), null);

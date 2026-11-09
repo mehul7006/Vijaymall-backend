@@ -48,6 +48,38 @@ class PurchasingIT extends IntegrationTestBase {
   }
 
   @Test
+  void theSameInvoiceForTheSameSupplierIsRecordedWithAWarningAndReplaysTheSameBody() {
+    String admin = adminToken();
+    Object pid = soap();
+    String invoice = "DUP-" + UUID.randomUUID().toString().substring(0, 8);
+    var lines = List.of(Map.of("productId", pid, "qty", 1, "unitCostPaise", 100));
+    String firstKey = UUID.randomUUID().toString();
+    var first = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, Map.of("supplierName", "Dup Traders", "invoiceNo", invoice, "items", lines), firstKey);
+    assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat((List) first.getBody().get("warnings")).isEmpty();
+
+    String key = UUID.randomUUID().toString();
+    Map body = Map.of("supplierName", " dup TRADERS ", "invoiceNo", " " + invoice.toLowerCase() + " ", "items", lines);
+    var second = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, body, key);
+    assertThat(second.getStatusCode()).as("never blocked").isEqualTo(HttpStatus.CREATED);
+    assertThat((List<String>) second.getBody().get("warnings")).hasSize(1).first().asString()
+        .startsWith("invoice number " + invoice.toLowerCase() + " was already recorded for this supplier on ")
+        .endsWith("(purchase " + first.getBody().get("id") + ")");
+
+    var replay = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, body, key);
+    assertThat(replay.getBody()).isEqualTo(second.getBody());
+    var firstReplay = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, Map.of("supplierName", "Dup Traders", "invoiceNo", invoice, "items", lines), firstKey);
+    assertThat((List) firstReplay.getBody().get("warnings")).as("the first one is not a duplicate of the later one").isEmpty();
+
+    var other = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, Map.of("supplierName", "Other Traders", "invoiceNo", invoice, "items", lines),
+        UUID.randomUUID().toString());
+    assertThat((List) other.getBody().get("warnings")).as("another supplier").isEmpty();
+    var noInvoice = call(HttpMethod.POST, "/api/v1/admin/purchases", admin, Map.of("supplierName", "Dup Traders", "items", lines), UUID.randomUUID().toString());
+    assertThat((List) noInvoice.getBody().get("warnings")).isEmpty();
+    assertThat((List) get("/api/v1/admin/purchases/" + second.getBody().get("id"), admin).getBody().get("warnings")).isEmpty();
+  }
+
+  @Test
   void badDeliveriesAreRefusedAndChangeNothing() {
     String admin = adminToken();
     Object pid = soap();

@@ -29,6 +29,10 @@ public class CoinRedemptionStep implements QuoteStep {
     }
     CoinSettings s = wallet.settings();
     long redeemable = c.lines.stream().filter(PricedLine::coinRedeemable).mapToLong(PricedLine::lineTotalPaise).sum();
+    if (redeemable == 0 && c.subtotal > 0) {
+      c.warnings.add("None of the items in the cart can be paid with coins");
+      return;
+    }
     long base = Math.min(redeemable, c.subtotal - c.couponDiscount);
     int coins = CoinRedemption.coinsToUse(base, c.request.mode(), c.request.pct(), wallet.balance(c.userId), s);
     c.coinsUsed = coins;
