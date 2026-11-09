@@ -271,7 +271,7 @@ OTP rate limits (429 `RATE_LIMITED`, `details.retryAfterSeconds`): per email 5 s
 | status | code | when |
 |---|---|---|
 | 400 | VALIDATION_FAILED | blank/malformed email or blank otp |
-| 422 | OTP_INVALID | `details.reason` is `EXPIRED` (no open code, or older than 5 min, or already used), `LOCKED` (5 wrong tries used up), or `WRONG` (code mismatch; the attempt is counted) |
+| 422 | OTP_INVALID | `details.reason` is `EXPIRED` (no open code, or older than 5 min, or already used; but replaying a used code while an earlier code locked by 5 wrong tries is still inside its 5 minutes answers `LOCKED`), `LOCKED` (5 wrong tries used up), or `WRONG` (code mismatch; the attempt is counted) |
 | 403 | FORBIDDEN | the account is blocked by an admin (or deleted) |
 
 - **UI notes**: Map `reason`: WRONG -> "Wrong code, try again" (max 5 tries); LOCKED/EXPIRED -> "Request a new code". After 5 wrong tries the user must request a new code. A deleted account is blocked and its email is renamed to a placeholder, so signing in again with the old email creates a brand-new empty account.

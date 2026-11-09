@@ -843,9 +843,9 @@ Sorted by `salesPaise` descending. Percentages are of that cashier's own sales, 
 - **Errors**: 400 as in shared period rules.
 
 ### GET /api/v1/admin/stock/low
-- **Who**: admin only. **Purpose**: reorder list.
+- **Who**: admin only. **Purpose**: reorder list. Retired (inactive) products are not listed (they are filtered before the cap), so every row is a product that can still be sold.
 - **Request**: query `limit` int, default 50. **The hard cap is 200 rows**: a `limit` above 200 returns 200 and one below 1 returns 1, silently (no error). There is no `page` parameter and no `hasMore`, so this endpoint can never show more than the 200 emptiest products; the dashboard's `lowStock` list is the same list cut to 10.
-- **Response**: 200 plain array (deliberately not a paged object) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: products whose stock is at or below their own alert level (`lowThreshold`), **sorted by `qty` ascending** (emptiest first; products with the same `qty` come in no guaranteed order). Retired (inactive) products are not filtered out of this list. Set the alert level per product in the catalog admin screens.
+- **Response**: 200 plain array (deliberately not a paged object) `[ { "productId": "uuid", "name": "Sugar 1kg", "qty": 2 } ]`: products whose stock is at or below their own alert level (`lowThreshold`), **sorted by `qty` ascending** (emptiest first; products with the same `qty` come in no guaranteed order). Retired (inactive) products are filtered out before the cap. Set the alert level per product in the catalog admin screens.
 
 ### GET /api/v1/admin/audit-log
 - **Who**: admin only. **Purpose**: "who changed what", newest first.
