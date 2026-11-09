@@ -1,3 +1,20 @@
+spring:
+  datasource:
+    # Dev: small pools (a laptop database). Override any of these with the environment variable named in the placeholder.
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${DB_POOL_WAIT_MS:10000}
+      # Leaks show up while developing: logs the stack of code holding a connection longer than 20 s.
+      leak-detection-threshold: ${DB_POOL_LEAK_MS:20000}
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULER_THREADS:2}
+server:
+  tomcat:
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:1024}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:50}
 app:
   config:
     encryption-key: ${CONFIG_ENCRYPTION_KEY:dmlqYXktbWFsbC1kZXYtY29uZmlnLWtleS0zMmJ5ISE=}
@@ -8,8 +25,10 @@ app:
     fixed-code: ${OTP_FIXED_CODE:12345}
   cors:
     # flutter run -d chrome picks a random port, so allow any local port
-    allowed-origin-patterns: http://localhost:*,http://127.0.0.1:*
-  bootstrap-admin-email: admin@vijaysupermall.local
+    # CORS_ORIGINS adds the web app of a test server; the default is any local port
+    allowed-origin-patterns: ${CORS_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+  # the seeded admin; ADMIN_EMAIL makes the owner's own e-mail an admin too on a test server
+  bootstrap-admin-email: ${ADMIN_EMAIL:admin@vijaysupermall.local}
 logging:
   level:
     com.vijay.mall: DEBUG

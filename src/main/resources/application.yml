@@ -5,8 +5,22 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/mall}
     username: ${DB_USER:mall}
     password: ${DB_PASSWORD:mall}
+    # Database connection pool. Sized to the database, not to the traffic: PostgreSQL allows 100 connections by default and every
+    # backend instance holds up to DB_POOL_MAX of them (instances x DB_POOL_MAX must stay under max_connections, with some left for admin tools).
+    # Requests run on virtual threads, so many can wait for a connection cheaply; a small pool keeps the database from being overloaded.
     hikari:
-      maximum-pool-size: 20
+      pool-name: mall-db
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      # Give up after 5 s with a clear error instead of hanging a request for the 30 s default.
+      connection-timeout: ${DB_POOL_WAIT_MS:5000}
+      validation-timeout: 3000
+      # Retire connections before the database or a firewall drops them; idle ones are trimmed down to minimum-idle.
+      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1500000}
+      idle-timeout: ${DB_POOL_IDLE_MS:600000}
+      keepalive-time: 300000
+      # 0 = off. Set e.g. 20000 while hunting a connection leak: logs the stack of code holding a connection longer than that.
+      leak-detection-threshold: ${DB_POOL_LEAK_MS:0}
   flyway:
     enabled: true
   jackson:
@@ -32,6 +46,15 @@ spring:
   threads:
     virtual:
       enabled: true
+  task:
+    # @Scheduled jobs (outbox relay, flash lifecycle, cleanups). Spring's default is ONE thread, so a slow job would delay all others.
+    scheduling:
+      thread-name-prefix: mall-sched-
+      pool:
+        size: ${SCHEDULER_THREADS:4}
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
   lifecycle:
     timeout-per-shutdown-phase: 30s
   mail:
@@ -48,6 +71,14 @@ server:
   shutdown: graceful
   tomcat:
     max-swallow-size: 6MB
+    # Requests run on virtual threads (spring.threads.virtual), so there is no request thread pool to size: max-threads is ignored.
+    # What bounds the server is the DB pool above and these connection limits.
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    # Connections queued when max-connections is reached; beyond that clients are refused quickly instead of piling up.
+    accept-count: ${TOMCAT_ACCEPT_COUNT:200}
+    connection-timeout: 20s
+    keep-alive-timeout: 30s
+    max-keep-alive-requests: 200
   # none: X-Forwarded-* is not believed (anyone can send it). Set FORWARD_HEADERS_STRATEGY=native behind a proxy that overwrites it.
   forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
 
