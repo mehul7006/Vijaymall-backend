@@ -26,14 +26,16 @@ import org.springframework.stereotype.Repository;
 public class PurchaseRepository {
   /**
    * A delivery's header. {@code totalCostPaise} is what the supplier is owed for the document (goods, tax, freight and round-off);
-   * {@code duePaise} is that minus the debit notes and the payments (negative: the supplier owes the shop).
+   * {@code duePaise} is that minus the debit notes and the payments (negative: the supplier owes the shop). {@code attachmentFile} and
+   * {@code attachmentType} name the stored invoice file and its content type (null: no attachment).
    */
   public record Header(UUID id, UUID supplierId, String supplierName, String supplierPhone, String supplierGstin, String supplierStateCode,
                        boolean interState, String gstMode, String invoiceNo, LocalDate invoiceDate, LocalDate receivedDate, String note,
                        String attachmentNote, long lineDiscountPaise, BigDecimal docDiscountPercent, long docDiscountPaise, long taxablePaise,
                        long cgstPaise, long sgstPaise, long igstPaise, long cessPaise, long freightPaise, int freightGstPercent,
                        long freightGstPaise, long roundOffPaise, long totalCostPaise, LocalDate dueDate, long paidPaise, long returnedPaise,
-                       long duePaise, String paymentStatus, String requestHash, UUID createdBy, Instant createdAt) {}
+                       long duePaise, String paymentStatus, String requestHash, UUID createdBy, Instant createdAt, String attachmentFile,
+                       String attachmentType) {}
 
   /** One received product line with every computed figure; free units are in {@code freeQty}. */
   public record Line(UUID id, UUID productId, int qty, int freeQty, long unitCostPaise, BigDecimal discountPercent, long lineDiscountPaise,
@@ -41,7 +43,7 @@ public class PurchaseRepository {
                      BigDecimal cessPercent, long cessPaise, long lineTotalPaise, long landedTotalPaise, BigDecimal landedUnitCost, String hsn,
                      Long mrpPaise, Long sellingPricePaise, String batchNo, LocalDate expiryDate, boolean applyToVariant, int returnedQty) {}
 
-  /** A payment made to the supplier against a delivery. {@code moneyAccountId} is stored as given (not validated yet). */
+  /** A payment made to the supplier against a delivery. {@code moneyAccountId} is stored as given (not validated yet). Mode CREDIT_NOTE is paid with credit, not money. */
   public record Payment(UUID id, UUID purchaseId, long amountPaise, String mode, String reference, String note, UUID moneyAccountId,
                         Instant paidAt, UUID createdBy, Instant createdAt) {}
 
@@ -59,7 +61,7 @@ public class PurchaseRepository {
   /** The totals over every delivery. */
   public record PayablesTotals(long purchasedPaise, long returnedPaise, long paidPaise, long duePaise, long overduePaise, long overdueCount) {}
 
-  private static final String SELECT = "select p.*, s.phone as supplier_phone, s.gstin as supplier_gstin from purchase p join supplier s on s.id = p.supplier_id";
+  private static final String SELECT = "select p.*, s.phone as supplier_phone, coalesce(p.supplier_gstin_override, s.gstin) as supplier_gstin from purchase p join supplier s on s.id = p.supplier_id";
 
   private final JdbcClient jdbc;
 
@@ -74,7 +76,7 @@ public class PurchaseRepository {
         r.getLong("sgst_paise"), r.getLong("igst_paise"), r.getLong("cess_paise"), r.getLong("freight_paise"), r.getInt("freight_gst_percent"),
         r.getLong("freight_gst_paise"), r.getLong("round_off_paise"), r.getLong("total_cost_paise"), r.getObject("due_date", LocalDate.class),
         r.getLong("paid_paise"), r.getLong("returned_paise"), r.getLong("due_paise"), r.getString("payment_status"), r.getString("request_hash"),
-        r.getObject("created_by", UUID.class), Sql.instant(r, "created_at"));
+        r.getObject("created_by", UUID.class), Sql.instant(r, "created_at"), r.getString("attachment_file"), r.getString("attachment_type"));
   }
 
   private static Line line(ResultSet r, int row) throws SQLException {
@@ -246,10 +248,10 @@ public class PurchaseRepository {
     return BoundedCount.assemble(fetched, page, size, () -> Sql.boundedCount(jdbc, "purchase p" + where, params));
   }
 
-  /** Totals over every delivery. */
+  /** Totals over every delivery. The paid figure is net of supplier refunds, so purchased minus returned minus paid is the due amount. */
   public PayablesTotals payablesTotals(LocalDate today) {
     return jdbc.sql("""
-        select coalesce(sum(total_cost_paise), 0) as purchased, coalesce(sum(returned_paise), 0) as returned, coalesce(sum(paid_paise), 0) as paid,
+        select coalesce(sum(total_cost_paise), 0) as purchased, coalesce(sum(returned_paise), 0) as returned, coalesce(sum(paid_paise - credit_used_paise), 0) as paid,
           coalesce(sum(due_paise), 0) as due,
           coalesce(sum(due_paise) filter (where due_date < :today and due_paise > 0), 0) as overdue,
           count(*) filter (where due_date < :today and due_paise > 0) as overdue_count
@@ -261,7 +263,7 @@ public class PurchaseRepository {
   /** The suppliers that are owed money or owe the shop, most owed first (at most {@code limit}). */
   public List<SupplierDue> payablesBySupplier(LocalDate today, int limit) {
     return jdbc.sql("""
-        select p.supplier_id, s.name, sum(p.total_cost_paise - p.returned_paise) as purchased, sum(p.paid_paise) as paid, sum(p.due_paise) as due,
+        select p.supplier_id, s.name, sum(p.total_cost_paise - p.returned_paise) as purchased, sum(p.paid_paise - p.credit_used_paise) as paid, sum(p.due_paise) as due,
           coalesce(sum(p.due_paise) filter (where p.due_date < :today and p.due_paise > 0), 0) as overdue,
           count(*) filter (where p.due_date < :today and p.due_paise > 0) as overdue_count
         from purchase p join supplier s on s.id = p.supplier_id

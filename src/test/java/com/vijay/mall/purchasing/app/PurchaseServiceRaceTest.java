@@ -33,7 +33,7 @@ class PurchaseServiceRaceTest {
 
   private static PurchaseRepository.Header stored(UUID id, String hash) {
     return new PurchaseRepository.Header(id, UUID.randomUUID(), "Agro", "", "", "", false, "REGULAR", "", LocalDate.of(2026, 11, 9),
-        LocalDate.of(2026, 11, 9), "", "", 0, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, "PAID", hash, UUID.randomUUID(), NOW);
+        LocalDate.of(2026, 11, 9), "", "", 0, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, "PAID", hash, UUID.randomUUID(), NOW, null, null);
   }
 
   @Test

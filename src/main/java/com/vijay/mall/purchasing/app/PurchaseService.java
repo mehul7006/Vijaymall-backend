@@ -88,10 +88,13 @@ public class PurchaseService {
                       @Size(max = 80) String paymentRef, UUID moneyAccountId) {
   }
 
-  /** A payment to record against a delivery. {@code paidAt} defaults to now; {@code moneyAccountId} is stored but not validated yet. */
+  /**
+   * A payment to record against a delivery. {@code paidAt} defaults to now; {@code moneyAccountId} is stored but not validated yet. Mode
+   * CREDIT_NOTE (see {@link SupplierCreditService}) pays with the credit of the debit note {@code debitNoteId} instead of money.
+   */
   @Schema(name = "PurchasePaymentInput")
-  public record PaymentInput(@Min(1) long amountPaise, @NotNull @Size(max = 10) String mode, @Size(max = 80) String reference,
-                             @Size(max = 200) String note, Instant paidAt, UUID moneyAccountId) {}
+  public record PaymentInput(@Min(1) long amountPaise, @NotNull @Size(max = 12) String mode, @Size(max = 80) String reference,
+                             @Size(max = 200) String note, Instant paidAt, UUID moneyAccountId, UUID debitNoteId) {}
 
   /** A received line with its computed figures. Unit costs are paise; the landed cost has 4 decimals and a rounded twin. */
   @Schema(name = "PurchaseItemView")
@@ -109,7 +112,8 @@ public class PurchaseService {
   /**
    * A recorded delivery. Money is paise; {@code totalCostPaise} is what the supplier is owed for the document and {@code duePaise} what is
    * still owed after debit notes and payments (negative: the supplier owes the shop). {@code rounding} says how
-   * {@code landedUnitCostRoundedPaise} of each line was rounded. {@code warnings} is filled only in the answer to recording a delivery.
+   * {@code landedUnitCostRoundedPaise} of each line was rounded. {@code warnings} is filled when a delivery is recorded or its invoice number
+   * is changed. {@code hasAttachment} says an invoice file is attached; {@code attachmentUrl} is then the admin path to fetch it with the token.
    */
   @Schema(name = "PurchaseView")
   public record PurchaseView(UUID id, UUID supplierId, String supplierName, String supplierPhone, String supplierGstin, String supplierStateCode,
@@ -118,12 +122,13 @@ public class PurchaseService {
                              long cgstPaise, long sgstPaise, long igstPaise, long cessPaise, long freightPaise, int freightGstPercent,
                              long freightGstPaise, long roundOffPaise, long totalCostPaise, String paymentStatus, long paidPaise,
                              long returnedPaise, long duePaise, LocalDate dueDate, boolean overdue, List<PaymentView> payments, String rounding,
-                             UUID createdBy, Instant createdAt, List<ItemView> items, List<String> warnings) {
+                             UUID createdBy, Instant createdAt, List<ItemView> items, List<String> warnings, boolean hasAttachment,
+                             String attachmentUrl) {
     PurchaseView withWarnings(List<String> found) {
       return new PurchaseView(id, supplierId, supplierName, supplierPhone, supplierGstin, supplierStateCode, interState, gstMode, invoiceNo,
           invoiceDate, receivedDate, note, attachmentNote, lineDiscountPaise, docDiscountPercent, docDiscountPaise, taxablePaise, cgstPaise,
           sgstPaise, igstPaise, cessPaise, freightPaise, freightGstPercent, freightGstPaise, roundOffPaise, totalCostPaise, paymentStatus,
-          paidPaise, returnedPaise, duePaise, dueDate, overdue, payments, rounding, createdBy, createdAt, items, found);
+          paidPaise, returnedPaise, duePaise, dueDate, overdue, payments, rounding, createdBy, createdAt, items, found, hasAttachment, attachmentUrl);
     }
   }
 
@@ -230,13 +235,13 @@ public class PurchaseService {
     if (idemKey.isBlank()) throw ApiException.validation("Idempotency-Key", "header is required");
   }
 
-  private PurchaseView recorded(Header h) { return views(List.of(h), Rounding.PAISE).getFirst().withWarnings(warnings(h)); }
+  PurchaseView recorded(Header h) { return views(List.of(h), Rounding.PAISE).getFirst().withWarnings(warnings(h)); }
 
   /**
    * Warns (never blocks) when an earlier delivery has the same supplier and invoice number, compared trimmed and ignoring case. Worked
    * out from the stored delivery, so a repeated request answers with the same warning.
    */
-  private List<String> warnings(Header h) {
+  List<String> warnings(Header h) {
     return repo.earlierWithInvoice(h.supplierName(), h.invoiceNo(), h.id(), h.createdAt())
         .map(e -> List.of("invoice number " + h.invoiceNo().strip() + " was already recorded for this supplier on "
             + e.createdAt().atZone(InvoiceNumbers.SHOP_ZONE).toLocalDate() + " (purchase " + e.id() + ")"))
@@ -315,7 +320,7 @@ public class PurchaseService {
     Header header = new Header(id, supplier.id(), supplier.name(), supplier.phone(), supplier.gstin(), supplierState, interState, mode.name(), invoice,
         invoiceDate, receivedDate, note, attachment, math.lineDiscountPaise(), docPercent.signum() > 0 ? docPercent : null, math.docDiscountPaise(),
         math.taxablePaise(), math.cgstPaise(), math.sgstPaise(), math.igstPaise(), math.cessPaise(), freight, freightRate, math.freightGstPaise(),
-        math.roundOffPaise(), math.totalPaise(), dueDate, pay.paid(), 0, 0, null, AdminOps.fingerprint(in), actor, now);
+        math.roundOffPaise(), math.totalPaise(), dueDate, pay.paid(), 0, 0, null, AdminOps.fingerprint(in), actor, now, null, null);
     PurchaseRepository.Payment first = pay.paid() == 0 ? null
         : new PurchaseRepository.Payment(UUID.randomUUID(), id, pay.paid(), pay.mode(), pay.reference(), "", in.moneyAccountId(), now, actor, now);
     repo.insert(header, idemKey, lines, first);
@@ -509,7 +514,8 @@ public class PurchaseService {
           h.gstMode(), h.invoiceNo(), h.invoiceDate(), h.receivedDate(), h.note(), h.attachmentNote(), h.lineDiscountPaise(), h.docDiscountPercent(),
           h.docDiscountPaise(), h.taxablePaise(), h.cgstPaise(), h.sgstPaise(), h.igstPaise(), h.cessPaise(), h.freightPaise(), h.freightGstPercent(),
           h.freightGstPaise(), h.roundOffPaise(), h.totalCostPaise(), h.paymentStatus(), h.paidPaise(), h.returnedPaise(), h.duePaise(), h.dueDate(),
-          overdue, paid, rounding.name(), h.createdBy(), h.createdAt(), items, List.of());
+          overdue, paid, rounding.name(), h.createdBy(), h.createdAt(), items, List.of(), h.attachmentFile() != null,
+          h.attachmentFile() == null ? null : "/api/v1/admin/purchases/" + h.id() + "/attachment");
     }).toList();
   }
 

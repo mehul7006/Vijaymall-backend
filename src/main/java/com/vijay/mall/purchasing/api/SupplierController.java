@@ -3,6 +3,7 @@ package com.vijay.mall.purchasing.api;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
+import com.vijay.mall.purchasing.app.SupplierCreditService;
 import com.vijay.mall.purchasing.app.SupplierService;
 import com.vijay.mall.purchasing.app.SupplierService.View;
 import jakarta.validation.constraints.Max;
@@ -10,8 +11,11 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,9 +45,37 @@ public class SupplierController {
   }
 
   private final SupplierService suppliers;
+  private final SupplierCreditService credit;
 
   /** Creates the controller. */
-  public SupplierController(SupplierService suppliers) { this.suppliers = suppliers; }
+  public SupplierController(SupplierService suppliers, SupplierCreditService credit) {
+    this.suppliers = suppliers;
+    this.credit = credit;
+  }
+
+  /**
+   * The supplier's statement: the balance at {@code from}, the purchases, payments, debit notes, credit uses and refunds in date order with a
+   * running balance (one page, size 1 to 50), and the balance at {@code to}. from and to are India dates and optional.
+   */
+  @GetMapping("/{id}/statement")
+  public SupplierCreditService.Statement statement(@PathVariable UUID id,
+                                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+                                                   @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+    return credit.statement(id, from, to, page, size);
+  }
+
+  /** Records money the supplier paid back, taken from its credit. Needs an Idempotency-Key; 422 REFUND_EXCEEDS_CREDIT above the credit. */
+  @PostMapping("/{id}/refunds")
+  @ResponseStatus(HttpStatus.CREATED)
+  public SupplierCreditService.RefundView refund(@PathVariable UUID id, @RequestHeader("Idempotency-Key") String key,
+                                                 @Valid @RequestBody SupplierCreditService.RefundInput b) {
+    return credit.refund(CurrentUser.id(), key, id, b);
+  }
+
+  /** The latest refunds of a supplier (at most 50), newest first. */
+  @GetMapping("/{id}/refunds")
+  public List<SupplierCreditService.RefundView> refunds(@PathVariable UUID id) { return credit.refunds(id); }
 
   /** Suppliers by name; q searches name, phone and GSTIN; active filters on/off suppliers. */
   @GetMapping

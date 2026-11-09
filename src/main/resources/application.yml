@@ -161,6 +161,8 @@ app:
     allowed-origin-patterns: ${CORS_ORIGINS:}
   bootstrap-admin-email: ${ADMIN_EMAIL:}
   images-dir: ${IMAGES_DIR:./data/images}
+  # Private files (purchase invoice scans): never served as static files, only through authenticated admin endpoints. Keep it on a volume.
+  files-dir: ${FILES_DIR:./data/files}
   delivery:
     # Delivery is free for now. An admin-editable rule comes later; until then set DELIVERY_FEE_PAISE (4000 = Rs 40).
     fee-paise: ${DELIVERY_FEE_PAISE:0}

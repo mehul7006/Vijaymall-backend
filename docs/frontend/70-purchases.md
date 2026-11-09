@@ -405,3 +405,120 @@ Stock lots and per-lot cost/price (the line stores the landed cost for it), file
 6. Show a negative `duePaise` as "supplier credit".
 7. Reports screens; product screen shows `lastPurchaseCostPaise` and the price history.
 8. Parse `landedUnitCost*` as `double`, everything else money as `int`.
+
+---
+
+## Addendum 1: supplier statement, supplier credit and refunds, invoice file, editing a recorded purchase
+
+This addendum builds four items of section 11. Same conventions as above: admin only, money in integer paise, error envelope `{ code, message, traceId, details: { fields } }`, lists are the standard bounded page. Migration `V106`.
+
+### A1.1 Supplier statement (ledger)
+
+`GET /admin/suppliers/{id}/statement?from=2026-04-01&to=2026-04-30&page=0&size=20`
+
+`from` and `to` are optional inclusive India dates (`size` 1..50). Without them the statement covers everything and its closing balance is the supplier's current balance. `400` when `from` is after `to`, `404` for an unknown supplier.
+
+```json
+{
+  "supplierId": "...", "supplierName": "Agro Traders", "from": "2026-04-01", "to": "2026-04-30",
+  "openingBalancePaise": -40000,
+  "closingBalancePaise": 10000,
+  "rows": { "items": [
+    { "date": "2026-04-02", "at": "2026-04-02T06:10:00Z", "kind": "PURCHASE", "refId": "<purchaseId>", "purchaseId": "<purchaseId>",
+      "invoiceNo": "INV-77", "mode": "", "reference": "INV-77", "amountPaise": 50000, "balancePaise": 10000 },
+    { "kind": "PAYMENT", "mode": "CREDIT_NOTE", "reference": "DN-000012", "amountPaise": -20000, "balancePaise": -10000, "...": "..." },
+    { "kind": "CREDIT_USED", "amountPaise": 20000, "balancePaise": 10000, "...": "..." }
+  ], "page": 0, "size": 20, "total": 3, "totalExact": true, "hasMore": false }
+}
+```
+
+- A balance is what the shop owes the supplier; negative means the supplier owes the shop. `amountPaise` is signed: plus raises what the shop owes, minus lowers it. `balancePaise` is the running balance after that row (starts at `openingBalancePaise`, exact on every page). `closingBalancePaise` = opening + the sum of all rows in the range, not only the page.
+- `kind`: `PURCHASE` (+ the document total, dated by invoice date), `PAYMENT` (- any payment, also one made with credit), `DEBIT_NOTE` (- a purchase return), `SUPPLIER_REFUND` (+ money the supplier paid back), `CREDIT_USED` (+ the other half of a payment made with credit: see A1.2; the two rows cancel out). Rows are ordered by date, then in that order of kinds, then by time.
+- With no `to`, `closingBalancePaise` equals `balancePaise` on `GET /admin/suppliers/{id}`, the supplier's `totalDuePaise` and its line in `GET /admin/purchases/payables`.
+- `GET /admin/suppliers/{id}` and the list now also carry `balancePaise` (same number as `totalDuePaise`) and `creditPaise` (the part of a negative balance that sits on purchases and can be used or refunded; always `>= 0`).
+
+### A1.2 Supplier credit: use it on another purchase, or take it back as money
+
+Credit appears when a debit note (return) is bigger than what is still unpaid on its purchase: that purchase gets a negative `duePaise`. `creditPaise` of the supplier is the sum of those negatives. It can be used in two ways, both cannot exceed the credit.
+
+**(a) Pay another purchase of the same supplier with the credit.** Same endpoint as payments, `POST /admin/purchases/{id}/payments`, with `Idempotency-Key`:
+
+```json
+{ "amountPaise": 30000, "mode": "CREDIT_NOTE", "debitNoteId": "<purchase return id>", "note": "adjusted", "paidAt": null }
+```
+
+Answer: `201` and the paid purchase (the payment row has `mode: "CREDIT_NOTE"` and `reference` = the debit note number). The credit is taken from the purchase the debit note belongs to, so the supplier's balance does not change, only which purchase carries it. Rules and errors: `debitNoteId` is required and must exist and belong to the same supplier (`400` on `debitNoteId`; also `400` when it is a return on the purchase being paid); `409 ALREADY_PAID` when nothing is due; `422 PAYMENT_EXCEEDS_DUE` above the due amount; `422 CREDIT_EXCEEDS_AVAILABLE` above the credit left on that debit note and its purchase (`details.availablePaise`, `details.fields.amountPaise`). Partial use is fine: use 30,000 of 40,000 now, the rest later. Two requests that use the same credit at the same time cannot both succeed: the second gets `CREDIT_EXCEEDS_AVAILABLE`. Show the debit notes with `GET /admin/purchases/{id}/returns`; offer "pay with credit" only when `creditPaise > 0`. `moneyAccountId` is not used by this mode.
+
+**(b) Refund: the supplier paid the credit back in cash or bank.** `POST /admin/suppliers/{id}/refunds` with `Idempotency-Key`:
+
+```json
+{ "amountPaise": 25000, "mode": "BANK", "reference": "UTR123", "receivedAt": "2026-04-20T09:30:00Z", "moneyAccountId": "<uuid or null>" }
+```
+
+`mode` is CASH, UPI, CARD, BANK or CHEQUE; `receivedAt` defaults to now; `moneyAccountId` is stored without validation, like payments. Answer `201`:
+
+```json
+{ "id": "...", "supplierId": "...", "amountPaise": 25000, "mode": "BANK", "reference": "UTR123", "moneyAccountId": null,
+  "receivedAt": "...", "createdBy": "...", "createdAt": "...", "creditPaise": 15000, "balancePaise": -15000 }
+```
+
+`creditPaise` and `balancePaise` are the supplier's figures after the refund. In `GET /admin/purchases/payables` the paid figures are net of refunds (a refund lowers `totalPaidPaise`), so purchased minus paid is still the due amount. Errors: `422 REFUND_EXCEEDS_CREDIT` (`details.creditPaise`, `details.fields.amountPaise`), `400` for a bad mode or a future `receivedAt`, `404` unknown supplier, `409 IDEMPOTENCY_KEY_REUSED`. A repeat with the same key and body returns the first refund and changes nothing. The refund is taken from the supplier's credit purchases, oldest invoice first, so their `duePaise` moves up towards 0. `GET /admin/suppliers/{id}/refunds` lists the latest 50 (same shape, newest first). The statement shows a refund as `SUPPLIER_REFUND` with a plus amount.
+
+Example: bought 100,000 and paid it; returned goods worth 40,000, so credit 40,000 and balance -40,000. A new purchase of 50,000: balance +10,000, credit still 40,000. Pay it with 30,000 credit: new purchase due 20,000, old purchase due -10,000, balance still +10,000. Or refund 10,000 in cash: old purchase due 0, balance +20,000.
+
+### A1.3 Invoice file
+
+- `POST /admin/purchases/{id}/attachment`, `multipart/form-data`, part `file`: PDF, JPEG, PNG or WebP, at most 5 MB. The type is decided from the file's first bytes, not from its name or sent type. Answer `200` and the purchase. A second upload replaces the first (the old file is deleted). No Idempotency-Key is needed: repeating it is harmless.
+- `DELETE /admin/purchases/{id}/attachment` removes it (`200` and the purchase, also when there was none).
+- `GET /admin/purchases/{id}/attachment` streams the file with its real `Content-Type` and `Content-Disposition: inline`; `404` when there is none. It needs the admin token, so a plain `<img src>` or link does not work: fetch the bytes with the `Authorization` header and show them (Flutter: `Image.memory`, or a PDF viewer on the bytes).
+- The purchase view has `hasAttachment` (bool) and `attachmentUrl` (`/api/v1/admin/purchases/{id}/attachment` or `null`). `attachmentNote` stays as a free text field.
+- Errors (`400`, `details.fields.file`): `UNSUPPORTED_FILE` (not one of the four types), `FILE_TOO_LARGE` (over 5 MB), `VALIDATION_FAILED` (empty file or not sent as multipart), `404` unknown purchase.
+- The files are in a private folder (`FILES_DIR`, default `./data/files`, a separate volume in `docker-compose.prod.yml`), never under `/img`, with random names. Back that volume up with the database.
+
+### A1.4 Edit a recorded purchase (non-stock fields only)
+
+`PATCH /admin/purchases/{id}` with a JSON body of only the fields to change:
+
+```json
+{ "invoiceNo": "INV-78", "invoiceDate": "2026-04-02", "dueDate": null, "note": "checked", "attachmentNote": "folder 4",
+  "supplierGstin": "24ABCDE1234F1Z5", "supplierStateCode": "24" }
+```
+
+- Left out = unchanged. Text fields: an empty string clears. `dueDate: null` clears the due date. `invoiceDate` cannot be cleared or be in the future; `dueDate` cannot be before the invoice date. `supplierGstin` must be a valid GSTIN (or empty); it fixes the text on this document only, not the supplier master, and when `supplierStateCode` is not sent the state follows the GSTIN. A state sent must match the GSTIN. Changing the state text does not recompute the tax (`interState` and the amounts stay as recorded).
+- Anything else (`items`, `qty`, `unitCostPaise`, totals, tax, discount, `supplierId`, `gstMode`, payments...) is refused with `400` on that field; the message says to use a purchase return and a new purchase. That is the rule for a wrong quantity or cost: **return the purchase (debit note) and record a new one**, because those change stock, lots and the money owed.
+- Answer `200` and the purchase, with `warnings` filled when the new invoice number was already recorded for this supplier (same check as when recording). Sending the same values again changes nothing. One audit entry `PURCHASE_EDIT` lists each changed field as `field: 'before' -> 'after'`. Moving `invoiceDate` moves the purchase between report periods (purchase register, input GST).
+
+### A1.5 Dart sketches
+
+```dart
+class StatementRow {
+  final DateTime date; final String kind; final String? purchaseId; final String invoiceNo;
+  final String mode, reference; final int amountPaise, balancePaise;
+  StatementRow.fromJson(Map<String, dynamic> j)
+      : date = DateTime.parse(j['date']), kind = j['kind'], purchaseId = j['purchaseId'], invoiceNo = j['invoiceNo'] ?? '',
+        mode = j['mode'] ?? '', reference = j['reference'] ?? '', amountPaise = j['amountPaise'], balancePaise = j['balancePaise'];
+}
+
+Future<Map<String, dynamic>> payWithCredit(Dio dio, String purchaseId, String noteId, int paise) async {
+  final r = await dio.post('/admin/purchases/$purchaseId/payments',
+      data: {'amountPaise': paise, 'mode': 'CREDIT_NOTE', 'debitNoteId': noteId},
+      options: Options(headers: {'Idempotency-Key': const Uuid().v4()}));
+  return r.data; // 422 CREDIT_EXCEEDS_AVAILABLE: details.availablePaise
+}
+
+Future<void> refund(Dio dio, String supplierId, int paise) => dio.post('/admin/suppliers/$supplierId/refunds',
+    data: {'amountPaise': paise, 'mode': 'CASH'}, options: Options(headers: {'Idempotency-Key': const Uuid().v4()}));
+
+Future<void> attach(Dio dio, String purchaseId, Uint8List bytes, String name) => dio.post('/admin/purchases/$purchaseId/attachment',
+    data: FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: name)}));
+
+Future<Uint8List> invoiceBytes(Dio dio, String purchaseId) async {
+  final r = await dio.get<List<int>>('/admin/purchases/$purchaseId/attachment', options: Options(responseType: ResponseType.bytes));
+  return Uint8List.fromList(r.data!);
+}
+
+Future<Map<String, dynamic>> editPurchase(Dio dio, String id, Map<String, dynamic> onlyChanged) async =>
+    (await dio.patch('/admin/purchases/$id', data: onlyChanged)).data;
+```
+
+New audit actions: `SUPPLIER_REFUND`, `PURCHASE_CREDIT_USE`, `PURCHASE_ATTACHMENT`, `PURCHASE_EDIT`. New payment mode value in `payments[].mode`: `CREDIT_NOTE` (not money: do not count it as cash out in a cash report). Still not built: stock lots, purchase orders, cancelling a purchase, validating `moneyAccountId`.

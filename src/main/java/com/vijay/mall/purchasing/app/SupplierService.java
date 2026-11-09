@@ -27,10 +27,14 @@ public class SupplierService {
   @Schema(name = "SupplierInput")
   public record Input(String name, String gstin, String stateCode, String phone, String address, Integer paymentTermsDays) {}
 
-  /** A supplier with what the purchases say about it. {@code totalDuePaise} is negative when the supplier owes the shop. */
+  /**
+   * A supplier with what the purchases say about it. {@code balancePaise} (the same figure as {@code totalDuePaise}) is what the shop owes the
+   * supplier, negative when the supplier owes the shop; {@code creditPaise} is the part that can be used on another purchase or refunded.
+   */
   @Schema(name = "SupplierView")
   public record View(UUID id, String name, String phone, String gstin, String stateCode, String address, int paymentTermsDays, boolean active,
-                     Instant createdAt, String lastInvoiceNo, Instant lastPurchaseAt, long purchaseCount, long totalDuePaise) {}
+                     Instant createdAt, String lastInvoiceNo, Instant lastPurchaseAt, long purchaseCount, long totalDuePaise,
+                     long balancePaise, long creditPaise) {}
 
   private static final Pattern GSTIN = Pattern.compile("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$");
   private static final Pattern PHONE = Pattern.compile("^[0-9+ \\-]{0,20}$");
@@ -142,7 +146,7 @@ public class SupplierService {
     return suppliers.stream().map(s -> {
       Stats t = stats.get(s.id());
       return new View(s.id(), s.name(), s.phone(), s.gstin(), s.stateCode(), s.address(), s.paymentTermsDays(), s.active(), s.createdAt(),
-          t.lastInvoiceNo(), t.lastPurchaseAt(), t.purchaseCount(), t.totalDuePaise());
+          t.lastInvoiceNo(), t.lastPurchaseAt(), t.purchaseCount(), t.totalDuePaise(), t.totalDuePaise(), t.creditPaise());
     }).toList();
   }
 

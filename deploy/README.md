@@ -21,7 +21,7 @@ sign in as anyone).
 
 Safety rules the server enforces at start-up (it refuses to start otherwise): a long random `JWT_SECRET` and `OTP_PEPPER`, an empty `OTP_FIXED_CODE`,
 `OTP_CHANNEL=email`, an `ADMIN_EMAIL`, and the metrics port different from the public port. Put TLS in front (Caddy, nginx or a cloud load balancer).
-Back up the `dbdata` volume (pg_dump) and the `images` volume.
+Back up the `dbdata` volume (pg_dump) and the `images` and `files` volumes (`files` holds the private purchase invoice scans).
 
 ## Thread and connection pools
 

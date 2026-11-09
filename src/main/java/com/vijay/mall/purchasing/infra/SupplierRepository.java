@@ -23,8 +23,11 @@ public class SupplierRepository {
   public record Supplier(UUID id, String name, String nameKey, String gstin, String stateCode, String phone, String address, int paymentTermsDays,
                          boolean active, Instant createdAt, Instant updatedAt) {}
 
-  /** What the purchases say about a supplier. {@code totalDuePaise} is negative when the supplier owes the shop. */
-  public record Stats(UUID supplierId, String lastInvoiceNo, Instant lastPurchaseAt, long purchaseCount, long totalDuePaise) {}
+  /**
+   * What the purchases say about a supplier. {@code totalDuePaise} is negative when the supplier owes the shop; {@code creditPaise} is the part of
+   * it that sits on individual purchases (credit that can be used or refunded).
+   */
+  public record Stats(UUID supplierId, String lastInvoiceNo, Instant lastPurchaseAt, long purchaseCount, long totalDuePaise, long creditPaise) {}
 
   private final JdbcClient jdbc;
 
@@ -102,18 +105,19 @@ public class SupplierRepository {
   /** Purchase figures for many suppliers in two queries. Suppliers without purchases get an empty entry. */
   public Map<UUID, Stats> stats(List<UUID> ids) {
     Map<UUID, Stats> out = new HashMap<>();
-    ids.forEach(id -> out.put(id, new Stats(id, "", null, 0, 0)));
+    ids.forEach(id -> out.put(id, new Stats(id, "", null, 0, 0, 0)));
     if (ids.isEmpty()) return out;
     Map<UUID, String> lastInvoice = new HashMap<>();
     jdbc.sql("select distinct on (supplier_id) supplier_id, invoice_no from purchase where supplier_id in (:ids) order by supplier_id, created_at desc, id desc")
         .param("ids", ids).query((r, i) -> Map.entry(r.getObject("supplier_id", UUID.class), r.getString("invoice_no"))).list()
         .forEach(e -> lastInvoice.put(e.getKey(), e.getValue()));
     jdbc.sql("""
-        select supplier_id, count(*) as cnt, max(created_at) as last_at, coalesce(sum(due_paise), 0) as due
+        select supplier_id, count(*) as cnt, max(created_at) as last_at, coalesce(sum(due_paise), 0) as due,
+          coalesce(sum(-due_paise) filter (where due_paise < 0), 0) as credit
         from purchase where supplier_id in (:ids) group by supplier_id""").param("ids", ids)
         .query((r, i) -> {
           UUID id = r.getObject("supplier_id", UUID.class);
-          return new Stats(id, lastInvoice.getOrDefault(id, ""), Sql.instant(r, "last_at"), r.getLong("cnt"), r.getLong("due"));
+          return new Stats(id, lastInvoice.getOrDefault(id, ""), Sql.instant(r, "last_at"), r.getLong("cnt"), r.getLong("due"), r.getLong("credit"));
         }).list().forEach(s -> out.put(s.supplierId(), s));
     return out;
   }
