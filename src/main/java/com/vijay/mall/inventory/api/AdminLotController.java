@@ -73,6 +73,12 @@ public class AdminLotController {
     return reports.margin(groupBy, from, to, page, size);
   }
 
+  /** The saved lot switches of a variant, so the screen can show them. */
+  @GetMapping("/api/v1/admin/variants/{id}/lot-settings")
+  public Map<String, Object> lotSettingsOf(@PathVariable UUID id) {
+    return admin.settingsOf(id);
+  }
+
   /** Switches lot pricing and expiry tracking of a variant. */
   @PutMapping("/api/v1/admin/variants/{id}/lot-settings")
   public Map<String, Object> lotSettings(@PathVariable UUID id, @Valid @RequestBody LotSettingsBody body) {

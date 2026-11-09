@@ -98,8 +98,13 @@ public class LotRepository {
 
   /** {lotPriced, trackExpiry} of a product; both false when the product is unknown. */
   public boolean[] flags(UUID productId) {
+    return findFlags(productId).orElse(new boolean[] {false, false});
+  }
+
+  /** {lotPriced, trackExpiry} of a product, or empty when the product is unknown. */
+  public java.util.Optional<boolean[]> findFlags(UUID productId) {
     return jdbc.sql("select lot_priced, track_expiry from product where id = :p").param("p", productId)
-        .query((r, _) -> new boolean[] {r.getBoolean(1), r.getBoolean(2)}).optional().orElse(new boolean[] {false, false});
+        .query((r, _) -> new boolean[] {r.getBoolean(1), r.getBoolean(2)}).optional();
   }
 
   /** The lots with stock of the lot-priced products among these, in use order, without locking (for prices at the counter and in quotes). */

@@ -51,6 +51,17 @@ public class LotAdminService {
     this.clock = clock;
   }
 
+  /** The saved lot switches of a variant ({@code lotPriced}, {@code trackExpiry}); 404 for an unknown variant. */
+  @Transactional(readOnly = true)
+  public Map<String, Object> settingsOf(UUID variantId) {
+    boolean[] f = lots.findFlags(variantId).orElseThrow(() -> ApiException.notFound("Variant"));
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("variantId", variantId);
+    out.put("lotPriced", f[0]);
+    out.put("trackExpiry", f[1]);
+    return out;
+  }
+
   /**
    * Switches a variant's lot pricing (its selling price and MRP follow the lot that sells next) and expiry tracking (earliest expiry
    * is sold first). Turning lot pricing on takes effect at the next stock movement of the variant.

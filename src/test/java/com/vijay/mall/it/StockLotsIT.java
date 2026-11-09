@@ -255,6 +255,11 @@ class StockLotsIT extends IntegrationTestBase {
     assertThat(get("/api/v1/admin/stock/lot-check", token("cashier@vijaysupermall.local")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     assertThat(call(HttpMethod.PUT, "/api/v1/admin/variants/" + UUID.randomUUID() + "/lot-settings", admin(), Map.of("lotPriced", true, "trackExpiry", false), null)
         .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(get("/api/v1/admin/variants/" + UUID.randomUUID() + "/lot-settings", admin()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    String switched = product(true, false);
+    var saved = get("/api/v1/admin/variants/" + switched + "/lot-settings", admin());
+    assertThat(saved.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(saved.getBody()).containsEntry("lotPriced", true).containsEntry("trackExpiry", false).containsEntry("variantId", switched);
     var bad = call(HttpMethod.PUT, "/api/v1/admin/config", admin(), Map.of("changes", List.of(Map.of("key", "inventory.lotCrossPolicy", "value", "SPLIT"))), null);
     assertThat(bad.getStatusCode().is4xxClientError()).isTrue();
   }
