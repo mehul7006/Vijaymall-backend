@@ -78,14 +78,18 @@ class LocalDiskImageStoreTest {
   }
 
   @Test
-  void transparentPixelsBecomeWhiteBecauseJpegHasNoAlpha() throws IOException {
-    BufferedImage clear = new BufferedImage(50, 50, BufferedImage.TYPE_INT_ARGB); // fully transparent
-    String url = store().save(encode(clear, "png"), "products");
-    String id = url.substring(url.lastIndexOf('/') + 1, url.length() - "_400.jpg".length());
-    int px = read(dir.resolve("products").resolve(id + "_400.jpg")).getRGB(25, 25);
-    assertThat((px >> 16) & 0xFF).isGreaterThan(240);
-    assertThat((px >> 8) & 0xFF).isGreaterThan(240);
-    assertThat(px & 0xFF).isGreaterThan(240);
+  void transparentPictureStaysPngWithItsAlphaInBothSizes() throws IOException {
+    BufferedImage clear = new BufferedImage(1200, 50, BufferedImage.TYPE_INT_ARGB); // fully transparent
+    String url = store().save(encode(clear, "png"), "shop");
+    assertThat(url).endsWith("_400.png");
+    String id = url.substring(url.lastIndexOf('/') + 1, url.length() - "_400.png".length());
+    BufferedImage small = read(dir.resolve("shop").resolve(id + "_400.png"));
+    BufferedImage big = read(dir.resolve("shop").resolve(id + "_1000.png"));
+    assertThat(small.getWidth()).isEqualTo(400);
+    assertThat(big.getWidth()).isEqualTo(1000);
+    assertThat(small.getColorModel().hasAlpha()).isTrue();
+    assertThat((small.getRGB(25, 5) >>> 24)).isZero();
+    assertThat(dir.resolve("shop").resolve(id + "_400.jpg")).doesNotExist();
   }
 
   @Test

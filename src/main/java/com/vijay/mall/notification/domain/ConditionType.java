@@ -22,8 +22,8 @@ public enum ConditionType {
       Map.of("type", "ORDER_COUNT", "op", "EQ", "value", 0), none()),
   TOTAL_SPENT("Total spent", "Customers whose total spending compares as chosen. Use op BETWEEN with minPaise and maxPaise, otherwise paise.",
       "Spending",
-      List.of(Param.choice("op", "Comparison", true, "GTE", "LTE", "BETWEEN"), Param.amount("paise", "Amount (paise)", false),
-          Param.amount("minPaise", "From amount (paise)", false), Param.amount("maxPaise", "To amount (paise)", false),
+      List.of(Param.choice("op", "Comparison", true, "GTE", "LTE", "BETWEEN"), Param.amount("paise", "Amount (Rs)", false),
+          Param.amount("minPaise", "From amount (Rs)", false), Param.amount("maxPaise", "To amount (Rs)", false),
           Param.days("withinDays", "Only count the last N days", false)),
       Map.of("type", "TOTAL_SPENT", "op", "GTE", "paise", 500_000), (p, err) -> {
         boolean between = "BETWEEN".equals(p.get("op"));
@@ -41,7 +41,7 @@ public enum ConditionType {
         }
       }),
   AVG_ORDER_VALUE("Average order value", "Customers whose average order value compares as chosen. Customers with no purchase never match.",
-      "Spending", List.of(Param.choice("op", "Comparison", true, "GTE", "LTE"), Param.amount("paise", "Amount (paise)", true)),
+      "Spending", List.of(Param.choice("op", "Comparison", true, "GTE", "LTE"), Param.amount("paise", "Amount (Rs)", true)),
       Map.of("type", "AVG_ORDER_VALUE", "op", "GTE", "paise", 100_000), none()),
   LAST_ORDER("Last purchase", "withinDays: bought in the last N days. notWithinDays: has bought before but not in the last N days (lapsed).",
       "Activity", List.of(Param.days("withinDays", "Bought within the last N days", false),
@@ -65,7 +65,7 @@ public enum ConditionType {
       List.of(Param.choice("op", "Comparison", true, "GTE", "LTE", "EQ"), Param.integer("value", "Coins", true, 0, 100_000_000)),
       Map.of("type", "COIN_BALANCE", "op", "GTE", "value", 500), none()),
   CREDIT_OWED("Credit owed (udhar)", "Customers whose outstanding counter credit compares as chosen.", "Account",
-      List.of(Param.choice("op", "Comparison", true, "GTE", "LTE", "EQ"), Param.amount("paise", "Amount (paise)", true)),
+      List.of(Param.choice("op", "Comparison", true, "GTE", "LTE", "EQ"), Param.amount("paise", "Amount (Rs)", true)),
       Map.of("type", "CREDIT_OWED", "op", "GTE", "paise", 1), none()),
   CART_ABANDONED("Abandoned cart", "Customers with items in their cart that have not been touched for N hours and who did not buy since.",
       "Activity", List.of(Param.integer("olderThanHours", "Cart untouched for (hours)", true, 1, 8760)),

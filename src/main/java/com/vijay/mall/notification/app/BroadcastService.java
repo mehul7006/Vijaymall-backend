@@ -49,6 +49,7 @@ public class BroadcastService {
    * @param body message text, 1 to 500 characters after trimming
    * @param ref optional free text for the app (at most 100 characters)
    */
+  @Schema(name = "BroadcastRequest")
   public record Request(Audience audience, List<UUID> userIds, List<String> mobiles, UUID segmentId, Segment segment, String title,
                         String body, String ref) {}
 

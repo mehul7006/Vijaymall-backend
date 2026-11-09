@@ -201,6 +201,16 @@ public class FlashRepository {
   @Transactional
   public void deleteItem(UUID itemId) { jdbc.sql("delete from flash_sale_item where id = :id").param("id", itemId).update(); }
 
+  /** Deletes a sale row; its items go with it (cascade). */
+  @Transactional
+  public void deleteSale(UUID id) { jdbc.sql("delete from flash_sale where id = :id").param("id", id).update(); }
+
+  /** True when any unit of any item of the sale was ever counted, given back or not. */
+  public boolean saleHasHistory(UUID saleId) {
+    return jdbc.sql("select exists (select 1 from flash_consumption where flash_sale_id = :id)").param("id", saleId)
+        .query(Boolean.class).single();
+  }
+
   /** True when any units of the item were ever counted, given back or not. */
   public boolean hasHistory(UUID itemId) {
     return jdbc.sql("select exists (select 1 from flash_consumption where flash_item_id = :id)").param("id", itemId)

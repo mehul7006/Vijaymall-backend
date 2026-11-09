@@ -62,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -704,14 +705,22 @@ public class PosService implements ReferenceLookup {
   }
 
   // ---------- held baskets ----------
+  /** The most lines one parked basket may hold. */
+  static final int MAX_HOLD_LINES = 50;
+
   /**
    * Parks a basket (with an optional label and customer mobile) so the cashier can serve someone else.
    *
-   * @throws ApiException 400 if the basket is empty
+   * @throws ApiException 400 if the basket is empty or has more than 50 lines; 409 {@code HOLD_LIMIT} when 100 baskets are already parked
    */
   @Transactional
   public HoldView hold(UUID cashierId, String label, Cart cart) {
     if (cart.items() == null || cart.items().isEmpty()) throw ApiException.validation("items", "basket is empty");
+    if (cart.items().size() > MAX_HOLD_LINES) throw ApiException.validation("items", "must have at most " + MAX_HOLD_LINES + " lines");
+    checkHoldQuantities(cart.items());
+    if (holds.count() >= PosHoldRepository.MAX_LISTED) {
+      throw ApiException.conflict("HOLD_LIMIT", "Too many parked baskets: resume or discard some first", Map.of("max", PosHoldRepository.MAX_LISTED));
+    }
     String mobile = mobile(cart.customerMobile());
     try {
       HoldRecord r = holds.insert(cashierId, label == null ? "" : label.strip(), mobile, json.writeValueAsString(cart), clock.instant());
@@ -721,7 +730,22 @@ public class PosService implements ReferenceLookup {
     }
   }
 
-  /** The newest 100 parked baskets, newest first (the list is capped so forgotten baskets cannot slow the counter). */
+  /**
+   * A parked basket keeps to the same quantity bounds as a bill: 1 to 9999 pieces, or 1 to 100000 grams for a weighed item. Products
+   * the till does not know yet are treated as counted items (a hold never checks that products exist).
+   */
+  private void checkHoldQuantities(List<Item> items) {
+    Map<UUID, ProductPos> attrs = catalog.attributesFor(items.stream().map(Item::productId).filter(Objects::nonNull).collect(Collectors.toSet()));
+    for (int i = 0; i < items.size(); i++) {
+      ProductPos a = attrs.get(items.get(i).productId());
+      int max = a != null && a.soldBy() == SoldBy.WEIGHT ? MAX_GRAMS : MAX_UNITS;
+      if (items.get(i).qty() < 1 || items.get(i).qty() > max) {
+        throw ApiException.validation("cart.items[" + i + "].qty", "must be 1 to " + max);
+      }
+    }
+  }
+
+  /** Every parked basket, newest first; at most 100 can exist, so none is ever left out. */
   public List<HoldView> holds() { return holds.all().stream().map(this::toView).toList(); }
 
   /**

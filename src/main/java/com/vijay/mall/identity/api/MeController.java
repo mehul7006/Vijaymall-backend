@@ -8,6 +8,7 @@ import com.vijay.mall.identity.domain.User;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -39,7 +40,7 @@ public class MeController {
    * @param name the display name, or null to keep it
    * @param mobile blank, or 10 digits without country code
    */
-  public record ProfileInput(String name, @Pattern(regexp = "^$|\\d{10}", message = "must be 10 digits") String mobile) {}
+  public record ProfileInput(@Size(min = 1, max = 80) String name, @Pattern(regexp = "^$|\\d{10}", message = "must be 10 digits") String mobile) {}
   /**
    * Request body for adding or editing a delivery address.
    * @param label short name such as Home or Office
@@ -49,7 +50,7 @@ public class MeController {
    * @param isDefault true to make this the default address; null or false leaves the default unchanged
    * @param phone optional contact phone for the delivery: blank, or exactly 10 digits
    */
-  public record AddressInput(@NotBlank String label, @NotBlank String line1, @NotBlank String area,
+  public record AddressInput(@NotBlank @Size(max = 30) String label, @NotBlank @Size(max = 200) String line1, @NotBlank @Size(max = 80) String area,
                              @NotBlank @Pattern(regexp = "^$|\\d{6}", message = "must be 6 digits") String pincode, Boolean isDefault,
                              @Pattern(regexp = "^$|\\d{10}", message = "must be 10 digits") String phone) {
     /** An address input without a phone. */

@@ -1473,3 +1473,36 @@ Several response/request records used to share a simple name (`View`, `Row`, `Re
 
 ### Plain dates in range-end fields
 - A plain date (for example `2026-12-31`) sent for a range-**end** instant field such as `hotEnd` means the **start** of that day in India time, so to say "through the end of that day" send a full timestamp (`2026-12-31T23:59:59+05:30`).
+
+## Addendum 3 (validation limits and consistency, round 3)
+
+**Images.** `/img/**` answers `Cache-Control: public, max-age=31536000, immutable` (no `no-store`, no `Expires: 0`), `Last-Modified`, and 304 for a conditional repeat. A picture with an alpha channel (a transparent PNG, for example the shop logo uploaded to `POST /admin/shop-profile/logo`) is stored as PNG: the returned path ends in `_400.png` (and `_1000.png`) instead of `_400.jpg`. Opaque pictures stay JPEG.
+
+**Whole numbers.** An integer field (stock `delta`, `paisePerCoin`, coin `delta`, quantities, paise) that receives `1.5` is a 400 `VALIDATION_FAILED` with `fields.<name>` = `must be a whole number`; it is no longer cut to `1`. `5.0` is rejected too (send `5`).
+
+**Same wording and checks across sibling endpoints.**
+- Variant (`POST /admin/products/{id}/variants`): `qtyOnHand` and `lowThreshold` below 0 are 400 `must be 0 or more` (they used to be stored as 0).
+- Coupon: `minOrderPaise` and `maxDiscountPaise` below 0 are 400 `must be 0 or more`.
+- Coin rule (`POST/PUT /admin/coin-rules`) and hot banner (`POST/PUT /admin/hot-banners`): an `endAt` before `startAt` is 400 `fields.endAt` = `must be after startAt`, exactly like coupons.
+
+**Size limits** (all 400 `VALIDATION_FAILED` on the field; also published in Swagger as `maxLength`, `minimum`, `maximum`). Constants live in `com.vijay.mall.common.Limits`.
+
+| Field | Limit |
+|---|---|
+| product `nameEn`, `nameGu`; category, unit and coin-rule names | 120 characters |
+| product `description` | 2000 characters |
+| `pricePaise`, `mrpPaise`, coupon `value` (FLAT), `minOrderPaise`, `maxDiscountPaise`, coin-rule `spendPaise`/`minOrderPaise`, `paisePerCoin` | 0 to 100,000,000 paise (Rs 10 lakh) |
+| `unit` / `packSize` / `variantName` | 30 / 40 / 60 characters |
+| coupon `code` | at most 30; after trimming and upper-casing only `A-Z 0-9 - _` (no spaces) |
+| coin settings `expiryMonths` | 1 to 120 |
+| coin-rule `coins` | 1 to 1,000,000 |
+| stock adjust `delta` (`POST /admin/products/{id}/stock`) | -1,000,000 to 1,000,000 |
+| hot banner `title`, `subtitle` / `imageUrl` | 200 / 500 characters |
+| purchase line `qty` | 1 to 1,000,000; `unitCostPaise` as before |
+| flash sale `name` / `description` / `bannerText`, item `maxQty` | 80 / 300 / 80 characters, 1 to 1,000,000 (file 40) |
+| shop `shopName` / `address` / `receiptFooter` | 80 / 300 / 200 characters |
+| shop `phone` | empty, or only digits, spaces, `+` and `-` with 7 to 15 digits |
+| shop `shortName` / `promise` / `details` / `holidayNote` | 20 / 200 / 500 / 200 characters |
+| Gujarati `shopNameGu` / `addressGu` / `promiseGu` / `detailsGu` / `holidayNoteGu` | 80 / 300 / 200 / 500 / 200 characters |
+
+(Profile name, address lines, holds, credit, staff and POS fields have their own limits in files 20 and 30.) A coupon has no description field, so there is nothing to limit there.

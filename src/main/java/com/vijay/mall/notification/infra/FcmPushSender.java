@@ -76,20 +76,21 @@ public class FcmPushSender implements PushSender {
   }
 
   @Override
-  public void send(List<String> deviceTokens, String title, String body) {
+  public void send(List<String> deviceTokens, String title, String body, Map<String, String> data) {
     try {
       if (deviceTokens == null || deviceTokens.isEmpty()) return;
       Account a = account();
       String bearer = bearer(a);
       String t = cut(title, 100);
       String b = cut(body, 400);
+      Map<String, String> extra = stringData(data);
       Semaphore gate = new Semaphore(PARALLEL);
       try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
         for (String token : deviceTokens) {
           pool.submit(() -> {
             gate.acquireUninterruptibly();
             try {
-              sendOne(a, bearer, token, t, b);
+              sendOne(a, bearer, token, t, b, extra);
             } finally {
               gate.release();
             }
@@ -101,11 +102,12 @@ public class FcmPushSender implements PushSender {
     }
   }
 
-  private void sendOne(Account a, String bearer, String token, String title, String body) {
+  private void sendOne(Account a, String bearer, String token, String title, String body, Map<String, String> data) {
     try {
       Map<String, Object> message = new LinkedHashMap<>();
       message.put("token", token);
       message.put("notification", Map.of("title", title, "body", body));
+      if (!data.isEmpty()) message.put("data", data);
       message.put("android", Map.of("priority", "HIGH"));
       HttpResponse<String> r = call(sendRequest(a, bearer, Map.of("message", message)));
       int code = r.statusCode();
@@ -121,6 +123,13 @@ public class FcmPushSender implements PushSender {
     } catch (RuntimeException e) {
       log.warn("A push could not be sent: {}", e.getMessage());
     }
+  }
+
+  /** The data payload FCM accepts: string keys and string values only, so entries without a value are dropped. */
+  private static Map<String, String> stringData(Map<String, String> data) {
+    Map<String, String> out = new LinkedHashMap<>();
+    if (data != null) data.forEach((k, v) -> { if (v != null) out.put(k, v); });
+    return out;
   }
 
   /** Used by the "test this setting" button. Never throws. */

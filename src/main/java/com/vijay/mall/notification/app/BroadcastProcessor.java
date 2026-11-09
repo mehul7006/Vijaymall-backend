@@ -8,7 +8,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -143,13 +145,17 @@ public class BroadcastProcessor {
   private void pushBatch(BroadcastRepository.Job job, Beat beat, List<UUID> users, UUID through) {
     boolean real = push.isConfigured();
     List<String> tokens = real ? profiles.deviceTokensOf(users) : List.of();
+    Map<String, String> data = new LinkedHashMap<>();
+    data.put("type", "ANNOUNCEMENT");
+    if (job.ref() != null) data.put("ref", job.ref());
+    data.put("broadcastId", job.id().toString());
     int handedOver = 0;
     boolean failed = false;
     for (int from = 0; from < tokens.size(); from += BATCH) {
       List<String> chunk = tokens.subList(from, Math.min(from + BATCH, tokens.size()));
       beat.pulse();
       try {
-        push.send(chunk, job.title(), job.body());
+        push.send(chunk, job.title(), job.body(), data);
         handedOver += chunk.size();
       } catch (RuntimeException e) {
         failed = true;

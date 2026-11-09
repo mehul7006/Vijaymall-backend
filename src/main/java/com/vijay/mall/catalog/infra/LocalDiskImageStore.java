@@ -17,7 +17,7 @@ import javax.imageio.ImageIO;
 import org.springframework.stereotype.Component;
 
 /**
- * Image store that writes resized JPEG copies into the folder configured as {@code imagesDir}; the files are served under {@code /img}.
+ * Image store that writes resized copies (JPEG, or PNG when the picture has transparency) into the folder configured as {@code imagesDir}; the files are served under {@code /img}.
  * <p>Each upload is saved at a maximum side of 400 px and 1000 px under a random UUID name, so the original file name is never used.
  */
 @Component
@@ -41,9 +41,11 @@ public class LocalDiskImageStore implements ImageStore {
       String name = UUID.randomUUID().toString();
       Path dir = root.resolve(folder);
       Files.createDirectories(dir);
-      ImageIO.write(scale(src, 400), "jpg", dir.resolve(name + "_400.jpg").toFile());
-      ImageIO.write(scale(src, 1000), "jpg", dir.resolve(name + "_1000.jpg").toFile());
-      return "/img/" + folder + "/" + name + "_400.jpg";
+      boolean alpha = src.getColorModel().hasAlpha();
+      String ext = alpha ? "png" : "jpg";
+      ImageIO.write(scale(src, 400, alpha), ext, dir.resolve(name + "_400." + ext).toFile());
+      ImageIO.write(scale(src, 1000, alpha), ext, dir.resolve(name + "_1000." + ext).toFile());
+      return "/img/" + folder + "/" + name + "_400." + ext;
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
@@ -51,17 +53,25 @@ public class LocalDiskImageStore implements ImageStore {
 
   /**
    * Shrinks the image so its longer side is at most {@code maxSide} (never enlarges it) and flattens it onto a white background,
-   * because JPEG has no transparency.
+   * because JPEG has no transparency (pictures with an alpha channel are saved as PNG and keep it).
    */
-  static BufferedImage scale(BufferedImage src, int maxSide) {
+  static BufferedImage scale(BufferedImage src, int maxSide) { return scale(src, maxSide, false); }
+
+  /**
+   * Same as {@link #scale(BufferedImage, int)}, but when {@code keepAlpha} is set the copy stays ARGB with its transparency
+   * (for PNG output) instead of being flattened onto white.
+   */
+  static BufferedImage scale(BufferedImage src, int maxSide, boolean keepAlpha) {
     int w = src.getWidth(), h = src.getHeight();
     double f = Math.min(1.0, (double) maxSide / Math.max(w, h));
     int nw = Math.max(1, (int) Math.round(w * f)), nh = Math.max(1, (int) Math.round(h * f));
-    BufferedImage out = new BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB);
+    BufferedImage out = new BufferedImage(nw, nh, keepAlpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
     Graphics2D g = out.createGraphics();
     g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-    g.setColor(Color.WHITE);
-    g.fillRect(0, 0, nw, nh);
+    if (!keepAlpha) {
+      g.setColor(Color.WHITE);
+      g.fillRect(0, 0, nw, nh);
+    }
     g.drawImage(src, 0, 0, nw, nh, null);
     g.dispose();
     return out;

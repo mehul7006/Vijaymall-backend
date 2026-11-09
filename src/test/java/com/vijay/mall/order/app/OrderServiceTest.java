@@ -253,6 +253,49 @@ class OrderServiceTest {
     verify(repo).insertHistory(eq(r.id()), eq("PACKED"), eq("CONFIRMED"), any(), any(), any());
   }
 
+  private OrderRepository.Row pickupRow(String status) {
+    return new OrderRepository.Row(UUID.randomUUID(), "VSM-1002", user, "PICKUP", status, 10000, null, 0, 0, 0, 0, 10000, 7, false,
+        "COD", "NONE", null, null, NOW, 3, null, null, OrderStatus.valueOf(status).holdsStock());
+  }
+
+  @Test
+  void aMoveThatDoesNotFitTheFulfilmentIsRefusedWith422() {
+    OrderRepository.Row delivery = row("PACKED", "COD", "NONE", 0, 7, false, user);
+    OrderRepository.Row pickup = pickupRow("PACKED");
+    when(repo.find(delivery.id())).thenReturn(Optional.of(delivery));
+    when(repo.find(pickup.id())).thenReturn(Optional.of(pickup));
+    for (OrderStatus bad : new OrderStatus[] {OrderStatus.READY_FOR_PICKUP, OrderStatus.PICKED_UP}) {
+      ApiException e = assertThrows(ApiException.class, () -> service.adminChangeStatus(delivery.id(), bad, null, user));
+      assertEquals("INVALID_TRANSITION", e.code());
+      assertEquals(422, e.status().value());
+    }
+    for (OrderStatus bad : new OrderStatus[] {OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED}) {
+      assertEquals("INVALID_TRANSITION", assertThrows(ApiException.class, () -> service.adminChangeStatus(pickup.id(), bad, null, user)).code());
+    }
+    verify(repo, never()).updateStatus(any(), any(), anyLong(), any());
+  }
+
+  @Test
+  void anOrderWhoseStockIsSetAsideCannotGoBackToPlaced() {
+    OrderRepository.Row reserved = row("PACKED", "COD", "NONE", 0, 7, false, user);
+    when(repo.find(reserved.id())).thenReturn(Optional.of(reserved));
+    ApiException e = assertThrows(ApiException.class, () -> service.adminChangeStatus(reserved.id(), OrderStatus.PLACED, null, user));
+    assertEquals("INVALID_TRANSITION", e.code());
+    assertEquals(422, e.status().value());
+    verify(repo, never()).updateStatus(any(), any(), anyLong(), any());
+    verify(inventory, never()).release(anyList(), any());
+  }
+
+  @Test
+  void aCancelledOrderReportsNoCoinsEarnedButAnOpenOneReportsTheFigure() {
+    OrderRepository.Row cancelled = row("CANCELLED", "COD", "NONE", 0, 5, false, user);
+    OrderRepository.Row open = row("PLACED", "COD", "NONE", 0, 5, false, user);
+    when(repo.find(cancelled.id())).thenReturn(Optional.of(cancelled));
+    when(repo.find(open.id())).thenReturn(Optional.of(open));
+    assertEquals(0, service.adminGet(cancelled.id()).order().coinsEarned());
+    assertEquals(5, service.adminGet(open.id()).order().coinsEarned());
+  }
+
   @Test
   void sameStatusAgainChangesNothing() {
     OrderRepository.Row r = row("PACKED", "COD", "NONE", 0, 7, false, user);

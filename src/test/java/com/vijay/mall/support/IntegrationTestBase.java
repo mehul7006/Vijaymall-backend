@@ -117,6 +117,16 @@ public abstract class IntegrationTestBase {
     return items.stream().filter(p -> nameEn.equals(p.get("nameEn"))).findFirst().orElseThrow();
   }
 
+  /** Switches one payment method on or off, sending the full list the endpoint now requires (the other method keeps its state). */
+  @SuppressWarnings("rawtypes")
+  protected ResponseEntity<Map> setPaymentMethod(String adminToken, String code, boolean enabled) {
+    List<Map<String, Object>> all = new java.util.ArrayList<>();
+    for (Map<String, Object> m : getList("/api/v1/admin/payment-methods", adminToken)) {
+      all.add(Map.of("code", m.get("code"), "enabled", code.equals(m.get("code")) ? enabled : m.get("enabled")));
+    }
+    return call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken, all, null);
+  }
+
   /** GET that returns a JSON array of objects. */
   @SuppressWarnings({"unchecked", "rawtypes"})
   protected List<Map<String, Object>> getList(String url, String token) {

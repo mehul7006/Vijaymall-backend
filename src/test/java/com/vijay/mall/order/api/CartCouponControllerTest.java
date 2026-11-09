@@ -67,10 +67,19 @@ class CartCouponControllerTest {
   }
 
   @Test
+  void aCartThatCannotBePricedIsRefusedInsteadOfListingEveryCouponAsNotApplicable() {
+    when(promotions.listOffered()).thenReturn(List.of(coupon("GOOD", 0, false)));
+    when(quotes.quote(any(), any())).thenThrow(ApiException.validation("productId", "product is not available: x"));
+
+    assertThatThrownBy(() -> controller.options(body)).isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.BAD_REQUEST));
+  }
+
+  @Test
   void anyBusinessErrorOnOneCouponListsItAsNotApplicableAndTheRestStillWork() {
     when(promotions.listOffered()).thenReturn(List.of(coupon("GOOD", 0, false), coupon("BAD", 0, false), coupon("MIN", 5_000, false)));
     when(quotes.quote(any(), any())).thenAnswer(inv -> {
       QuoteRequest r = inv.getArgument(1);
+      if (r.couponCode() == null) return saving(0); // the cart itself is priced once first, without a coupon
       return switch (r.couponCode()) {
         case "GOOD" -> saving(700);
         case "BAD" -> throw new ApiException(HttpStatus.BAD_REQUEST, "SOMETHING_ELSE", "That did not work");

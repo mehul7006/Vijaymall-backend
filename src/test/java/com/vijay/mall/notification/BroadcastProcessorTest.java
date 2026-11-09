@@ -26,6 +26,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -85,7 +86,7 @@ class BroadcastProcessorTest {
     assertThat(batches.getAllValues().stream().map(List::size)).containsExactly(500, 500, 201);
     assertThat(batches.getAllValues().stream().flatMap(List::stream).distinct()).hasSize(1201);
     ArgumentCaptor<List<String>> pushes = ArgumentCaptor.forClass(List.class);
-    verify(push, times(5)).send(pushes.capture(), eq("Title"), eq("Body"));
+    verify(push, times(5)).send(pushes.capture(), eq("Title"), eq("Body"), any());
     assertThat(pushes.getAllValues()).allSatisfy(p -> assertThat(p.size()).isLessThanOrEqualTo(500));
     assertThat(pushes.getAllValues().stream().mapToInt(List::size).sum()).isEqualTo(2402);
     ArgumentCaptor<Integer> devices = ArgumentCaptor.forClass(Integer.class);
@@ -107,7 +108,7 @@ class BroadcastProcessorTest {
     verify(store, times(2)).deliverBatch(eq(id), anyInt(), any(), batches.capture(), any(), any(), any(), any());
     assertThat(batches.getAllValues().get(0)).containsExactlyElementsOf(everyone.subList(700, 1200));
     assertThat(batches.getAllValues().get(1)).containsExactly(everyone.get(1200));
-    verify(push, never()).send(anyList(), any(), any());
+    verify(push, never()).send(anyList(), any(), any(), any());
     verify(store, never()).inboxUsersBetween(any(), any(), any());
     verify(store).finish(id, ATTEMPT, NOW);
   }
@@ -123,7 +124,7 @@ class BroadcastProcessorTest {
 
     processor.tick();
 
-    verify(push).send(List.of("tok2"), "Title", "Body");
+    verify(push).send(List.of("tok2"), "Title", "Body", Map.of("type", "ANNOUNCEMENT", "ref", "ref", "broadcastId", id.toString()));
     verify(store).markPushed(id, ATTEMPT, u2, 1, false, NOW);
     verify(store).finish(id, ATTEMPT, NOW);
   }
@@ -141,8 +142,22 @@ class BroadcastProcessorTest {
     processor.tick();
 
     verify(store).deliverBatch(id, ATTEMPT, u2, List.of(u1, u2), "Title", "Body", "ref", NOW);
-    verify(push).send(List.of("tok"), "Title", "Body");
+    verify(push).send(List.of("tok"), "Title", "Body", Map.of("type", "ANNOUNCEMENT", "ref", "ref", "broadcastId", id.toString()));
     verify(store).markPushed(id, ATTEMPT, u2, 1, false, NOW);
+  }
+
+  @Test
+  void aBroadcastWithoutAReferencePushesNoRefKey() {
+    UUID u1 = new UUID(0, 1);
+    claims(new BroadcastRepository.Job(id, "CUSTOMERS", "Title", "Body", null, null, null, null, ATTEMPT, null, NOW));
+    when(profiles.recipientIdsAfter(List.of("CUSTOMER"), new UUID(0, 0), 500)).thenReturn(List.of(u1));
+    when(profiles.recipientIdsAfter(List.of("CUSTOMER"), u1, 500)).thenReturn(List.of());
+    when(store.deliverBatch(any(), anyInt(), any(), anyList(), any(), any(), any(), any())).thenReturn(List.of(u1));
+    when(profiles.deviceTokensOf(List.of(u1))).thenReturn(List.of("tok"));
+
+    processor.tick();
+
+    verify(push).send(List.of("tok"), "Title", "Body", Map.of("type", "ANNOUNCEMENT", "broadcastId", id.toString()));
   }
 
   @Test
@@ -168,7 +183,7 @@ class BroadcastProcessorTest {
     processor.tick();
 
     verify(store).deliverBatch(id, ATTEMPT, u, List.of(u), "Title", "Body", "ref", NOW);
-    verify(push, never()).send(anyList(), any(), any());
+    verify(push, never()).send(anyList(), any(), any(), any());
     verify(store).markPushed(id, ATTEMPT, u, 0, false, NOW);
   }
 
@@ -178,7 +193,7 @@ class BroadcastProcessorTest {
     claims(job("USERS", List.of(u), null, null));
     when(store.deliverBatch(any(), anyInt(), any(), anyList(), any(), any(), any(), any())).thenReturn(List.of(u));
     when(profiles.deviceTokensOf(List.of(u))).thenReturn(List.of("tok"));
-    doThrow(new IllegalStateException("fcm down")).when(push).send(anyList(), any(), any());
+    doThrow(new IllegalStateException("fcm down")).when(push).send(anyList(), any(), any(), any());
 
     processor.tick();
 
@@ -196,7 +211,7 @@ class BroadcastProcessorTest {
     processor.tick();
 
     verify(profiles, never()).deviceTokensOf(anyList());
-    verify(push, never()).send(anyList(), any(), any());
+    verify(push, never()).send(anyList(), any(), any(), any());
     verify(store).markPushed(id, ATTEMPT, u, 0, false, NOW);
     verify(store).finish(id, ATTEMPT, NOW);
   }
@@ -229,7 +244,7 @@ class BroadcastProcessorTest {
     when(store.deliverBatch(any(), anyInt(), any(), anyList(), any(), any(), any(), any())).thenReturn(List.of(u1));
     when(profiles.deviceTokensOf(List.of(u1))).thenReturn(IntStream.range(0, 600).mapToObj(i -> "t" + i).toList()); // two push calls
     org.mockito.Mockito.doAnswer(i -> { now.set(now.get().plus(BroadcastProcessor.HEARTBEAT).plusSeconds(1)); return null; })
-        .when(push).send(anyList(), any(), any());
+        .when(push).send(anyList(), any(), any(), any());
 
     processor.tick();
 

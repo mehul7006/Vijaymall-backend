@@ -12,9 +12,13 @@ import com.vijay.mall.notification.infra.SegmentRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,12 +79,43 @@ public class SegmentService {
     return d;
   }
 
+  /** The name, description and conditions after every check passed. */
+  private record Checked(String name, String description, Segment segment) {}
+
+  /**
+   * Checks the name, the description and the conditions together, so one answer lists every field that is wrong (a single problem keeps its
+   * own message).
+   */
+  private static Checked check(String name, String description, Segment segment) {
+    List<ApiException> failed = new ArrayList<>();
+    String n = collect(failed, () -> name(name));
+    String d = collect(failed, () -> description(description));
+    Segment clean = collect(failed, () -> SegmentValidator.validate(segment));
+    if (failed.size() == 1) throw failed.getFirst();
+    if (!failed.isEmpty()) {
+      Map<String, Object> fields = new LinkedHashMap<>();
+      failed.forEach(e -> ((Map<?, ?>) e.details().get("fields")).forEach((k, v) -> fields.put(String.valueOf(k), v)));
+      throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Please check the highlighted fields", Map.of("fields", fields));
+    }
+    return new Checked(n, d, clean);
+  }
+
+  private static <T> T collect(List<ApiException> failed, Supplier<T> check) {
+    try {
+      return check.get();
+    } catch (ApiException e) {
+      failed.add(e);
+      return null;
+    }
+  }
+
   /** Saves a new segment. Fails with 400 for bad conditions and 409 {@code SEGMENT_NAME_TAKEN} for a name already in use. */
   @Transactional
   public View create(UUID actor, String name, String description, Segment segment) {
-    String n = name(name);
-    String d = description(description);
-    Segment clean = SegmentValidator.validate(segment);
+    Checked in = check(name, description, segment);
+    String n = in.name();
+    String d = in.description();
+    Segment clean = in.segment();
     if (store.nameTaken(n, new UUID(0, 0))) throw taken();
     UUID id = UUID.randomUUID();
     store.insert(id, n, d, clean, actor, clock.instant());
@@ -91,9 +126,10 @@ public class SegmentService {
   /** Replaces a segment. Past broadcasts keep the snapshot they were sent with. */
   @Transactional
   public View update(UUID actor, UUID id, String name, String description, Segment segment) {
-    String n = name(name);
-    String d = description(description);
-    Segment clean = SegmentValidator.validate(segment);
+    Checked in = check(name, description, segment);
+    String n = in.name();
+    String d = in.description();
+    Segment clean = in.segment();
     get(id);
     if (store.nameTaken(n, id)) throw taken();
     store.update(id, n, d, clean, clock.instant());
@@ -127,7 +163,8 @@ public class SegmentService {
    */
   public Resolved resolve(UUID segmentId, Segment inline) {
     if ((segmentId == null) == (inline == null)) {
-      throw ApiException.validation("segment", "give either segmentId or segment (match and rules), not both");
+      throw ApiException.validation("segment", segmentId == null ? "give a segmentId or a segment (match and rules)"
+          : "give either a segmentId or a segment, not both");
     }
     if (segmentId != null) return new Resolved(segmentId, store.find(segmentId).orElseThrow(() -> ApiException.notFound("Segment")).segment());
     return new Resolved(null, SegmentValidator.validate(inline));

@@ -51,4 +51,8 @@ interface OrderJpa extends JpaRepository<OrderEntity, UUID> {
 
   @Query("select o.id, o.orderNo from OrderEntity o where o.id in :ids")
   List<Object[]> numbers(@Param("ids") Collection<UUID> ids);
+
+  /** The order number of the order each of these returns belongs to (return id, order number). */
+  @Query("select r.id, o.orderNo from OrderReturnEntity r join OrderEntity o on o.id = r.orderId where r.id in :ids")
+  List<Object[]> returnNumbers(@Param("ids") Collection<UUID> ids);
 }

@@ -86,6 +86,12 @@ class OrderServiceCoverageTest {
         false, method, payStatus, snapshot, null, NOW, 2, null, null, false);
   }
 
+  private OrderRepository.Row withFulfilment(OrderRepository.Row r, String fulfilment) {
+    return new OrderRepository.Row(r.id(), r.orderNo(), r.userId(), fulfilment, r.status(), r.subtotal(), r.couponCode(), r.couponDiscount(),
+        r.coinsUsed(), r.coinDiscount(), r.deliveryFee(), r.total(), r.coinsEarned(), r.coinsCredited(), r.paymentMethod(), r.paymentStatus(),
+        r.addressSnapshot(), r.expiresAt(), r.placedAt(), r.version(), r.deliverySlot(), r.cancelReason(), r.stockReserved());
+  }
+
   private OrderRepository.Row stub(String status, String method, String payStatus, int coinsEarned) {
     UUID id = UUID.randomUUID();
     OrderRepository.Row r = row(id, status, method, payStatus, coinsEarned, null);
@@ -146,7 +152,9 @@ class OrderServiceCoverageTest {
     service.adminChangeStatus(paid.id(), OrderStatus.DELIVERED, null, actor);
     verify(repo, never()).setPaymentStatus(eq(paid.id()), anyString(), any());
 
-    OrderRepository.Row online = stub("READY_FOR_PICKUP", "ONLINE", "CAPTURED", 0);
+    UUID onlineId = UUID.randomUUID();
+    OrderRepository.Row online = withFulfilment(row(onlineId, "READY_FOR_PICKUP", "ONLINE", "CAPTURED", 0, null), "PICKUP");
+    when(repo.find(onlineId)).thenReturn(Optional.of(online));
     service.adminChangeStatus(online.id(), OrderStatus.PICKED_UP, null, actor);
     verify(repo, never()).setPaymentStatus(eq(online.id()), anyString(), any());
   }

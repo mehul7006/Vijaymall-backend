@@ -3,6 +3,7 @@ package com.vijay.mall.promotion.app;
 import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.cache.AppCaches;
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.live.CatalogChanged;
 import com.vijay.mall.common.live.LiveEvents;
@@ -218,8 +219,16 @@ public class PromotionService {
 
   private static void check(Coupon c) {
     if (c.code() == null || c.code().isBlank()) throw ApiException.validation("code", "code is required");
+    String code = normalize(c.code());
+    if (code.length() > Limits.COUPON_CODE) throw ApiException.validation("code", "at most " + Limits.COUPON_CODE + " characters");
+    if (!code.matches(Limits.COUPON_CODE_REGEX)) throw ApiException.validation("code", "only letters, digits, - and _ (no spaces)");
     if (!Coupon.FLAT.equals(c.kind()) && !Coupon.PERCENT.equals(c.kind())) throw ApiException.validation("kind", "FLAT or PERCENT");
     if (c.value() <= 0) throw ApiException.validation("value", "must be positive");
+    if (c.minOrderPaise() < 0) throw ApiException.validation("minOrderPaise", "must be 0 or more");
+    if (c.maxDiscountPaise() < 0) throw ApiException.validation("maxDiscountPaise", "must be 0 or more");
+    if (c.value() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("value", "must be " + Limits.MAX_PRICE_PAISE + " or less");
+    if (c.minOrderPaise() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("minOrderPaise", "must be " + Limits.MAX_PRICE_PAISE + " or less");
+    if (c.maxDiscountPaise() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("maxDiscountPaise", "must be " + Limits.MAX_PRICE_PAISE + " or less");
     if (c.perUserLimit() < 0) throw ApiException.validation("perUserLimit", "0 for no limit, 1 for once per customer, or more");
     if (c.totalLimit() < 0) throw ApiException.validation("totalLimit", "0 for no limit, or more");
     if (Coupon.PERCENT.equals(c.kind()) && c.value() > 100) throw ApiException.validation("value", "percent cannot exceed 100");

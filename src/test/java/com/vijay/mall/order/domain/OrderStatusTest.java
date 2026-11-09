@@ -38,6 +38,20 @@ class OrderStatusTest {
     assertThat(PLACED.canMoveTo(PAYMENT_PENDING, DELIVERY)).isFalse();
     assertThat(DELIVERED.canMoveTo(PACKED, DELIVERY)).isFalse();
   }
+  @Test void statuses_fit_only_their_own_fulfilment() {
+    for (var s : new OrderStatus[] {OUT_FOR_DELIVERY, DELIVERED}) {
+      assertThat(s.fitsFulfilment(DELIVERY)).isTrue();
+      assertThat(s.fitsFulfilment(PICKUP)).isFalse();
+    }
+    for (var s : new OrderStatus[] {READY_FOR_PICKUP, PICKED_UP}) {
+      assertThat(s.fitsFulfilment(PICKUP)).isTrue();
+      assertThat(s.fitsFulfilment(DELIVERY)).isFalse();
+    }
+    for (var s : new OrderStatus[] {PLACED, CONFIRMED, PACKED, CANCELLED}) {
+      assertThat(s.fitsFulfilment(PICKUP)).isTrue();
+      assertThat(s.fitsFulfilment(DELIVERY)).isTrue();
+    }
+  }
   @Test void customer_can_cancel_only_before_packed() {
     assertThat(PLACED.customerCanCancel()).isTrue();
     assertThat(CONFIRMED.customerCanCancel()).isTrue();

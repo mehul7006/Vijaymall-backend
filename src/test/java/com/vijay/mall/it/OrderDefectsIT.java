@@ -41,7 +41,8 @@ class OrderDefectsIT extends IntegrationTestBase {
     String id = (String) placeCod(t, productByName(t, "Potato Chips").get("id"), 1).getBody().get("id");
     assertThat(status(admin, id, "PACKED").getStatusCode()).as("skip ahead").isEqualTo(HttpStatus.OK);
     assertThat(status(admin, id, "CONFIRMED").getStatusCode()).as("step back").isEqualTo(HttpStatus.OK);
-    assertThat(status(admin, id, "DELIVERED").getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(status(admin, id, "DELIVERED").getStatusCode()).as("not for a pickup order").isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    assertThat(status(admin, id, "PICKED_UP").getStatusCode()).isEqualTo(HttpStatus.OK);
     var after = status(admin, id, "PACKED");
     assertThat(after.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     assertThat(after.getBody().get("code")).isEqualTo("ILLEGAL_TRANSITION");

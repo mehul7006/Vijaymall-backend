@@ -68,7 +68,8 @@ public final class SegmentValidator {
       case INT, AMOUNT_PAISE -> {
         long n = ((Number) v).longValue();
         if (n < p.min() || n > p.max()) {
-          fields.put(at, "must be between " + p.min() + " and " + p.max());
+          String unit = p.kind() == Param.Kind.AMOUNT_PAISE ? " paise" : "";
+          fields.put(at, "must be between " + p.min() + " and " + p.max() + unit);
           return null;
         }
         return n;

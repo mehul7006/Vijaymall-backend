@@ -25,6 +25,9 @@ spring:
     enabled: true
   jackson:
     default-property-inclusion: always
+    deserialization:
+      # 1.5 for a whole-number field is a mistake to report, not a value to cut down to 1
+      accept-float-as-int: false
   jpa:
     open-in-view: false
     hibernate:

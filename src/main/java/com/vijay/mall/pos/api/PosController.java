@@ -10,6 +10,7 @@ import com.vijay.mall.pos.app.PosViews.BillView;
 import com.vijay.mall.pos.app.PosViews.Cart;
 import com.vijay.mall.pos.app.PosViews.DayReport;
 import com.vijay.mall.pos.app.PosViews.HoldView;
+import com.vijay.mall.pos.app.PosViews.Item;
 import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.PosProduct;
 import com.vijay.mall.pos.app.PosViews.ReturnInput;
@@ -23,10 +24,13 @@ import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
 import com.vijay.mall.pos.domain.WeighedMode;
 import com.vijay.mall.wallet.domain.CoinRedemption;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -53,7 +57,7 @@ public class PosController {
    * Request body for a basket: the items, plus optional customer mobile, coupon code and coin redemption choice. The
    * mobile is needed only to use a coupon or coins or to earn coins.
    */
-  public record CartBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
+  public record CartBody(@NotEmpty List<@Valid Item> items, String customerMobile, String couponCode,
                          CoinRedemption.Mode coinMode, Integer percent) {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
   }
@@ -62,8 +66,9 @@ public class PosController {
    * Request body for completing a bill: the basket, how it is paid, the cash handed over (for change) and an optional
    * manual discount.
    */
-  public record SaleBody(@NotNull @Valid CartBody cart, List<Pay> payments, Long cashTenderedPaise,
-                         PosViews.ManualDiscount manualDiscount) {
+  public record SaleBody(@NotNull @Valid CartBody cart, List<@Valid Pay> payments,
+                         @Max(value = PosViews.MAX_PAISE, message = "must be at most 100000000") Long cashTenderedPaise,
+                         @Valid PosViews.ManualDiscount manualDiscount) {
     SaleInput toInput() { return new SaleInput(cart.toCart(), payments, cashTenderedPaise, manualDiscount); }
   }
 
@@ -72,8 +77,8 @@ public class PosController {
    * the previewed total matches the sale. No reason or PIN is needed to preview.
    */
   @Schema(name = "PosQuoteBody")
-  public record QuoteBody(@NotEmpty List<PosViews.Item> items, String customerMobile, String couponCode,
-                          CoinRedemption.Mode coinMode, Integer percent, PosViews.ManualDiscount manualDiscount) {
+  public record QuoteBody(@NotEmpty List<@Valid Item> items, String customerMobile, String couponCode,
+                          CoinRedemption.Mode coinMode, Integer percent, @Valid PosViews.ManualDiscount manualDiscount) {
     Cart toCart() { return new Cart(items, customerMobile, couponCode, coinMode, percent); }
   }
 
@@ -88,7 +93,7 @@ public class PosController {
   }
 
   /** Request body for parking a basket: an optional label for the cashier and the basket itself. */
-  public record HoldBody(String label, @NotNull @Valid CartBody cart) {}
+  public record HoldBody(@Size(max = 60) String label, @NotNull @Valid CartBody cart) {}
 
   /**
    * Request body for a return against a bill: the sold lines and quantities coming back, a reason and how the refund
@@ -96,7 +101,7 @@ public class PosController {
    * never both.
    */
   @Schema(name = "PosReturnBody")
-  public record ReturnBody(@NotEmpty List<ReturnLine> items, String reason, List<Pay> refunds, String refundMode) {}
+  public record ReturnBody(@NotEmpty List<@Valid ReturnLine> items, @Size(max = 200) String reason, List<@Valid Pay> refunds, String refundMode) {}
 
   /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
   public record Receipt(int width, String text) {}
@@ -148,7 +153,7 @@ public class PosController {
    * products changed at or after it, for an offline till refreshing its copy.
    */
   @GetMapping("/products")
-  public Page<PosProduct> products(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
+  public Page<PosProduct> products(@Parameter(schema = @Schema(maxLength = 100)) @RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,
                                    @RequestParam(defaultValue = "20") int size,
                                    @RequestParam(required = false) Instant updatedSince) {
     return catalog.search(q, page, size, updatedSince);

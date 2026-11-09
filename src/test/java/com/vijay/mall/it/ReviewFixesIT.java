@@ -145,7 +145,7 @@ class ReviewFixesIT extends IntegrationTestBase {
   @Test
   void aPendingOnlineOrderShowsWhenItExpires() {
     String admin = adminToken();
-    call(HttpMethod.PUT, "/api/v1/admin/payment-methods", admin, List.of(Map.of("code", "COD", "enabled", true)), null);
+    setPaymentMethod(admin, "COD", true);
     String token = token(freshEmail());
     Object pid = productByName(token, "Potato Chips").get("id");
     restock("Potato Chips", 80);

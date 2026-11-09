@@ -160,7 +160,8 @@ public class UserRepository {
 
   /**
    * Strips everything that identifies a customer but keeps the row, so bills and orders (which the shop must keep for
-   * tax records) still point at a valid, nameless account that can no longer sign in.
+   * tax records) still point at a valid, nameless account that can no longer sign in. The account is marked blocked and the remembered
+   * "is blocked" answer is dropped, so the access token the customer held when deleting is refused on the very next request.
    */
   @Transactional
   public void anonymize(UUID id, Instant now) {
@@ -172,6 +173,7 @@ public class UserRepository {
       e.status = "BLOCKED";
       e.updatedAt = now;
     });
+    if (caches != null) caches.evict(AppCaches.Name.BLOCKED_USERS, id); // the access token of a deleted account must stop working at once
   }
 
   /** What the admin sees about a customer beyond the public profile. */

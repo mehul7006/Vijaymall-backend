@@ -32,7 +32,7 @@ public class PosCreditController {
    * Request body for a credit repayment: the customer's mobile, how they pay (CASH, UPI or CARD, split allowed) and
    * an optional note.
    */
-  public record RepaymentBody(@NotBlank String customerMobile, @NotEmpty List<Pay> payments, @Size(max = 200) String note) {}
+  public record RepaymentBody(@NotBlank String customerMobile, @NotEmpty List<@Valid Pay> payments, @Size(max = 200) String note) {}
 
   private final CreditService credit;
 

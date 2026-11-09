@@ -217,23 +217,54 @@ class PosFlowIT extends IntegrationTestBase {
     assertThat(get("/api/v1/pos/holds/" + id, cashier).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
 
-  @Test void theHeldBasketListShowsOnlyTheNewestHundred() {
+  @Test void theHundredAndFirstHeldBasketIsRefusedSoNothingDropsOutOfTheList() {
     String cashier = cashier();
     List<Object> ids = new java.util.ArrayList<>();
     try {
-      for (int i = 0; i < 101; i++) {
+      int room = 100 - getList("/api/v1/pos/holds", cashier).size();
+      for (int i = 0; i < room; i++) {
         var made = post("/api/v1/pos/holds", cashier,
             Map.of("label", "bulk " + i, "cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)))));
         assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         ids.add(made.getBody().get("id"));
       }
-      var listed = getList("/api/v1/pos/holds", cashier);
-      assertThat(listed).hasSize(100);
-      assertThat(listed.get(0).get("id")).as("newest first").isEqualTo(ids.get(100));
-      assertThat(listed).noneMatch(h -> ids.get(0).equals(h.get("id")));
+      var over = post("/api/v1/pos/holds", cashier,
+          Map.of("label", "one too many", "cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1)))));
+      assertThat(over.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+      assertThat(over.getBody().get("code")).isEqualTo("HOLD_LIMIT");
+      assertThat(over.getBody().get("message")).isEqualTo("Too many parked baskets: resume or discard some first");
+      assertThat(((Map) over.getBody().get("details")).get("max")).isEqualTo(100);
+      assertThat(getList("/api/v1/pos/holds", cashier)).hasSize(100);
+      if (!ids.isEmpty()) {
+        call(HttpMethod.DELETE, "/api/v1/pos/holds/" + ids.remove(0), cashier, null, null);
+        assertThat(post("/api/v1/pos/holds", cashier, Map.of("cart", Map.of("items", List.of(Map.of("productId", riceId(), "qty", 1))))).getStatusCode())
+            .as("room again after one is discarded").isEqualTo(HttpStatus.CREATED);
+        ids.addAll(getList("/api/v1/pos/holds", cashier).stream().map(h -> h.get("id")).filter(id -> !ids.contains(id)).toList());
+      }
     } finally {
       ids.forEach(id -> call(HttpMethod.DELETE, "/api/v1/pos/holds/" + id, cashier, null, null));
     }
+  }
+
+  @Test void aHeldBasketKeepsToItsBounds() {
+    String cashier = cashier();
+    Object rice = riceId();
+    for (int qty : new int[] {0, -1, 10000, 99999}) {
+      var res = post("/api/v1/pos/holds", cashier, Map.of("cart", Map.of("items", List.of(Map.of("productId", rice, "qty", qty)))));
+      assertThat(res.getStatusCode()).as("qty " + qty).isEqualTo(HttpStatus.BAD_REQUEST);
+      assertThat(((Map) ((Map) res.getBody().get("details")).get("fields")).get("cart.items[0].qty")).isEqualTo("must be 1 to 9999");
+    }
+    var longLabel = post("/api/v1/pos/holds", cashier, Map.of("label", "x".repeat(61), "cart", Map.of("items", List.of(Map.of("productId", rice, "qty", 1)))));
+    assertThat(longLabel.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(((Map) ((Map) longLabel.getBody().get("details")).get("fields")).get("label")).isNotNull();
+    var many = new java.util.ArrayList<Map<String, Object>>();
+    for (int i = 0; i < 51; i++) many.add(Map.of("productId", rice, "qty", 1));
+    var tooMany = post("/api/v1/pos/holds", cashier, Map.of("cart", Map.of("items", many)));
+    assertThat(tooMany.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(((Map) ((Map) tooMany.getBody().get("details")).get("fields")).get("items")).isEqualTo("must have at most 50 lines");
+    var ok = post("/api/v1/pos/holds", cashier, Map.of("label", "x".repeat(60), "cart", Map.of("items", List.of(Map.of("productId", rice, "qty", 9999)))));
+    assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    call(HttpMethod.DELETE, "/api/v1/pos/holds/" + ok.getBody().get("id"), cashier, null, null);
   }
 
   @Test void upiLinkNeedsTheShopUpiId() {

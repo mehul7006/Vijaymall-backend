@@ -138,6 +138,34 @@ class PosServiceCoverageTest {
         ArgumentMatchers.isNull(), anyString(), any());
   }
 
+  @Test void hold_refusesTooManyLinesAndAFullTill() {
+    var lines = new java.util.ArrayList<Item>();
+    for (int i = 0; i < PosService.MAX_HOLD_LINES + 1; i++) lines.add(new Item(UUID.randomUUID(), 1));
+    assertThatThrownBy(() -> service.hold(cashier, "L", new Cart(lines, null, null, null, null)))
+        .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.details()).isEqualTo(Map.of("fields", Map.of("items", "must have at most 50 lines"))));
+
+    when(holds.count()).thenReturn(100L);
+    assertThatThrownBy(() -> service.hold(cashier, "L", cart(null)))
+        .isInstanceOfSatisfying(ApiException.class, e -> {
+          assertThat(e.status().value()).isEqualTo(409);
+          assertThat(e.code()).isEqualTo("HOLD_LIMIT");
+          assertThat(e.details()).isEqualTo(Map.of("max", 100));
+        });
+    verify(holds, never()).insert(any(), anyString(), any(), anyString(), any());
+  }
+
+  @Test void hold_quantityBoundsFollowHowTheProductIsSold() {
+    UUID loose = UUID.randomUUID();
+    when(catalogMock.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006"),
+        loose, new ProductPos(loose, SoldBy.WEIGHT, "101", 5, "1701")));
+    when(holds.insert(any(), anyString(), any(), anyString(), any())).thenReturn(new PosRecords.HoldRecord(UUID.randomUUID(), cashier, "", null, "{}", NOW));
+    service.hold(cashier, "", new Cart(List.of(new Item(rice, 9999), new Item(loose, 25000)), null, null, null, null));
+    for (var bad : List.of(new Item(rice, 0), new Item(rice, 10000), new Item(loose, 100001), new Item(UUID.randomUUID(), -3))) {
+      assertThatThrownBy(() -> service.hold(cashier, "", new Cart(List.of(new Item(rice, 1), bad), null, null, null, null)))
+          .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.details().toString()).contains("cart.items[1].qty=must be 1 to "));
+    }
+  }
+
   @Test void hold_basketThatCannotBeWritten_isAServerError() {
     JsonMapper broken = mock(JsonMapper.class);
     when(broken.writeValueAsString(any())).thenThrow(new JacksonException("boom") { });

@@ -22,7 +22,7 @@ Sending is asynchronous. `POST /broadcast` only records the broadcast and answer
 
 - Every recipient gets a normal inbox item, the same shape as order notifications (`GET /api/v1/me/notifications`, see `10-customer-and-catalog.md`): `{ id, title, body, kind, ref, read, createdAt }` with **`kind` = `"ANNOUNCEMENT"`**. The consumer app must add `ANNOUNCEMENT` to the kinds it renders (a megaphone icon is suggested) and must not crash on an unknown kind.
 - `title` and `body` are exactly what the admin typed (trimmed). `ref` is optional free text chosen by the admin (at most 100 characters), or `null`. The backend gives it no meaning; agree a convention in the app, for example `"offers"`, `"product:<uuid>"`, `"category:<uuid>"`, `"order:<orderNo>"`. When the user taps the item or the push, open the screen `ref` names and fall back to the inbox if `ref` is `null` or not understood.
-- If the user has a registered device, the phone also receives a push with the same title and body. The push does **not** carry `kind` or `ref`; to deep link from a push, open the inbox (or the newest `ANNOUNCEMENT`) and read `ref` there.
+- If the user has a registered device, the phone also receives a push with the same title and body. The push carries a string-only `data` payload: `type` = `ANNOUNCEMENT`, `ref` = the admin's `ref` (the key is left out when the admin gave none) and `broadcastId` = the broadcast id (the same value as the inbox item's `broadcastId`). Open the screen named by `ref` from the push data; if it is missing or unknown, open the inbox. Other pushes (orders, payments, stock, flash sales) carry `type` = `ORDER`, `PAYMENT`, `STOCK` or `FLASH` and `ref` = order number, order number, product id or sale id; all `data` values are strings, ignore keys you do not know.
 - Staff members (admin, cashier) can be recipients too (audiences `ALL`, `STAFF`, `ADMINS`, `CASHIERS`, `USERS`); they see the same inbox item.
 
 ### Delivery guarantees
@@ -172,7 +172,7 @@ Request: either a saved segment or inline conditions:
 { "match": "ALL", "rules": [ { "type": "ORDER_COUNT", "op": "EQ", "value": 0 } ] }
 ```
 
-Give exactly one of `segmentId` or (`match` and `rules`); otherwise 400 `VALIDATION_FAILED` on `segment`. Response:
+Give exactly one of `segmentId` or (`match` and `rules`); otherwise 400 `VALIDATION_FAILED` on `segment`, with the message `give a segmentId or a segment (match and rules)` when neither was sent (for example `{}`) and `give either a segmentId or a segment, not both` when both were. A `SEGMENT` broadcast without `segmentId` and `segment` gets the first text. Response:
 
 ```json
 {
@@ -208,7 +208,7 @@ Request:
 | `match` | `ALL` or `ANY`; missing means `ALL` |
 | `rules` | 1 to 10 conditions, see section 6 |
 
-Response: the segment object (4.2). Errors: 400 `VALIDATION_FAILED` (`name`, `description`, `match`, `rules`, `rules[i].type`, `rules[i].<param>`); 409 `SEGMENT_NAME_TAKEN` (show "Another segment already has this name"); 404 `NOT_FOUND` for an unknown `id` on update.
+Response: the segment object (4.2). Errors: 400 `VALIDATION_FAILED` (`name`, `description`, `match`, `rules`, `rules[i].type`, `rules[i].<param>`), **all failing fields together** in `details.fields` (an empty `name` and empty `rules` report both); 409 `SEGMENT_NAME_TAKEN` (show "Another segment already has this name"); 404 `NOT_FOUND` for an unknown `id` on update.
 
 ### 3.8 `GET /segments?page=0&size=20`, `GET /segments/{id}`
 
@@ -320,7 +320,7 @@ Every order and spending condition uses one definition:
   "group": "Spending",
   "params": [
     { "name": "op", "kind": "ENUM", "label": "Comparison", "required": true, "min": null, "max": null, "options": ["GTE", "LTE", "BETWEEN"], "pattern": null, "pickFrom": null },
-    { "name": "paise", "kind": "AMOUNT_PAISE", "label": "Amount (paise)", "required": false, "min": 0, "max": 10000000000, "options": null, "pattern": null, "pickFrom": null }
+    { "name": "paise", "kind": "AMOUNT_PAISE", "label": "Amount (Rs)", "required": false, "min": 0, "max": 10000000000, "options": null, "pattern": null, "pickFrom": null, "inputUnit": "RUPEES", "scale": 100 }
   ],
   "supportsNegate": true,
   "example": { "type": "TOTAL_SPENT", "negate": false, "op": "GTE", "paise": 500000 }
@@ -332,13 +332,15 @@ Every order and spending condition uses one definition:
 | `kind` | Input widget | Value sent |
 |---|---|---|
 | `INT` | Number field, `min`..`max` | integer |
-| `AMOUNT_PAISE` | Money field in **rupees** shown to the admin, converted to paise (x100), `min`..`max` | integer paise |
+| `AMOUNT_PAISE` | Money field in **rupees** shown to the admin (`inputUnit` is `RUPEES`, the label says `(Rs)`), multiplied by `scale` (100) before sending; `min`..`max` are in paise on the wire | integer paise |
 | `ENUM` | Dropdown of `options` | string |
 | `PRODUCT_ID` | Product picker, see `pickFrom` | UUID string |
 | `CATEGORY_ID` | Category picker, see `pickFrom` | UUID string |
 | `STRING` | Text field, must match `pattern` (upper-cased by the server) | string |
 | `STRING_LIST` | Chips input, each value must match `pattern`, `min`..`max` values | string[] |
 | `BOOLEAN` | Switch | true/false |
+
+Every param entry also has `inputUnit` and `scale`: `"RUPEES"` and `100` for `AMOUNT_PAISE` params, `null` for all others. A range error on an amount names the unit: `must be between 0 and 10000000000 paise`. Condition labels and descriptions are English only. In Swagger the broadcast request body is the schema `BroadcastRequest` and `Rule.type` lists the 17 condition type names.
 
 `required` is `false` for parameters that are required only in some cases (for example `paise` of `TOTAL_SPENT` is needed unless `op` is `BETWEEN`, where `minPaise` and `maxPaise` are needed); the `description` says so and the server enforces it. For types with two alternatives (`LAST_ORDER`, `REGISTERED`) give exactly one of the two.
 
@@ -533,4 +535,4 @@ Parse enums defensively (unknown value falls back to a safe default). Serialise 
 - [ ] Segment list, create, edit (PUT), delete; show 409 `SEGMENT_NAME_TAKEN`.
 - [ ] Map `details.fields` keys such as `rules[2].paise` to the right input.
 - [ ] Customer app: render inbox `kind` `ANNOUNCEMENT`, open the screen named by `ref`, tolerate unknown `ref` and unknown kinds.
-- [ ] Push taps open the inbox (the push carries no `ref`).
+- [ ] Push taps read the push `data` (`type`, `ref`, `broadcastId`) and open the matching screen; fall back to the inbox when `ref` is missing or unknown.

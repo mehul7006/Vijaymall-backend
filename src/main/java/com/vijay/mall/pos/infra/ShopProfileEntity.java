@@ -22,6 +22,7 @@ class ShopProfileEntity {
   String facebook;
   String hours;
   String holidayNote;
+  String holidayNoteGu;
   boolean onlineOrdersEnabled;
   String onlineOrdersMessage;
   Instant updatedAt;

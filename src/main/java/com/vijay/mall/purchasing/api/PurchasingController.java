@@ -3,11 +3,14 @@ package com.vijay.mall.purchasing.api;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
+import com.vijay.mall.purchasing.app.PurchaseService.ItemInput;
 import com.vijay.mall.purchasing.app.PurchaseService.PurchaseView;
 import com.vijay.mall.purchasing.app.PurchaseService;
 import com.vijay.mall.purchasing.app.StockTakeService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,10 +38,11 @@ public class PurchasingController {
   /**
    * Request body for receiving a delivery: supplier name (required), optional invoice number and note, and at least one product line.
    */
-  public record PurchaseBody(String supplierName, String invoiceNo, String note, @NotEmpty List<PurchaseService.ItemInput> items) {}
+  public record PurchaseBody(@NotBlank @Size(max = 120) String supplierName, @Size(max = 60) String invoiceNo, @Size(max = 200) String note,
+                             @NotEmpty @Size(max = PurchaseService.MAX_LINES) List<@Valid ItemInput> items) {}
 
   /** Request body for a stock take: an optional note and at least one counted product. */
-  public record StockTakeBody(String note, @NotEmpty List<StockTakeService.Count> items) {}
+  public record StockTakeBody(@Size(max = 200) String note, @NotEmpty List<StockTakeService.Count> items) {}
 
   private final PurchaseService purchases;
   private final StockTakeService stockTakes;

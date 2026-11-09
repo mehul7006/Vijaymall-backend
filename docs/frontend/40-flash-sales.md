@@ -35,6 +35,7 @@ Global conventions (not repeated per endpoint):
 | 13 | `POST /api/v1/admin/flash-sales/{id}/duplicate` | ADMIN, CASHIER | Copy a sale onto a new schedule |
 | 14 | `GET /api/v1/admin/flash-sales/{id}/report` | ADMIN, CASHIER | Report for one sale |
 | 15 | `GET /api/v1/admin/flash-sales/report` | ADMIN, CASHIER | Report across sales that started in a date range |
+| 16 | `DELETE /api/v1/admin/flash-sales/{id}` | ADMIN, CASHIER | Delete a sale that never started and sold nothing |
 
 15 endpoints, then: Where flash prices appear in other endpoints, Customer app flow, Staff app flow, Notifications and live events, Things the code does not settle.
 
@@ -290,7 +291,7 @@ The server validates item errors per field name `items` only; the message names 
 
 | status | code | when |
 |---|---|---|
-| 400 | `VALIDATION_FAILED` | any rule above |
+| 400 | `VALIDATION_FAILED` | any rule above. **Every failing field is reported together** in `details.fields` (for example an empty `name`, `discountValue` 95 and no `items` give all three keys); a single problem keeps its own `message`. The same holds for `PATCH` |
 | 409 | `FLASH_OVERLAP` | a product is already in another non-cancelled sale whose window overlaps. `message` names product and sale; `details` = `{ saleId, saleName, productId }` of the other sale. Only the first clash is reported |
 
 - **UI notes**: Show a date-time picker for both times (send UTC; display in the shop's time zone, Asia/Kolkata). Offer "Start now" by omitting `startsAt`. Product picker should search active products and send the pack id (`productId`). Show the computed `salePricePaise` from the response for each item to confirm. On `FLASH_OVERLAP` tell staff which sale holds the product and offer to open it (`details.saleId`). Sending the same create twice makes two sales (no idempotency key), so disable the button after the tap.
@@ -448,6 +449,13 @@ Copies: description, bannerText, channel, default discount, perCustomerLimit and
 - **Response** 201: `SaleView` of the new sale.
 - **Errors**: 400 `VALIDATION_FAILED` (name/time fields; also `items` when a copied item no longer gives a lower price or its product is no longer active); 404 `NOT_FOUND`; 409 `FLASH_OVERLAP` (for example duplicating a running sale with no body starts now and overlaps the original).
 - **UI notes**: Always ask for a new start time; sending no body to copy a running sale fails with `FLASH_OVERLAP`.
+
+### DELETE /api/v1/admin/flash-sales/{id}
+- **Who**: ADMIN, CASHIER (like every flash-sale call).
+- **Purpose / when the UI calls it**: "Delete" on a sale that was set up by mistake and has not started yet. Anything that started is history: use cancel or end-now.
+- **Response** 204, no body. The sale and its items are gone, an audit entry `FLASH_DELETE` is written and open apps get the live `FLASH` catalog event.
+- **Errors**: 404 `NOT_FOUND` (unknown or already deleted id; a repeated delete therefore answers 404, treat it as done); 409 `FLASH_NOT_ALLOWED` when the sale has already started (running, ended, or cancelled after starting) or any unit was ever counted for it (`message` says which).
+- **UI notes**: Show the button only for status `SCHEDULED`; confirm first.
 
 ### GET /api/v1/admin/flash-sales/{id}/report
 - **Who**: ADMIN, CASHIER.

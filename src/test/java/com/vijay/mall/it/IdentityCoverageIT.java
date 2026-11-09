@@ -58,6 +58,12 @@ class IdentityCoverageIT extends IntegrationTestBase {
     assertThat(u.get("mobile")).isNull();
     assertThat(u.get("status")).isEqualTo("BLOCKED");
 
+    // the access token used to delete is refused at once, for every kind of call
+    assertThat(get("/api/v1/me", token).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    assertThat(call(HttpMethod.PUT, "/api/v1/me", token, Map.of("name", "X"), null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    assertThat(post("/api/v1/me/addresses", token, Map.of("label", "Home", "line1", "1 Main", "area", "Centre", "pincode", "380001"))
+        .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
     // the same email can no longer sign in to that account
     assertThat(users.findByEmail(email)).isEmpty();
   }

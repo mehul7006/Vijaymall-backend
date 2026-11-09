@@ -8,6 +8,9 @@ import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.purchasing.infra.PurchaseRepository.Header;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
@@ -29,7 +32,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class PurchaseService {
   /** One product received: quantity (1 to {@link #MAX_QTY}) and the cost of each unit in paise. */
   @Schema(name = "PurchaseItemInput")
-  public record ItemInput(UUID productId, int qty, long unitCostPaise) {}
+  public record ItemInput(@NotNull UUID productId,
+                          @Min(value = 1, message = "must be 1 to 1000000") @Max(value = 1_000_000, message = "must be 1 to 1000000") int qty,
+                          @Min(value = 0, message = "must be at least 0") @Max(value = 100_000_000, message = "must be at most 100000000") long unitCostPaise) {}
 
   /** A supplier delivery to record: supplier name, optional invoice number and note, and the product lines. */
   public record Input(String supplierName, String invoiceNo, String note, List<ItemInput> items) {}
@@ -45,7 +50,7 @@ public class PurchaseService {
   /** Most product lines in one delivery. */
   public static final int MAX_LINES = 200;
   /** Largest quantity of one product in a delivery. */
-  public static final int MAX_QTY = 10_000_000;
+  public static final int MAX_QTY = 1_000_000;
   /** Rs 10 lakh per unit: anything above is a typing mistake */
   public static final long MAX_UNIT_COST = 1_000_000_00L;
 
@@ -105,7 +110,7 @@ public class PurchaseService {
     String note = in.note() == null ? "" : in.note().strip();
     if (supplier.isEmpty() || supplier.length() > 120) throw ApiException.validation("supplierName", "1 to 120 characters");
     if (invoice.length() > 60) throw ApiException.validation("invoiceNo", "at most 60 characters");
-    if (note.length() > 300) throw ApiException.validation("note", "at most 300 characters");
+    if (note.length() > 200) throw ApiException.validation("note", "at most 200 characters");
     List<ItemInput> lines = in.items() == null ? List.of() : in.items();
     if (lines.isEmpty() || lines.size() > MAX_LINES) throw ApiException.validation("items", "1 to " + MAX_LINES + " products");
 

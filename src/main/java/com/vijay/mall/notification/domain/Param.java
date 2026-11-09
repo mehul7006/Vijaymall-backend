@@ -14,9 +14,17 @@ import java.util.List;
  * @param options the allowed values of an {@code ENUM}; null for other kinds
  * @param pattern regular expression every text value (or list item) must match; null for none
  * @param pickFrom the admin endpoint the app uses to let the admin pick the id, for the id kinds; null otherwise
+ * @param inputUnit for {@code AMOUNT_PAISE}: {@code RUPEES}, the unit the admin types in; null for other kinds
+ * @param scale for {@code AMOUNT_PAISE}: what to multiply the typed number by before sending (100, because the wire value is paise); null otherwise
  */
 public record Param(String name, Kind kind, String label, boolean required, Long min, Long max, List<String> options,
-                    String pattern, String pickFrom) {
+                    String pattern, String pickFrom, String inputUnit, Integer scale) {
+
+  /** A parameter that is not an amount (no input unit, no scale). */
+  public Param(String name, Kind kind, String label, boolean required, Long min, Long max, List<String> options, String pattern,
+               String pickFrom) {
+    this(name, kind, label, required, min, max, options, pattern, pickFrom, null, null);
+  }
 
   /** How a parameter value is entered and checked. */
   public enum Kind { INT, AMOUNT_PAISE, ENUM, PRODUCT_ID, CATEGORY_ID, STRING, STRING_LIST, BOOLEAN }
@@ -32,9 +40,12 @@ public record Param(String name, Kind kind, String label, boolean required, Long
   /** A day count, 1 to 3650. */
   static Param days(String name, String label, boolean required) { return integer(name, label, required, 1, 3650); }
 
-  /** Money in paise, 0 or more. */
+  /**
+   * Money, 0 or more. The wire value is paise (min and max are in paise); the admin types rupees, so the form multiplies by {@code scale}
+   * 100 before sending.
+   */
   static Param amount(String name, String label, boolean required) {
-    return new Param(name, Kind.AMOUNT_PAISE, label, required, 0L, 10_000_000_000L, null, null, null);
+    return new Param(name, Kind.AMOUNT_PAISE, label, required, 0L, 10_000_000_000L, null, null, null, "RUPEES", 100);
   }
 
   /** One of a fixed set of words. */

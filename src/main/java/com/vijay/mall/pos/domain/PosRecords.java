@@ -22,11 +22,21 @@ public final class PosRecords {
     /**
      * The shop's own details and bill settings: name, address, phone, GSTIN, GST state code, UPI id, invoice prefix,
      * receipt footer, weighing-scale prefix and mode, plus the tagline ({@code promise}) and the "about the shop"
-     * text ({@code details}) shown in the apps.
+     * text ({@code details}) shown in the apps, a {@code shortName} for tight spaces and the optional Gujarati versions
+     * of the name, address, promise and details (empty means the apps fall back to English).
      */
     public record ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
                               String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
-                              WeighedMode weighedMode, String promise, String details) {
+                              WeighedMode weighedMode, String promise, String details, String shortName, String shopNameGu,
+                              String addressGu, String promiseGu, String detailsGu) {
+        /** A shop setting with the English texts only (no short name and no Gujarati texts). */
+        public ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
+                           String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,
+                           WeighedMode weighedMode, String promise, String details) {
+            this(shopName, address, phone, gstin, stateCode, upiId, invoicePrefix, receiptFooter, weighedPrefix,
+                weighedMode, promise, details, "", "", "", "", "");
+        }
+
         /** A shop setting with no "about the shop" text. */
         public ShopSetting(String shopName, String address, String phone, String gstin, String stateCode,
                            String upiId, String invoicePrefix, String receiptFooter, String weighedPrefix,

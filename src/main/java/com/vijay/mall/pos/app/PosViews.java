@@ -3,6 +3,9 @@ package com.vijay.mall.pos.app;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -15,8 +18,8 @@ public final class PosViews {
 
   @Schema(name = "PosItem")
 
-  /** A basket line: a product and how many pieces (or grams for a weighed item). */
-  public record Item(UUID productId, int qty) {}
+  /** A basket line: a product and how many pieces (1 to 9999) or, for a weighed item, grams (1 to 100000). The service checks the bound that fits the product. */
+  public record Item(UUID productId, @Schema(minimum = "1", maximum = "100000") int qty) {}
 
   /** What is in the basket. {@code customerMobile} is needed only to use a coupon or coins, or to earn coins. */
   @Schema(name = "PosCart")
@@ -27,10 +30,16 @@ public final class PosViews {
    * One payment part: mode ({@code CASH}, {@code UPI}, {@code CARD} or {@code CREDIT} on a sale), amount in paise and
    * an optional reference such as a UPI transaction id.
    */
-  public record Pay(String mode, long amountPaise, String reference) {}
+  public record Pay(@Size(max = 20) String mode,
+                    @Min(value = 0, message = "must be at least 0") @Max(value = MAX_PAISE, message = "must be at most 100000000") long amountPaise,
+                    @Size(max = 100) String reference) {}
+
+  /** The largest amount any single money input accepts: 100,000,000 paise (10 lakh rupees). */
+  public static final long MAX_PAISE = 100_000_000L;
 
   /** A discount typed in at the till: the amount off the bill, why, and (above the cashier's limit) a manager's PIN. */
-  public record ManualDiscount(long amountPaise, String reason, String approverPin) {}
+  public record ManualDiscount(@Min(value = 0, message = "must be at least 0") @Max(value = MAX_PAISE, message = "must be at most 100000000") long amountPaise,
+                               @Size(max = 200) String reason, @Size(max = 20) String approverPin) {}
 
   /**
    * soldAt is when the bill was really rung up (set by an offline till on upload, otherwise the server's time). offline
@@ -106,7 +115,8 @@ public final class PosViews {
   public record HoldView(UUID id, String label, String customerMobile, UUID cashierId, Instant createdAt, Cart cart) {}
 
   /** restock false = these goods are damaged or unfit to sell: they are kept apart (defective stock), not put back on the shelf. */
-  public record ReturnLine(UUID saleItemId, int qty, Boolean restock) {
+  public record ReturnLine(UUID saleItemId,
+                           @Min(value = 1, message = "must be at least 1") @Max(value = 100000, message = "must be at most 100000") int qty, Boolean restock) {
     /** A returned line that goes back on the shelf. */
     public ReturnLine(UUID saleItemId, int qty) { this(saleItemId, qty, null); }
   }

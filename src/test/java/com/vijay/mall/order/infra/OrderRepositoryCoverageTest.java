@@ -181,6 +181,13 @@ class OrderRepositoryCoverageTest {
   }
 
   @Test
+  void theIdOfAReturnAnswersWithTheNumberOfItsOrder() {
+    UUID ret = UUID.randomUUID();
+    when(orders.returnNumbers(List.of(ret))).thenReturn(Collections.singletonList(new Object[] {ret, "VSM-9"}));
+    assertThat(repo.numbers(List.of(ret))).containsEntry(ret, "VSM-9");
+  }
+
+  @Test
   void adminListPicksTheRightQueryForEveryFilterCombination() {
     when(orders.findPageBy(any(Pageable.class))).thenReturn(List.of());
     when(orders.listByNumberOrCustomer(any(), any())).thenReturn(List.of());

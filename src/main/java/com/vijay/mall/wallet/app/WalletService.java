@@ -1,5 +1,6 @@
 package com.vijay.mall.wallet.app;
 
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.cache.AppCaches;
@@ -272,6 +273,7 @@ public class WalletService {
   /** Admin: adds an earning rule, audits it and clears the rule cache. */
   @Transactional
   public StoredRule createRule(StoredRule in, UUID actor) {
+    requireWindow(in);
     UUID id = repo.insertRule(in);
     audit.log(actor, "CREATE", "coin_rule", id, in.rule().name());
     forget(AppCaches.Name.COIN_RULES);
@@ -284,11 +286,18 @@ public class WalletService {
    */
   @Transactional
   public StoredRule updateRule(UUID id, StoredRule in, UUID actor) {
+    requireWindow(in);
     repo.rule(id).orElseThrow(() -> ApiException.notFound("Coin rule"));
     repo.updateRule(id, in);
     audit.log(actor, "UPDATE", "coin_rule", id, in.rule().name());
     forget(AppCaches.Name.COIN_RULES);
     return repo.rule(id).orElseThrow();
+  }
+
+  private static void requireWindow(StoredRule in) {
+    if (in.startAt() != null && in.endAt() != null && in.endAt().isBefore(in.startAt())) {
+      throw ApiException.validation("endAt", "must be after startAt");
+    }
   }
 
   /** Admin: deletes an earning rule, audits it and clears the rule cache. */
@@ -309,6 +318,8 @@ public class WalletService {
     if (s.paisePerCoin() <= 0) throw ApiException.validation("paisePerCoin", "must be positive");
     if (s.maxRedeemPercent() < 0 || s.maxRedeemPercent() > 100) throw ApiException.validation("maxRedeemPercent", "0 to 100");
     if (s.expiryMonths() <= 0) throw ApiException.validation("expiryMonths", "must be positive");
+    if (s.expiryMonths() > Limits.MAX_EXPIRY_MONTHS) throw ApiException.validation("expiryMonths", "at most " + Limits.MAX_EXPIRY_MONTHS);
+    if (s.paisePerCoin() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("paisePerCoin", "at most " + Limits.MAX_PRICE_PAISE);
     repo.saveSettings(s);
     audit.log(actor, "UPDATE", "coin_setting", 1, s.toString());
     forget(AppCaches.Name.COIN_SETTINGS);

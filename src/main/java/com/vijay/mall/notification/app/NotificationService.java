@@ -209,7 +209,11 @@ public class NotificationService {
   private void notify(UUID userId, String title, String body, String kind, String ref) {
     repo.insert(userId, title, body, kind, ref, clock.instant());
     List<String> tokens = profiles.deviceTokens(userId);
-    if (!tokens.isEmpty()) push.send(tokens, title, body);
+    if (tokens.isEmpty()) return;
+    Map<String, String> data = new LinkedHashMap<>();
+    data.put("type", kind);
+    if (ref != null) data.put("ref", ref);
+    push.send(tokens, title, body, data);
   }
 
   private static String pretty(String status) { return status.toLowerCase().replace('_', ' '); }

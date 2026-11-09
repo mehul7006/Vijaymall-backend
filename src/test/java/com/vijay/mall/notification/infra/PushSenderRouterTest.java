@@ -22,26 +22,26 @@ class PushSenderRouterTest {
   @Test
   void usesFirebaseWhenAServiceAccountIsSaved() {
     when(settings.isSet(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(true);
-    router.send(List.of("t"), "a", "b");
-    verify(fcm).send(List.of("t"), "a", "b");
+    router.send(List.of("t"), "a", "b", Map.of());
+    verify(fcm).send(List.of("t"), "a", "b", Map.of());
     verifyNoInteractions(logging);
   }
 
   @Test
   void fallsBackToTheLogWhenNothingIsSaved() {
     when(settings.isSet(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(false);
-    router.send(List.of("t"), "a", "b");
-    verify(logging).send(List.of("t"), "a", "b");
+    router.send(List.of("t"), "a", "b", Map.of());
+    verify(logging).send(List.of("t"), "a", "b", Map.of());
     verifyNoInteractions(fcm);
   }
 
   @Test
   void switchesLiveWhenTheSettingChanges() {
     when(settings.isSet(Settings.FCM_SERVICE_ACCOUNT)).thenReturn(false, true);
-    router.send(List.of("t"), "a", "b");
-    router.send(List.of("t"), "a", "b");
-    verify(logging).send(List.of("t"), "a", "b");
-    verify(fcm).send(List.of("t"), "a", "b");
+    router.send(List.of("t"), "a", "b", Map.of());
+    router.send(List.of("t"), "a", "b", Map.of());
+    verify(logging).send(List.of("t"), "a", "b", Map.of());
+    verify(fcm).send(List.of("t"), "a", "b", Map.of());
   }
 
   @Test

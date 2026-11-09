@@ -11,6 +11,7 @@ import com.vijay.mall.catalog.infra.BannerRepository;
 import com.vijay.mall.catalog.infra.CategoryRepository;
 import com.vijay.mall.catalog.infra.ProductRepository;
 import com.vijay.mall.common.FlashPricing;
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.OrderLimits;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ReferenceNumbers;
@@ -708,6 +709,7 @@ public class CatalogService {
   /** Creates a hot-sale banner. A null start or end means the banner has no limit on that side. */
   @Transactional
   public HotBanner createBanner(String title, String sub, String img, Instant start, Instant end, boolean active) {
+    requireWindow(start, end);
     UUID id = banners.insert(title, nz(sub), img, start, end, active);
     changed();
     return banners.find(id).orElseThrow();
@@ -716,6 +718,7 @@ public class CatalogService {
   /** Updates a hot-sale banner; {@code NOT_FOUND} when it does not exist. */
   @Transactional
   public HotBanner updateBanner(UUID id, String title, String sub, String img, Instant start, Instant end, boolean active) {
+    requireWindow(start, end);
     banners.find(id).orElseThrow(() -> ApiException.notFound("Banner"));
     banners.update(id, title, nz(sub), img, start, end, active);
     changed();
@@ -789,11 +792,24 @@ public class CatalogService {
   }
 
   private static void validate(ProductInput in) {
+    tooLong("nameEn", in.nameEn(), Limits.NAME);
+    tooLong("nameGu", in.nameGu(), Limits.NAME);
+    tooLong("description", in.description(), Limits.DESCRIPTION);
+    if (in.pricePaise() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("pricePaise", "must be " + Limits.MAX_PRICE_PAISE + " or less");
+    if (in.mrpPaise() > Limits.MAX_PRICE_PAISE) throw ApiException.validation("mrpPaise", "must be " + Limits.MAX_PRICE_PAISE + " or less");
     if (in.pricePaise() < 0 || in.mrpPaise() < 0) throw ApiException.validation("pricePaise", "price cannot be negative");
     if (in.mrpPaise() < in.pricePaise()) throw ApiException.validation("mrpPaise", "MRP must not be below the price");
     if (in.hotStart() != null && in.hotEnd() != null && in.hotEnd().isBefore(in.hotStart())) {
       throw ApiException.validation("hotEnd", "must be after hotStart");
     }
+  }
+
+  private static void tooLong(String field, String value, int max) {
+    if (value != null && value.length() > max) throw ApiException.validation(field, "at most " + max + " characters");
+  }
+
+  private static void requireWindow(Instant start, Instant end) {
+    if (start != null && end != null && end.isBefore(start)) throw ApiException.validation("endAt", "must be after startAt");
   }
 
   private static String nz(String s) { return s == null ? "" : s; }

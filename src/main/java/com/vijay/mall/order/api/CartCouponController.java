@@ -64,7 +64,8 @@ public class CartCouponController {
    * Usable coupons come first, the biggest saving first; the others follow with the reason and, for a minimum order, how much
    * more to add. At most {@value #MAX_TRIED} coupons are tried (each is a full quote): those open to every category and with the
    * lowest minimum order are chosen first. A coupon that fails for any business reason is listed as not applicable with the plain
-   * message; it never hides the others.
+   * message; it never hides the others. A cart that cannot be priced at all (an unknown or unavailable product, a bad quantity) is
+   * refused with the same 400 the quote gives, instead of listing every coupon as not applicable.
    *
    * @param body the cart
    * @return the coupons on offer, each with what it would save or why it cannot be used
@@ -72,6 +73,7 @@ public class CartCouponController {
   @PostMapping("/coupons")
   public List<CouponOption> options(@Valid @RequestBody QuoteBody body) {
     QuoteRequest base = body.toRequest();
+    quotes.quote(CurrentUser.id(), new QuoteRequest(base.items(), null, base.coinMode(), base.percent(), base.fulfilment()));
     return promotions.listOffered().stream()
         .sorted(Comparator.comparing((PublicCoupon c) -> !c.categoryIds().isEmpty()).thenComparingLong(PublicCoupon::minOrderPaise))
         .limit(MAX_TRIED).map(c -> tryCoupon(c, base))

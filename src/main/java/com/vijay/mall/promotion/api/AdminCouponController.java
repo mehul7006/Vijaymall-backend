@@ -1,13 +1,16 @@
 package com.vijay.mall.promotion.api;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.promotion.domain.Coupon;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -28,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminCouponController {
   /**
    * Request body for creating or changing a coupon. Money is in paise.
-   * @param code the code customers type; stored upper-case
+   * @param code the code customers type; stored upper-case; at most 30 characters, letters, digits, - and _ only (no spaces)
    * @param kind {@code FLAT} (value is paise off) or {@code PERCENT} (value is a percent, at most 100)
    * @param value the discount size, at least 1
    * @param minOrderPaise minimum cart value; null means none
@@ -44,8 +47,9 @@ public class AdminCouponController {
    * @param categoryIds categories it covers; empty or null means every category
    */
   @Schema(name = "CouponBody")
-  public record Body(@NotBlank String code, @NotBlank String kind, @NotNull @Min(1) Long value, Long minOrderPaise,
-                     Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
+  public record Body(@NotBlank @Size(max = Limits.COUPON_CODE) String code, @NotBlank String kind,
+                     @NotNull @Min(1) @Max(Limits.MAX_PRICE_PAISE) Long value,
+                     @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long minOrderPaise, @Min(0) @Max(Limits.MAX_PRICE_PAISE) Long maxDiscountPaise, UUID categoryId, Integer perUserLimit, Integer totalLimit,
                      Instant startAt, Instant endAt, Boolean active, Boolean worksWithCoins, Boolean firstOrderOnly,
                      List<UUID> categoryIds) {
     /** Without categoryIds: the single categoryId (or every category when that is null too), as before. */

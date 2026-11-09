@@ -38,7 +38,15 @@ public class ShopProfileService implements OnlineOrdering {
 
   /** What is stored and edited. */
   public record Profile(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
-                        List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {}
+                        List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt,
+                        String holidayNoteGu) {
+    /** A profile without the Gujarati holiday note. */
+    public Profile(String logoUrl, String email, String whatsapp, String mapUrl, String website, String instagram, String facebook,
+                   List<DayHours> hours, String holidayNote, boolean onlineOrdersEnabled, String onlineOrdersMessage, Instant updatedAt) {
+      this(logoUrl, email, whatsapp, mapUrl, website, instagram, facebook, hours, holidayNote, onlineOrdersEnabled, onlineOrdersMessage,
+          updatedAt, "");
+    }
+  }
 
   /** What the apps get, with the parts worked out from the clock. */
   public record PublicView(Profile profile, boolean openNow, String todayHours, boolean onlineOrdersOpen, String timezone) {}
@@ -47,7 +55,11 @@ public class ShopProfileService implements OnlineOrdering {
   private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
   private static final Pattern PHONE = Pattern.compile("^\\+?[0-9]{10,15}$");
   private static final List<String> DAYS = List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
-  static final String DEFAULT_PAUSED = "We are not taking online orders right now. Please visit the shop or try again later.";
+  /** What customers read while online orders are paused and the admin left the message blank. */
+  public static final String DEFAULT_PAUSED = "We are not taking online orders right now. Please visit the shop or try again later.";
+
+  /** The message to show while orders are paused: the admin's text, or {@link #DEFAULT_PAUSED} when it is blank. */
+  public static String pausedMessage(String stored) { return stored == null || stored.isBlank() ? DEFAULT_PAUSED : stored; }
 
   private final ShopProfileRepository repo;
   private final ImageStore images;
@@ -84,7 +96,7 @@ public class ShopProfileService implements OnlineOrdering {
       hours = List.of();
     }
     return new Profile(r.logoUrl(), r.email(), r.whatsapp(), r.mapUrl(), r.website(), r.instagram(), r.facebook(), hours, r.holidayNote(),
-        r.onlineOrdersEnabled(), r.onlineOrdersMessage(), r.updatedAt());
+        r.onlineOrdersEnabled(), r.onlineOrdersMessage(), r.updatedAt(), r.holidayNoteGu());
   }
 
   /**
@@ -111,7 +123,7 @@ public class ShopProfileService implements OnlineOrdering {
   public void requireOpen() {
     Profile p = get();
     if (!p.onlineOrdersEnabled()) {
-      String msg = p.onlineOrdersMessage() == null || p.onlineOrdersMessage().isBlank() ? DEFAULT_PAUSED : p.onlineOrdersMessage();
+      String msg = pausedMessage(p.onlineOrdersMessage());
       throw ApiException.unprocessable("ORDERS_PAUSED", msg, Map.of());
     }
   }
@@ -127,8 +139,9 @@ public class ShopProfileService implements OnlineOrdering {
     String note = clean(in.holidayNote(), "holidayNote", 200);
     String message = clean(in.onlineOrdersMessage(), "onlineOrdersMessage", 200);
     ShopProfileRepository.Row old = repo.get();
+    String noteGu = in.holidayNoteGu() == null ? old.holidayNoteGu() : clean(in.holidayNoteGu(), "holidayNoteGu", 200);
     ShopProfileRepository.Row row = new ShopProfileRepository.Row(old.logoUrl(), email, whatsapp, link(in.mapUrl(), "mapUrl"), link(in.website(), "website"),
-        link(in.instagram(), "instagram"), link(in.facebook(), "facebook"), hoursJson(in.hours()), note, in.onlineOrdersEnabled(), message, null);
+        link(in.instagram(), "instagram"), link(in.facebook(), "facebook"), hoursJson(in.hours()), note, in.onlineOrdersEnabled(), message, null, noteGu);
     repo.save(row, clock.instant());
     audit.log(actor, "UPDATE", "shop_profile", 1, in.onlineOrdersEnabled() ? "profile" : "online ordering paused");
     changed();
@@ -158,7 +171,7 @@ public class ShopProfileService implements OnlineOrdering {
   private void updateLogo(String url) {
     ShopProfileRepository.Row o = repo.get();
     repo.save(new ShopProfileRepository.Row(url, o.email(), o.whatsapp(), o.mapUrl(), o.website(), o.instagram(), o.facebook(), o.hours(),
-        o.holidayNote(), o.onlineOrdersEnabled(), o.onlineOrdersMessage(), null), clock.instant());
+        o.holidayNote(), o.onlineOrdersEnabled(), o.onlineOrdersMessage(), null, o.holidayNoteGu()), clock.instant());
   }
 
   private void changed() {
