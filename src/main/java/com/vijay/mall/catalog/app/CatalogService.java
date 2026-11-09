@@ -487,12 +487,34 @@ public class CatalogService {
   }
 
   // ---------- admin side ----------
+  /** The ways the admin product list can be sorted. */
+  private static final List<String> ADMIN_SORTS = List.of("name", "lowStock", "updated");
+
   /** Admin product list with stock numbers; includes inactive and counter-only products, sorted by English name. */
   public Page<AdminProduct> adminList(String q, UUID categoryId, int page, int size) {
+    return adminList(q, categoryId, null, null, false, null, page, size);
+  }
+
+  /**
+   * Admin product list with stock numbers, narrowed and sorted as asked.
+   *
+   * @param hotSale true for products flagged hot sale, false for the others, {@code null} for both
+   * @param active true for active products, false for retired ones, {@code null} for both
+   * @param lowStock true to keep only products at or below their stock alert level
+   * @param sort {@code name} (default), {@code lowStock} (emptiest first) or {@code updated} (newest change first)
+   * @throws ApiException 400 {@code fields.sort} for any other sort
+   */
+  public Page<AdminProduct> adminList(String q, UUID categoryId, Boolean hotSale, Boolean active, boolean lowStock, String sort,
+                                      int page, int size) {
+    String order = sort == null || sort.isBlank() ? "name" : sort.trim();
+    if (!ADMIN_SORTS.contains(order)) throw ApiException.validation("sort", "must be one of " + String.join(", ", ADMIN_SORTS));
     int pg = Math.max(0, page);
     int sz = Page.clampSize(size);
-    Instant now = clock.instant();
-    return withStock(searched("admin|" + q + "|" + categoryId + "|" + pg + "|" + sz, () -> products.search(q, categoryId, false, false, now, pg, sz)));
+    Supplier<Page<ProductData>> search = () -> products.adminSearch(q, categoryId, hotSale, active, lowStock, order, pg, sz);
+    // stock decides the low-stock filter and order, and stock changes do not touch the catalog cache: never remembered
+    boolean byStock = lowStock || order.equals("lowStock");
+    String key = "admin|" + q + "|" + categoryId + "|" + hotSale + "|" + active + "|" + order + "|" + pg + "|" + sz;
+    return withStock(byStock ? search.get() : searched(key, search));
   }
 
   /** One product with stock numbers for the admin; {@code NOT_FOUND} when unknown. */
@@ -646,6 +668,38 @@ public class CatalogService {
     AdminProduct updated = update(id, patch.applyTo(before), actor);
     return patch.touchesVariant() ? setVariant(id, patch.variantName(), patch.variantOrder(), actor) : updated;
   }
+
+  /**
+   * What a bulk hot-sale change did.
+   * @param changed how many products were set
+   * @param ids the products that were set, in the order asked, without repeats
+   */
+  public record HotSaleResult(int changed, List<UUID> ids) {}
+
+  /**
+   * Turns the hot-sale flag of many products on or off in one transaction, with one audit entry; open screens are told once that
+   * the catalog changed. The window replaces the old one on every product ({@code null} means no limit).
+   *
+   * @param ids the products, at most 200; repeated ids count once
+   * @param hotStart start of the hot-sale window, or {@code null}
+   * @param hotEnd end of the window, or {@code null}; not before the start
+   * @throws ApiException {@code NOT_FOUND} (nothing changes) when any id is unknown; 400 for an empty or too long list or a window that ends before it starts
+   */
+  @Transactional
+  public HotSaleResult setHotSale(List<UUID> ids, boolean hotSale, Instant hotStart, Instant hotEnd, UUID actor) {
+    List<UUID> distinct = ids == null ? List.of() : ids.stream().distinct().toList();
+    if (distinct.isEmpty()) throw ApiException.validation("ids", "choose at least one product");
+    if (distinct.size() > MAX_BULK) throw ApiException.validation("ids", "at most " + MAX_BULK + " products at a time");
+    if (hotStart != null && hotEnd != null && hotEnd.isBefore(hotStart)) throw ApiException.validation("hotEnd", "must be after hotStart");
+    int n = products.setHotSale(distinct, hotSale, hotStart, hotEnd, clock.instant());
+    if (n != distinct.size()) throw ApiException.notFound("Product"); // rolls the whole change back
+    audit.log(actor, "HOT_SALE_BULK", "product", null, (hotSale ? "on" : "off") + " for " + n + " products: " + distinct);
+    changed();
+    return new HotSaleResult(n, distinct);
+  }
+
+  /** The most products one bulk change may touch. */
+  static final int MAX_BULK = 200;
 
   /** Every category including hidden ones, with the active flag and picture, in the same order as the shop list. */
   public List<AdminCategory> adminCategories() { return categories.listAll(); }

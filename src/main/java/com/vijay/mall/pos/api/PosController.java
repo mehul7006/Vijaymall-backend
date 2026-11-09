@@ -101,7 +101,7 @@ public class PosController {
    * never both.
    */
   @Schema(name = "PosReturnBody")
-  public record ReturnBody(@NotEmpty List<@Valid ReturnLine> items, @Size(max = 200) String reason, List<@Valid Pay> refunds, String refundMode) {}
+  public record ReturnBody(@NotEmpty(message = "choose at least one item to return") List<@Valid ReturnLine> items, @Size(max = 200) String reason, List<@Valid Pay> refunds, String refundMode) {}
 
   /** A bill rendered as plain text for a thermal printer, with the character width it was laid out for. */
   public record Receipt(int width, String text) {}

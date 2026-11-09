@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -223,16 +224,97 @@ class OrderServiceCoverageTest {
     verify(repo, never()).updateStatus(eq(notPending.id()), anyString(), anyLong(), any());
   }
 
+  private static final OrderRepository.AdminFilter ANY = new OrderRepository.AdminFilter(List.of(), null, null, null);
+
+  private OrderRepository.AdminFilter filterSentToTheRepository(OrderService.AdminQuery q) {
+    when(repo.adminList(any(OrderRepository.AdminFilter.class), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    service.adminList(q, 0, 20);
+    var captured = org.mockito.ArgumentCaptor.forClass(OrderRepository.AdminFilter.class);
+    verify(repo).adminList(captured.capture(), anyInt(), anyInt());
+    return captured.getValue();
+  }
+
+  private static ApiException rejected(org.junit.jupiter.api.function.Executable e) {
+    return org.junit.jupiter.api.Assertions.assertThrows(ApiException.class, e);
+  }
+
+  @Test
+  void adminListReadsSeveralStatusesAnyCaseAndSkipsEmptyParts() {
+    var f = filterSentToTheRepository(new OrderService.AdminQuery(" placed, CONFIRMED,,", false, null, null, null, null));
+    assertThat(f.statuses()).containsExactly("PLACED", "CONFIRMED");
+  }
+
+  @Test
+  void adminListWithNoFilterAsksForEveryStatusAndNoDates() {
+    assertThat(filterSentToTheRepository(new OrderService.AdminQuery("  ", false, null, "", " ", "")))
+        .isEqualTo(ANY);
+  }
+
+  @Test
+  void adminListNeedsActionIsTheFiveWorkingStatuses() {
+    var f = filterSentToTheRepository(new OrderService.AdminQuery(null, true, null, null, null, null));
+    assertThat(f.statuses()).containsExactly("PLACED", "CONFIRMED", "PACKED", "OUT_FOR_DELIVERY", "READY_FOR_PICKUP");
+  }
+
+  @Test
+  void adminListRejectsBadStatusNeedsActionWithStatusAndLongSearch() {
+    var unknown = rejected(() -> service.adminList(new OrderService.AdminQuery("PLACED,BOGUS", false, null, null, null, null), 0, 20));
+    assertThat(unknown.details().toString()).contains("status=must be one of PAYMENT_PENDING, PLACED, CONFIRMED");
+    var both = rejected(() -> service.adminList(new OrderService.AdminQuery("PLACED", true, null, null, null, null), 0, 20));
+    assertThat(both.details().toString()).contains("needsAction=cannot be used together with status");
+    var longQ = rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, "x".repeat(101), null, null, null), 0, 20));
+    assertThat(longQ.details().toString()).contains("q=must be at most 100 characters");
+  }
+
+  @Test
+  void adminListReadsFromAndToWherePlainDatesAreIndiaDaysAndToCoversTheWholeDay() {
+    var f = filterSentToTheRepository(new OrderService.AdminQuery(null, false, null, "2026-11-09", "2026-11-09", null));
+    assertThat(f.from()).isEqualTo(Instant.parse("2026-11-08T18:30:00Z"));
+    assertThat(f.to()).as("a plain date as the end covers the whole day").isEqualTo(Instant.parse("2026-11-09T18:30:00Z"));
+  }
+
+  @Test
+  void adminListToGivenAsAnInstantIsExcluded() {
+    var f = filterSentToTheRepository(new OrderService.AdminQuery(null, false, null, "2026-11-09T10:00:00", "2026-11-09T12:00:00Z", null));
+    assertThat(f.from()).isEqualTo(Instant.parse("2026-11-09T04:30:00Z"));
+    assertThat(f.to()).isEqualTo(Instant.parse("2026-11-09T12:00:00Z"));
+  }
+
+  @Test
+  void adminListDateIsOneIndiaDay() {
+    var f = filterSentToTheRepository(new OrderService.AdminQuery(null, false, null, null, null, "2026-11-09"));
+    assertThat(f.from()).isEqualTo(Instant.parse("2026-11-08T18:30:00Z"));
+    assertThat(f.to()).isEqualTo(Instant.parse("2026-11-09T18:30:00Z"));
+  }
+
+  @Test
+  void adminListRejectsBadDatesAndBackwardsRanges() {
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, "yesterday", null, null), 0, 20))
+        .details().toString()).contains("from=must be a valid date");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, null, "2026-13-40", null), 0, 20))
+        .details().toString()).contains("to=must be a valid date");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, null, null, "2026-11-09T10:00:00"), 0, 20))
+        .details().toString()).contains("date=must be a valid date");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, "2026-11-09", "2026-11-08", null), 0, 20))
+        .details().toString()).contains("to=must be after from");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, "2026-11-09T10:00:00", "2026-11-09T10:00:00", null), 0, 20))
+        .details().toString()).as("an empty range").contains("to=must be after from");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, "2026-11-01", null, "2026-11-09"), 0, 20))
+        .details().toString()).contains("date=cannot be used together with from or to");
+    assertThat(rejected(() -> service.adminList(new OrderService.AdminQuery(null, false, null, null, "2026-11-01", "2026-11-09"), 0, 20))
+        .details().toString()).contains("date=cannot be used together with from or to");
+  }
+
   @Test
   void adminListWithoutSearchTextDelegatesAndMapsCustomersAndMissingCustomers() {
     UUID known = UUID.randomUUID();
     UUID gone = UUID.randomUUID();
     var r1 = new OrderRepository.SummaryRow(UUID.randomUUID(), known, "VSM-1", "PLACED", "DELIVERY", 500, 2, NOW, 450, "C", 10, 1, 5, 40, "COD", "NONE");
     var r2 = new OrderRepository.SummaryRow(UUID.randomUUID(), gone, "VSM-2", "PLACED", "PICKUP", 700, 1, NOW, 700, null, 0, 0, 0, 0, "ONLINE", "CAPTURED");
-    when(repo.adminList("PLACED", null, 0, 50)).thenReturn(new Page<>(List.of(r1, r2), 0, 50, 2));
+    when(repo.adminList(new OrderRepository.AdminFilter(List.of("PLACED"), null, null, null), 0, 50)).thenReturn(new Page<>(List.of(r1, r2), 0, 50, 2));
     when(profiles.users(anyList())).thenReturn(Map.of(known, new User(known, "k@x.com", "Kay", "98", "CUSTOMER")));
 
-    Page<OrderViews.AdminSummary> p = service.adminList("PLACED", 0, 500);
+    Page<OrderViews.AdminSummary> p = service.adminList(new OrderService.AdminQuery("PLACED", false, null, null, null, null), 0, 500);
 
     assertThat(p.total()).isEqualTo(2);
     assertThat(p.items()).hasSize(2);

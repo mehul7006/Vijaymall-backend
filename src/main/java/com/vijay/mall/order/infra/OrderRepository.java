@@ -3,7 +3,6 @@ package com.vijay.mall.order.infra;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.persistence.BoundedCount;
-import com.vijay.mall.common.persistence.Window;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -359,43 +358,67 @@ public class OrderRepository {
     return summaries(orders.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt"))), page, size);
   }
 
-  /** All orders, newest first, optionally of one status. */
-  public Page<SummaryRow> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
+  /**
+   * What the staff order list is narrowed to; every part is optional.
+   * @param statuses order statuses to keep; {@code null} or empty means every status
+   * @param q part of the order number or of a customer's name, e-mail or mobile; {@code null} or blank means no search
+   * @param from earliest placement time, included; {@code null} for no lower bound
+   * @param to latest placement time, excluded; {@code null} for no upper bound
+   */
+  public record AdminFilter(List<String> statuses, String q, Instant from, Instant to) {
+    boolean anyStatus() { return statuses == null || statuses.isEmpty(); }
+
+    boolean anyNumber() { return q == null || q.isBlank(); }
+  }
 
   /**
-   * How many orders match, counting at most {@link BoundedCount#CAP} + 1 rows (see {@link BoundedCount}): exact, never cached, and
-   * as cheap on 5 million orders as on 5,000. A text search matches the order number or any customer whose name, e-mail or mobile
-   * number contains it, decided in SQL (no list of customers is built or capped).
+   * The conditions of the staff list as JPQL ({@code jpql = true}) or as SQL for the bounded count, and their parameters. A text
+   * search matches the order number or any customer whose name, e-mail or mobile number contains it, decided in SQL (no list of
+   * customers is built or capped); its two halves are a UNION so each uses its own trigram index.
    */
-  private long boundedTotal(String status, String like, boolean anyStatus, boolean anyNumber) {
-    StringBuilder from = new StringBuilder("orders o where 1 = 1");
-    Map<String, Object> params = new HashMap<>();
-    if (!anyStatus) {
-      from.append(" and o.status = :status");
-      params.put("status", status);
+  private static String conditions(AdminFilter f, boolean jpql, Map<String, Object> params) {
+    StringBuilder w = new StringBuilder();
+    if (!f.anyStatus()) {
+      w.append(" and o.status in (:statuses)");
+      params.put("statuses", f.statuses());
     }
-    if (!anyNumber) {
-      from.append(" and o.id in (select a.id from orders a where lower(a.order_no) like :pattern union select b.id from orders b "
-          + "where b.user_id in (select u.id from users u where lower(coalesce(u.name, '')) like :pattern "
-          + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))");
-      params.put("pattern", like);
+    if (f.from() != null) {
+      w.append(" and ").append(jpql ? "o.placedAt" : "o.placed_at").append(" >= :from");
+      params.put("from", f.from());
     }
-    return BoundedCount.count(em, from.toString(), params);
+    if (f.to() != null) {
+      w.append(" and ").append(jpql ? "o.placedAt" : "o.placed_at").append(" < :to");
+      params.put("to", f.to());
+    }
+    if (!f.anyNumber()) {
+      w.append(jpql
+          ? " and o.id in (select a.id from OrderEntity a where lower(a.orderNo) like :pattern union select b.id from OrderEntity b "
+            + "where b.userId in (select u.id from UserEntity u where lower(coalesce(u.name, '')) like :pattern "
+            + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))"
+          : " and o.id in (select a.id from orders a where lower(a.order_no) like :pattern union select b.id from orders b "
+            + "where b.user_id in (select u.id from users u where lower(coalesce(u.name, '')) like :pattern "
+            + "or lower(coalesce(u.email, '')) like :pattern or coalesce(u.mobile, '') like :pattern))");
+      params.put("pattern", pattern(f.q()));
+    }
+    return w.toString();
   }
 
   /** "1001" becomes "%1001%" in lower case; a % or _ typed by the person is dropped so it cannot act as a wildcard. */
   static String pattern(String q) { return "%" + q.trim().toLowerCase().replace("%", "").replace("_", "") + "%"; }
 
-  /** Orders newest first, optionally of one status and/or whose order number or customer (name, mobile, e-mail) contains q. */
-  public Page<SummaryRow> adminList(String status, String q, int page, int size) {
-    Window req = Window.of(page, size, Sort.by(Sort.Direction.DESC, "placedAt")); // one extra row tells whether another page follows
-    boolean anyStatus = status == null || status.isBlank();
-    boolean anyNumber = q == null || q.isBlank();
-    String like = anyNumber ? null : pattern(q);
-    List<OrderEntity> content = anyStatus
-        ? (anyNumber ? orders.findPageBy(req) : orders.listByNumberOrCustomer(like, req))
-        : (anyNumber ? orders.findPageByStatus(status, req) : orders.listByStatusAndNumberOrCustomer(status, like, req));
+  /**
+   * Orders newest first, narrowed by the filter. One page is read with one extra row; the total is exact (see {@link BoundedCount}).
+   */
+  public Page<SummaryRow> adminList(AdminFilter f, int page, int size) {
+    Map<String, Object> params = new HashMap<>();
+    String where = conditions(f, true, params);
+    var query = em.createQuery("select o from OrderEntity o where 1 = 1" + where + " order by o.placedAt desc", OrderEntity.class);
+    params.forEach(query::setParameter);
+    List<OrderEntity> content = query.setFirstResult((int) Math.min((long) page * size, Integer.MAX_VALUE)).setMaxResults(size + 1).getResultList();
     // the total is exact: no count when the page settles it, otherwise a count that stops at BoundedCount.CAP rows
-    return summaries(BoundedCount.assemble(content, page, size, () -> boundedTotal(status, like, anyStatus, anyNumber)));
+    Map<String, Object> countParams = new HashMap<>();
+    String countWhere = conditions(f, false, countParams);
+    return summaries(BoundedCount.assemble(content, page, size,
+        () -> BoundedCount.count(em, "orders o where 1 = 1" + countWhere, countParams)));
   }
 }

@@ -1,6 +1,8 @@
 package com.vijay.mall.report.app;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.common.persistence.BoundedCount;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -10,6 +12,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,9 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class CreditReportService {
-  /** lastSaleAt / lastPaymentAt are null when the customer never had one. */
-  public record Debtor(UUID customerId, String name, String mobile, long balancePaise, long limitPaise,
-                       Instant lastSaleAt, Instant lastPaymentAt) {}
+  /**
+   * lastSaleAt / lastPaymentAt are null when the customer never had one.
+   * @param availablePaise what the customer may still take on credit: the limit minus the balance, never below zero
+   * @param blocked whether the customer is blocked (no credit can be given whatever the limit)
+   */
+  public record Debtor(UUID customerId, String name, String mobile, long balancePaise, long limitPaise, long availablePaise,
+                       boolean blocked, Instant lastSaleAt, Instant lastPaymentAt) {}
 
   /**
    * How many counter bills were paid by one payment type and their total.
@@ -119,26 +126,42 @@ public class CreditReportService {
     }
 
     return new Report(r.from(), r.to(), num(owed[0]), num(owed[1]), given, returned, recovered, writtenOff, added, byMode,
-        types, days, debtors(true, 0, 20).items());
+        types, days, debtors(true, false, null, 0, 20).items());
   }
 
-  /** Customers with a credit account, biggest balance first. outstandingOnly leaves out those who owe nothing. */
+  /**
+   * Customers with a credit account, biggest balance first. The total is exact (see {@link BoundedCount}).
+   * @param outstandingOnly leaves out those who owe nothing
+   * @param eligibleOnly keeps only customers who have a credit limit above zero
+   * @param q part of the name or mobile number, any case; blank for no search
+   */
   @Transactional(readOnly = true)
   @SuppressWarnings("unchecked")
-  public Page<Debtor> debtors(boolean outstandingOnly, int page, int size) {
+  public Page<Debtor> debtors(boolean outstandingOnly, boolean eligibleOnly, String q, int page, int size) {
     int p = Math.max(0, page);
     int n = Page.clampSize(size);
-    String where = outstandingOnly ? " WHERE a.balance_paise > 0" : "";
-    long total = num(em.createNativeQuery("SELECT COUNT(*) FROM credit_account a" + where).getSingleResult());
-    List<Object[]> found = em.createNativeQuery("SELECT a.user_id, u.name, u.mobile, a.balance_paise, a.limit_paise, "
-            + "(SELECT MAX(l.created_at) FROM credit_ledger l WHERE l.user_id = a.user_id AND l.kind = 'SALE'), "
-            + "(SELECT MAX(l.created_at) FROM credit_ledger l WHERE l.user_id = a.user_id AND l.kind = 'PAYMENT') "
-            + "FROM credit_account a JOIN users u ON u.id = a.user_id" + where
-            + " ORDER BY a.balance_paise DESC, u.name LIMIT :n OFFSET :o")
-        .setParameter("n", n).setParameter("o", p * n).getResultList();
-    List<Debtor> items = found.stream().map(row -> new Debtor(toUuid(row[0]), (String) row[1], (String) row[2], num(row[3]),
-        num(row[4]), toInstant(row[5]), toInstant(row[6]))).toList();
-    return new Page<>(items, p, n, total);
+    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
+    StringBuilder from = new StringBuilder("credit_account a JOIN users u ON u.id = a.user_id WHERE 1 = 1");
+    Map<String, Object> params = new HashMap<>();
+    if (outstandingOnly) from.append(" AND a.balance_paise > 0");
+    if (eligibleOnly) from.append(" AND a.limit_paise > 0");
+    if (q != null && !q.isBlank()) {
+      from.append(" AND (lower(coalesce(u.name, '')) LIKE :pattern OR coalesce(u.mobile, '') LIKE :pattern)");
+      params.put("pattern", "%" + q.trim().toLowerCase().replace("%", "").replace("_", "") + "%");
+    }
+    var query = em.createNativeQuery("SELECT a.user_id, u.name, u.mobile, a.balance_paise, a.limit_paise, u.status = 'BLOCKED', "
+        + "(SELECT MAX(l.created_at) FROM credit_ledger l WHERE l.user_id = a.user_id AND l.kind = 'SALE'), "
+        + "(SELECT MAX(l.created_at) FROM credit_ledger l WHERE l.user_id = a.user_id AND l.kind = 'PAYMENT') "
+        + "FROM " + from + " ORDER BY a.balance_paise DESC, u.name, a.user_id LIMIT :n OFFSET :o");
+    params.forEach(query::setParameter);
+    List<Object[]> found = query.setParameter("n", n + 1).setParameter("o", p * n).getResultList();
+    List<Debtor> items = found.stream().map(row -> {
+      long balance = num(row[3]);
+      long limit = num(row[4]);
+      return new Debtor(toUuid(row[0]), (String) row[1], (String) row[2], balance, limit, Math.max(0, limit - balance),
+          Boolean.TRUE.equals(row[5]), toInstant(row[6]), toInstant(row[7]));
+    }).toList();
+    return BoundedCount.assemble(items, p, n, () -> BoundedCount.count(em, from.toString(), params));
   }
 
   @SuppressWarnings("unchecked")

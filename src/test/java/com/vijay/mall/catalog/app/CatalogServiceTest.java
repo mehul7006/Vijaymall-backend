@@ -274,17 +274,57 @@ class CatalogServiceTest {
   @Test
   void adminListSearchesAllProductsIncludingInactiveAndAddsStock() {
     UUID inactive = UUID.randomUUID();
-    when(products.search(any(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+    when(products.adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt()))
         .thenReturn(new Page<>(List.of(data(inactive, false, false, null, null)), 0, 50, 1));
     stock.put(inactive, new Stock(inactive, 2, 9));
 
     Page<AdminProduct> out = service.adminList("x", null, -1, 999);
 
-    verify(products).search("x", null, false, false, NOW, 0, 50);
+    verify(products).adminSearch("x", null, null, null, false, "name", 0, 50);
     AdminProduct p = out.items().get(0);
     assertThat(p.active()).isFalse();
     assertThat(p.qtyOnHand()).isEqualTo(2);
     assertThat(p.lowThreshold()).isEqualTo(9);
+  }
+
+  @Test
+  void adminListPassesTheFiltersAndSortAndRejectsAnUnknownSort() {
+    when(products.adminSearch(any(), any(), any(), any(), anyBoolean(), any(), anyInt(), anyInt())).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    service.adminList(null, null, true, false, true, " lowStock ", 0, 20);
+    verify(products).adminSearch(null, null, true, false, true, "lowStock", 0, 20);
+    service.adminList(null, null, null, null, false, "updated", 0, 20);
+    verify(products).adminSearch(null, null, null, null, false, "updated", 0, 20);
+    service.adminList(null, null, null, null, false, "  ", 0, 20);
+    verify(products).adminSearch(null, null, null, null, false, "name", 0, 20);
+    assertThatThrownBy(() -> service.adminList(null, null, null, null, false, "price", 0, 20))
+        .satisfies(t -> assertThat(fields(t).get("sort").toString()).isEqualTo("must be one of name, lowStock, updated"));
+  }
+
+  @Test
+  void bulkHotSaleChangesAllProductsInOneTransactionWithOneAuditEntryAndOneAnnouncement() {
+    UUID a = UUID.randomUUID(), b = UUID.randomUUID();
+    Instant start = NOW.minusSeconds(60), end = NOW.plusSeconds(3600);
+    when(products.setHotSale(List.of(a, b), true, start, end, NOW)).thenReturn(2);
+    var r = service.setHotSale(java.util.Arrays.asList(a, b, a), true, start, end, pid);
+    assertThat(r.changed()).isEqualTo(2);
+    assertThat(r.ids()).containsExactly(a, b);
+    verify(audit, org.mockito.Mockito.times(1)).log(eq(pid), eq("HOT_SALE_BULK"), eq("product"), isNull(), anyString());
+  }
+
+  @Test
+  void bulkHotSaleRefusesBadListsWindowsAndUnknownProducts() {
+    UUID a = UUID.randomUUID();
+    assertThatThrownBy(() -> service.setHotSale(null, true, null, null, pid))
+        .satisfies(t -> assertThat(fields(t).get("ids").toString()).isEqualTo("choose at least one product"));
+    assertThatThrownBy(() -> service.setHotSale(List.of(), true, null, null, pid)).satisfies(t -> assertApi(t, 400, "VALIDATION_FAILED"));
+    List<UUID> many = java.util.stream.IntStream.range(0, 201).mapToObj(i -> UUID.randomUUID()).toList();
+    assertThatThrownBy(() -> service.setHotSale(many, true, null, null, pid))
+        .satisfies(t -> assertThat(fields(t).get("ids").toString()).isEqualTo("at most 200 products at a time"));
+    assertThatThrownBy(() -> service.setHotSale(List.of(a), true, NOW, NOW.minusSeconds(1), pid))
+        .satisfies(t -> assertThat(fields(t).get("hotEnd").toString()).isEqualTo("must be after hotStart"));
+    when(products.setHotSale(any(), anyBoolean(), any(), any(), any())).thenReturn(0);
+    assertThatThrownBy(() -> service.setHotSale(List.of(a), false, null, null, pid)).satisfies(t -> assertApi(t, 404, "NOT_FOUND"));
+    verify(audit, never()).log(any(), eq("HOT_SALE_BULK"), any(), any(), any());
   }
 
   @Test

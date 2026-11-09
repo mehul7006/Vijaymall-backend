@@ -115,14 +115,62 @@ class CreditServiceTest {
   }
 
   @Test
-  void customersWithoutALimitOrBlockedCannotBuyOnCredit() {
+  void aCustomerWithoutALimitAndABlockedCustomerAreToldApartWithPlainMessages() {
     when(repo.lock(eq(customer), any())).thenReturn(new CreditRepository.Account(customer, 0, 0));
     assertThatThrownBy(() -> service.chargeSale(customer, 100, saleId, "VSM/1", cashier, NOW))
-        .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.code()).isEqualTo("CREDIT_NOT_ALLOWED"));
+        .isInstanceOfSatisfying(ApiException.class, ex -> {
+          assertThat(ex.code()).isEqualTo("CREDIT_NOT_ALLOWED");
+          assertThat(ex.getMessage()).isEqualTo("Credit is not enabled for this customer");
+        });
     when(repo.lock(eq(customer), any())).thenReturn(new CreditRepository.Account(customer, 0, 10000));
     when(users.isBlocked(customer)).thenReturn(true);
     assertThatThrownBy(() -> service.chargeSale(customer, 100, saleId, "VSM/1", cashier, NOW))
-        .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.code()).isEqualTo("CREDIT_NOT_ALLOWED"));
+        .isInstanceOfSatisfying(ApiException.class, ex -> {
+          assertThat(ex.code()).isEqualTo("CUSTOMER_BLOCKED");
+          assertThat(ex.getMessage()).isEqualTo("This customer is blocked, so credit cannot be given");
+          assertThat(ex.details()).containsEntry("customerId", customer.toString());
+        });
+    verify(repo, never()).append(any(), anyString(), anyLong(), any(), any(), any(), any(), anyString(), any(), any());
+  }
+
+  @Test
+  void theAccountSaysWhetherTheCustomerIsBlocked() {
+    assertThat(service.account(customer).blocked()).isFalse();
+    when(users.isBlocked(customer)).thenReturn(true);
+    assertThat(service.accountByMobile(MOBILE).blocked()).isTrue();
+  }
+
+  // ----- the till's picker -----
+  @Test
+  void thePickerMasksTheMobileAndWorksOutWhatIsLeft() {
+    UUID blocked = UUID.randomUUID();
+    when(repo.pick(eq("%asha%"), eq(false), eq(0), eq(20))).thenReturn(new Page<>(List.of(
+        new CreditRepository.Pick(customer, "Asha", "9876543210", 3000, 10000, false),
+        new CreditRepository.Pick(blocked, "Bina", "123", 9000, 4000, true),
+        new CreditRepository.Pick(UUID.randomUUID(), "Chitra", null, 0, 0, false)), 0, 20, 3));
+    var page = service.pick(" A%sha_ ", false, -2, 500 - 480);
+    assertThat(page.items()).extracting(CreditService.PickView::maskedMobile).containsExactly("98XXXXXX10", "XXXX", null);
+    assertThat(page.items().get(0).availablePaise()).isEqualTo(7000);
+    assertThat(page.items().get(0).limitPaise()).isEqualTo(10000);
+    assertThat(page.items().get(1).availablePaise()).as("over the limit: never negative").isZero();
+    assertThat(page.items().get(1).blocked()).isTrue();
+    assertThat(page.total()).isEqualTo(3);
+  }
+
+  @Test
+  void thePickerWithoutTextListsEveryoneWithALimitAndAllCustomersNeedTwoCharacters() {
+    when(repo.pick(eq(null), eq(false), eq(0), eq(50))).thenReturn(new Page<>(List.of(), 0, 50, 0));
+    assertThat(service.pick(null, false, 0, 500).items()).isEmpty();
+    service.pick("  ", false, 0, 500);
+    verify(repo, org.mockito.Mockito.times(2)).pick(eq(null), eq(false), eq(0), eq(50));
+    assertThatThrownBy(() -> service.pick(" a ", true, 0, 20))
+        .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.details().toString()).contains("q=enter at least 2 characters"));
+    assertThatThrownBy(() -> service.pick(null, true, 0, 20)).isInstanceOf(ApiException.class);
+    assertThatThrownBy(() -> service.pick("x".repeat(101), false, 0, 20))
+        .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.details().toString()).contains("q=must be at most 100"));
+    when(repo.pick(eq("%as%"), eq(true), eq(0), eq(20))).thenReturn(new Page<>(List.of(), 0, 20, 0));
+    service.pick("as", true, 0, 20);
+    verify(repo).pick("%as%", true, 0, 20);
   }
 
   // ----- goods coming back -----

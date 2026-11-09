@@ -1,6 +1,7 @@
 package com.vijay.mall.order.domain;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -13,6 +14,9 @@ import java.util.Set;
  */
 public enum OrderStatus {
   PAYMENT_PENDING, PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP, CANCELLED;
+
+  /** The statuses in which staff still have something to do: the "needs action" filter of the order list and its dashboard count. */
+  public static final List<OrderStatus> NEEDS_ACTION = List.of(PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP);
 
   /** Statuses this one may move to. {@code f} is kept for callers; the rules no longer depend on it. */
   public Set<OrderStatus> next(Fulfilment f) {

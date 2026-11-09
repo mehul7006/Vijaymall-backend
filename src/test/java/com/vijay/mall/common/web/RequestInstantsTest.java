@@ -37,4 +37,12 @@ class RequestInstantsTest {
     assertThat(conversion.convert("2026-11-09T10:00:00Z", Instant.class)).isEqualTo(Instant.parse("2026-11-09T10:00:00Z"));
     assertThatThrownBy(() -> conversion.convert("nope", Instant.class)).isInstanceOf(ConversionFailedException.class);
   }
+
+  @Test
+  void theEndOfARangeCoversTheWholeDayForAPlainDateAndIsTheInstantItselfOtherwise() {
+    assertThat(RequestInstants.parseEnd(" 2026-11-09 ")).isEqualTo(Instant.parse("2026-11-09T18:30:00Z"));
+    assertThat(RequestInstants.parseEnd("2026-11-09T10:00:00")).isEqualTo(Instant.parse("2026-11-09T04:30:00Z"));
+    assertThat(RequestInstants.parseEnd("2026-11-09T10:00:00Z")).isEqualTo(Instant.parse("2026-11-09T10:00:00Z"));
+    assertThatThrownBy(() -> RequestInstants.parseEnd("nope")).isInstanceOf(DateTimeException.class);
+  }
 }

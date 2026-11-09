@@ -1323,3 +1323,29 @@ No endpoint, field or behaviour of `POST /admin/refunds/{id}/retry`, `GET /admin
 - **Staff accounts**: `POST /admin/staff` with an e-mail that already has an account is `409 EMAIL_ALREADY_REGISTERED`; an active customer can be promoted by repeating the call with `confirmPromote: true`. Details in `30-pos-reports-purchasing.md`.
 - **Size limits**: profile `name` 1 to 80 characters; address `label` at most 30, `line1` at most 200, `area` at most 80, `phone` blank or exactly 10 digits (`must be 10 digits`, like the profile mobile); admin order `note` at most 200. Search `q` is at most 100 characters on the admin customer and order lists (`400` `fields.q`). Counter, credit and purchasing limits are in `30-pos-reports-purchasing.md`.
 - **Correction for `10-customer-and-catalog.md` (login code errors):** replaying a code that was already used answers `LOCKED`, not `EXPIRED`, when an earlier code for that e-mail was locked by 5 wrong tries and is still within its 5 minutes (a locked code stays the newest open one); `EXPIRED` is only for no open code or an old one.
+
+## Addendum 6 (staff order list: dates, status lists, needs action)
+
+All on `GET /api/v1/admin/orders` (ADMIN and CASHIER). Every filter combines with the others and with `q`; `total`, `totalExact` and `hasMore` stay exact (bounded count, 10,000 cap).
+
+| Query parameter | Meaning |
+|---|---|
+| `from` | Orders placed at or after this moment. An ISO instant (`2026-11-09T10:00:00Z`, offset allowed), a zone-less date-time (India time) or a plain date: `from=2026-11-09` is the start of that India-time day. |
+| `to` | End of the range. **Plain date = the whole of that day** (`to=2026-11-09` includes everything until 00:00 of the 10th, India time). **An instant or zone-less date-time is excluded** (`to=2026-11-09T12:00:00` returns orders placed before noon). |
+| `date` | Shortcut for one India-time day: `date=2026-11-09` is `from=2026-11-09&to=2026-11-09`. Must be a plain `YYYY-MM-DD`; cannot be sent with `from` or `to`. |
+| `status` | One status or a comma-separated list: `status=PLACED,CONFIRMED`. Case does not matter. |
+| `needsAction` | `true` = `PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP` (what staff still have to work on). Cannot be sent with `status`. |
+
+The date applies to `placedAt`. Errors are `400 VALIDATION_FAILED` with `details.fields`:
+
+| Field | Message |
+|---|---|
+| `from`, `to` | `must be a valid date` |
+| `date` | `must be a valid date`, or `cannot be used together with from or to` |
+| `to` | `must be after from` (also when the range is empty) |
+| `status` | `must be one of PAYMENT_PENDING, PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP, CANCELLED` |
+| `needsAction` | `cannot be used together with status` |
+
+**Behaviour change:** an unknown `status` used to return an empty page; it is now `400 fields.status`. A blank `status` (`status=`) still means every status.
+
+`GET /admin/dashboard` has a new number `needsAction` (the same five statuses, counted now; it includes `newOrders`). It is cached with the rest of the dashboard for about 30 seconds; badge the "Orders" tab with it, and open the list with `?needsAction=true`.

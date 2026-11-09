@@ -11,6 +11,7 @@ import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.metrics.Metrics;
 import com.vijay.mall.common.outbox.OutboxService;
+import com.vijay.mall.common.web.RequestInstants;
 import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
 import com.vijay.mall.identity.app.ProfileService;
@@ -32,14 +33,20 @@ import com.vijay.mall.wallet.app.OrderNumberLookup;
 import com.vijay.mall.wallet.app.WalletService;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -459,13 +466,38 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
         r.cancelCode())).toList());
   }
 
-  /** Staff list of all orders, optionally of one status. */
-  public Page<OrderViews.AdminSummary> adminList(String status, int page, int size) { return adminList(status, null, page, size); }
+  /**
+   * What the staff order list is asked for, as the client sent it.
+   * @param status one status or a comma-separated list; blank for every status
+   * @param needsAction true for the orders staff still have to work on (see {@link OrderStatus#NEEDS_ACTION}); not with a status
+   * @param q order number, or customer name, mobile or e-mail (part of it is enough, any case)
+   * @param from earliest placement time (an instant, a zone-less date-time or a plain date, India time), included
+   * @param to end of the range, excluded when given as an instant, the whole day when given as a plain date
+   * @param date one India-time day as {@code YYYY-MM-DD}; not together with {@code from} or {@code to}
+   */
+  public record AdminQuery(String status, boolean needsAction, String q, String from, String to, String date) {}
 
-  /** q filters by order number, customer name, mobile or e-mail (part of it is enough, any case). */
-  public Page<OrderViews.AdminSummary> adminList(String status, String q, int page, int size) {
-    if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
-    Page<OrderRepository.SummaryRow> p = repo.adminList(status, q, Math.max(0, page), Page.clampSize(size));
+  /** The staff list narrowed as asked; a bad value answers {@code 400} with the field named. */
+  public Page<OrderViews.AdminSummary> adminList(AdminQuery in, int page, int size) {
+    if (in.q() != null && in.q().length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
+    List<String> statuses = statuses(in);
+    Instant from = null;
+    Instant to = null;
+    if (in.date() != null && !in.date().isBlank()) {
+      if (notBlank(in.from()) || notBlank(in.to())) throw ApiException.validation("date", "cannot be used together with from or to");
+      try {
+        from = RequestInstants.parse(LocalDate.parse(in.date().trim()).toString());
+        to = RequestInstants.parseEnd(in.date());
+      } catch (DateTimeException e) {
+        throw ApiException.validation("date", "must be a valid date");
+      }
+    } else {
+      from = instant("from", in.from(), false);
+      to = instant("to", in.to(), true);
+      if (from != null && to != null && !to.isAfter(from)) throw ApiException.validation("to", "must be after from");
+    }
+    var filter = new OrderRepository.AdminFilter(statuses, in.q(), from, to);
+    Page<OrderRepository.SummaryRow> p = repo.adminList(filter, Math.max(0, page), Page.clampSize(size));
     Map<UUID, User> customers = profiles.users(p.items().stream().map(OrderRepository.SummaryRow::userId).distinct().toList());
     return p.withItems(p.items().stream().map(r -> {
       User u = customers.get(r.userId());
@@ -474,6 +506,39 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
           r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(),
           r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(), r.cancelCode());
     }).toList());
+  }
+
+  private static boolean notBlank(String s) { return s != null && !s.isBlank(); }
+
+  /** The statuses to keep: the "needs action" set, the listed statuses, or none (every status). */
+  private static List<String> statuses(AdminQuery in) {
+    if (in.needsAction()) {
+      if (notBlank(in.status())) throw ApiException.validation("needsAction", "cannot be used together with status");
+      return OrderStatus.NEEDS_ACTION.stream().map(Enum::name).toList();
+    }
+    if (!notBlank(in.status())) return List.of();
+    List<String> out = new ArrayList<>();
+    for (String part : in.status().split(",")) {
+      String name = part.trim().toUpperCase(Locale.ROOT);
+      if (name.isEmpty()) continue;
+      try {
+        out.add(OrderStatus.valueOf(name).name());
+      } catch (IllegalArgumentException e) {
+        throw ApiException.validation("status", "must be one of " + Arrays.stream(OrderStatus.values()).map(Enum::name)
+            .collect(Collectors.joining(", ")));
+      }
+    }
+    return out;
+  }
+
+  /** Reads a range end of the list filter; {@code null} for blank. */
+  private static Instant instant(String field, String text, boolean end) {
+    if (!notBlank(text)) return null;
+    try {
+      return end ? RequestInstants.parseEnd(text) : RequestInstants.parse(text);
+    } catch (DateTimeException e) {
+      throw ApiException.validation(field, "must be a valid date");
+    }
   }
 
   /** The customer's latest delivered or picked-up order that contains this product, if any. Used to allow reviews. */
