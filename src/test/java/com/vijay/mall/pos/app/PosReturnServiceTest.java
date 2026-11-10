@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.app;
 
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -267,7 +267,7 @@ class PosReturnServiceTest {
       Mockito.clearInvocations(sales);
       when(sales.lockAndFind(saleId)).thenReturn(Optional.of(s));
       ReturnRecord r = service.refund(cashier, saleId, "f-" + rate, new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null));
-      var expected = com.vijay.mall.pos.domain.GstCalculator.split(2500, GstRates.of(rate));
+      var expected = com.vijay.mall.common.tax.GstCalculator.split(2500, GstRates.of(rate));
       assertThat(r.refundPaise()).isEqualTo(2500);
       assertThat(r.taxablePaise()).isEqualTo(expected.taxable());
       assertThat(r.cgstPaise()).isEqualTo(expected.cgst());

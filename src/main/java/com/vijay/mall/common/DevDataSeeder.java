@@ -7,7 +7,7 @@ import com.vijay.mall.payment.app.MoneyAccountService;
 import com.vijay.mall.pos.app.PosCatalogService;
 import com.vijay.mall.pos.app.StaffService;
 import com.vijay.mall.pos.domain.BarcodeParser;
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.promotion.domain.Coupon;

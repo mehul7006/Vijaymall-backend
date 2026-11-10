@@ -1,7 +1,7 @@
 package com.vijay.mall.pos.api;
 
 import java.math.BigDecimal;
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.identity.domain.User;

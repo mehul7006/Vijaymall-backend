@@ -1,6 +1,6 @@
 package com.vijay.mall.purchasing.app;
 
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;

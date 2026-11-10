@@ -1,7 +1,7 @@
 package com.vijay.mall.purchasing.infra;
 
-import com.vijay.mall.pos.domain.GstRates;
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.persistence.BoundedCount;
 import java.math.BigDecimal;

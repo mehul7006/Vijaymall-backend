@@ -1,4 +1,6 @@
-package com.vijay.mall.pos.domain;
+package com.vijay.mall.common.tax;
+
+
 
 import java.math.BigDecimal;
 import java.util.Arrays;

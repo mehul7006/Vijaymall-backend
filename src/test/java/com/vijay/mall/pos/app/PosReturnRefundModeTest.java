@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.app;
 
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.domain;
 
+import com.vijay.mall.common.tax.GstRates;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;

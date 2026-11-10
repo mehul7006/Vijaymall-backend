@@ -2,6 +2,8 @@ package com.vijay.mall.pos.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.TaxSplit;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;

@@ -1,7 +1,7 @@
 package com.vijay.mall.pos.app;
 
 import java.math.BigDecimal;
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;

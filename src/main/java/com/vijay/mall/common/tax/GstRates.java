@@ -1,4 +1,5 @@
-package com.vijay.mall.pos.domain;
+package com.vijay.mall.common.tax;
+
 
 import com.vijay.mall.common.error.ApiException;
 import java.math.BigDecimal;

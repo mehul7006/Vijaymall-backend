@@ -1,6 +1,6 @@
-package com.vijay.mall.common.web;
+package com.vijay.mall.common.tax;
 
-import com.vijay.mall.pos.domain.GstRates;
+
 import java.math.BigDecimal;
 import tools.jackson.core.JsonGenerator;
 import tools.jackson.databind.SerializationContext;

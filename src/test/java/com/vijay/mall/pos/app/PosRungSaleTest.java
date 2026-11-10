@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.app;
 
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,13 +30,13 @@ import com.vijay.mall.pos.app.PosViews.Pay;
 import com.vijay.mall.pos.app.PosViews.Rung;
 import com.vijay.mall.pos.app.PosViews.RungLine;
 import com.vijay.mall.pos.app.PosViews.SaleInput;
-import com.vijay.mall.pos.domain.GstCalculator;
+import com.vijay.mall.common.tax.GstCalculator;
 import com.vijay.mall.pos.domain.OfflineExceptionKind;
 import com.vijay.mall.pos.domain.OfflineFinding;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.SaleRecord;
 import com.vijay.mall.pos.domain.SoldBy;
-import com.vijay.mall.pos.domain.TaxSplit;
+import com.vijay.mall.common.tax.TaxSplit;
 import com.vijay.mall.pos.infra.InvoiceCounterRepository;
 import com.vijay.mall.pos.infra.PosHoldRepository;
 import com.vijay.mall.pos.infra.PosSaleRepository;

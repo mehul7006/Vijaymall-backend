@@ -1,7 +1,7 @@
 package com.vijay.mall.purchasing.app;
 
-import com.vijay.mall.pos.domain.GstRates;
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminProduct;

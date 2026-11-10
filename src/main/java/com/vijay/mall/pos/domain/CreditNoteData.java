@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.domain;
 
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstRateJson;
 import java.math.BigDecimal;
 import java.util.List;
 

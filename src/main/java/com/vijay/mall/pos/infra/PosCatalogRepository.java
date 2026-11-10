@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.infra;
 
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.SoldBy;
 import java.time.Instant;

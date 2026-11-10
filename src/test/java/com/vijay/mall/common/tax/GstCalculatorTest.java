@@ -1,4 +1,6 @@
-package com.vijay.mall.pos.domain;
+package com.vijay.mall.common.tax;
+
+
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

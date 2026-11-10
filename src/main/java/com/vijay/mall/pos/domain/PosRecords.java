@@ -1,8 +1,9 @@
 package com.vijay.mall.pos.domain;
 
-import com.vijay.mall.common.web.GstRateJson;
-import java.math.BigDecimal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.GstRates;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;

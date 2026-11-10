@@ -1,10 +1,10 @@
-package com.vijay.mall.pos.domain;
+package com.vijay.mall.common.tax;
+
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vijay.mall.common.error.ApiException;
-import com.vijay.mall.common.web.GstRateJson;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;

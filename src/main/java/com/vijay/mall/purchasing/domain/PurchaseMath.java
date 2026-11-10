@@ -1,7 +1,7 @@
 package com.vijay.mall.purchasing.domain;
 
 import com.vijay.mall.common.error.ApiException;
-import com.vijay.mall.pos.domain.GstCalculator;
+import com.vijay.mall.common.tax.GstCalculator;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;

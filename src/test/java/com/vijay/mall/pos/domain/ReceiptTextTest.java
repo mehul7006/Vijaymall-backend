@@ -3,6 +3,7 @@ package com.vijay.mall.pos.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vijay.mall.common.tax.GstRates;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

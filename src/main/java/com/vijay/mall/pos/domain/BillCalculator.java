@@ -1,6 +1,8 @@
 package com.vijay.mall.pos.domain;
 
-import com.vijay.mall.common.web.GstRateJson;
+import com.vijay.mall.common.tax.GstCalculator;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.TaxSplit;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;

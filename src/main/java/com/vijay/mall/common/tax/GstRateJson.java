@@ -1,4 +1,6 @@
-package com.vijay.mall.common.web;
+package com.vijay.mall.common.tax;
+
+
 
 import com.fasterxml.jackson.annotation.JacksonAnnotationsInside;
 import java.lang.annotation.ElementType;

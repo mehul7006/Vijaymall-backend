@@ -1,6 +1,6 @@
 package com.vijay.mall.pos.app;
 
-import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.tax.GstRates;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleItemRecord;
