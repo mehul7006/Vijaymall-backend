@@ -292,3 +292,4 @@ The seed was not changed; the app only surfaces `verification`. These need the o
 5. Single Hindi words that are only a keyword of an item can tie with an item whose name equals the word (`atta`: "Chakki Atta" and "Atta Kneader"). The owner should add plain one-word items ("Atta", "Jeera") through the "Add item" form.
 6. The data holds only the rates 0, 3, 5, 18 and 40; 0.25, 1.5, 12 and 28 appear only in the rate card.
 7. `nameGu` is empty everywhere: Gujarati-script search works only after the owner adds Gujarati names.
+8. **GST on the online delivery fee** is not computed: the delivery fee is outside every GST slab of the cart quote and the order views (`20-orders-payments-admin-config.md`, Addendum 10). The accountant must decide whether it is taxable and at which rate.

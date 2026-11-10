@@ -224,7 +224,7 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     for (Quote.Line l : q.lines()) {
       repo.insertItem(orderId, new OrderRepository.NewItem(l.productId(), l.name(), l.unitPricePaise(), l.qty(),
           l.lineTotalPaise(), l.earnsCoins(), l.coinRedeemable(), l.nameGu(), l.unitLabel(), l.couponDiscountPaise(),
-          images.get(l.productId())));
+          images.get(l.productId()), l.gstPercent(), l.hsn(), l.taxablePaise(), l.cgstPaise(), l.sgstPaise()));
     }
     repo.insertHistory(orderId, null, status, userId, null, now);
 
@@ -461,10 +461,11 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
   /** Lists the customer's orders, newest first. */
   public Page<OrderViews.Summary> list(UUID userId, int page, int size) {
     Page<OrderRepository.SummaryRow> p = repo.list(userId, Math.max(0, page), Page.clampSize(size));
+    Map<UUID, OrderViews.Gst> gst = repo.gstOf(p.items().stream().map(OrderRepository.SummaryRow::id).toList());
     return p.withItems(p.items().stream().map(r -> new OrderViews.Summary(r.id(), r.orderNo(), r.status(), r.fulfilment(),
         r.totalPaise(), r.itemCount(), r.placedAt(), r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(),
         r.coinsUsed(), r.coinDiscountPaise(), r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(),
-        r.cancelCode())).toList());
+        r.cancelCode(), gst.getOrDefault(r.id(), OrderViews.Gst.NOT_RECORDED))).toList());
   }
 
   /**
@@ -500,12 +501,14 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
     var filter = new OrderRepository.AdminFilter(statuses, in.q(), from, to);
     Page<OrderRepository.SummaryRow> p = repo.adminList(filter, Math.max(0, page), Page.clampSize(size));
     Map<UUID, User> customers = profiles.users(p.items().stream().map(OrderRepository.SummaryRow::userId).distinct().toList());
+    Map<UUID, OrderViews.Gst> gst = repo.gstOf(p.items().stream().map(OrderRepository.SummaryRow::id).toList());
     return p.withItems(p.items().stream().map(r -> {
       User u = customers.get(r.userId());
       return new OrderViews.AdminSummary(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.totalPaise(), r.itemCount(),
           r.placedAt(), u == null ? null : u.name(), u == null ? null : u.email(), u == null ? null : u.mobile(),
           r.subtotalPaise(), r.couponCode(), r.couponDiscountPaise(), r.coinsUsed(), r.coinDiscountPaise(),
-          r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(), r.cancelCode());
+          r.deliveryFeePaise(), r.paymentMethod(), r.paymentStatus(), r.cancelledBy(), r.cancelCode(),
+          gst.getOrDefault(r.id(), OrderViews.Gst.NOT_RECORDED));
     }).toList());
   }
 
@@ -571,12 +574,13 @@ public class OrderService implements OrderNumberLookup, PurchaseLookup, Referenc
 
   private OrderViews.View view(OrderRepository.Row r) {
     PaymentSession session = OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? payments.sessionFor(r.id()).orElse(null) : null;
+    List<OrderViews.Item> items = repo.items(r.id());
     return new OrderViews.View(r.id(), r.orderNo(), r.status(), r.fulfilment(), r.paymentMethod(), r.paymentStatus(),
-        repo.items(r.id()), r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
+        items, r.subtotal(), r.couponCode(), r.couponDiscount(), r.coinsUsed(), r.coinDiscount(),
         r.deliveryFee(), r.total(), coinsKept(r), fromJson(r.addressSnapshot()), session, repo.timeline(r.id()), r.placedAt(),
         r.deliverySlot(), plainReason(r.cancelReason()), wallet.balance(r.userId()),
         OrderStatus.PAYMENT_PENDING.name().equals(r.status()) ? r.expiresAt() : null, // the app shows a countdown to this
-        r.cancelledBy(), r.cancelCode());
+        r.cancelledBy(), r.cancelCode(), OrderViews.Gst.ofItems(items));
   }
 
   /**

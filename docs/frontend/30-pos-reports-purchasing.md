@@ -1271,3 +1271,25 @@ The server now fills a blank GST rate or HSN from the GST master (guide 75, sect
 - **`POST /admin/purchases`**: a line without `gstPercent` / `hsn` uses the product's saved values, then the master, then 0 / empty. The line stores what it used; the product is not changed. `warnings` gets an entry when a value came from a `VERIFY_PRODUCT` master row.
 - **`GET /admin/purchases/lookup`**: blank parts are filled from the master for a product with no saved counter attributes (or no HSN); new last fields `gstSource` (`STORED`, `MASTER`, `DEFAULT`) and `gstVerification`.
 - The rates 0.25, 1.5 and 40 are accepted by billing, so the GST master reports `acceptedForBilling: true` for every rate and may fill them.
+
+## Addendum 10: GST on sales views (counter quote)
+
+Prices include GST and the owner wants every amount shown split by slab. `POST /pos/quote` now returns the figures the finished sale will store, from the same bill calculation (there is no second calculation).
+
+- Each `lines[]` row of the quote gets `taxablePaise`, `cgstPaise`, `sgstPaise` (the GST split of that line's `netPaise`, after its coupon share, coin share and manual discount share). `gstPercent` was already there.
+- The quote gets `gstSlabs[]`: one entry per distinct rate on the bill, lowest rate first, each `{ gstPercent, taxablePaise, cgstPaise, sgstPaise, taxPaise }` (`taxPaise = cgstPaise + sgstPaise`). The slabs add up to the bill's `taxablePaise`, `cgstPaise` and `sgstPaise`, which stay as before.
+- Rounding: per line `taxable = round half up(net x 100 / (100 + rate))`, the tax is split in two halves and the odd paisa goes to SGST; the bill tax is the sum of the line taxes. Discounts are spread over the lines as before. `totalPaise` includes the rupee round-off when it is on; the slabs do not (the round-off is not taxed).
+- The sale (`POST /pos/sales`, `SaleRecord`) stores the same line and bill figures: a quote followed by a sale with the same basket shows identical `taxablePaise`, `cgstPaise` and `sgstPaise` per line and in total (covered by a test). Use `gstSlabs` on the till display and the receipt preview.
+
+```json
+{ "lines": [ { "productId": "...", "netPaise": 10025, "gstPercent": 0.25, "taxablePaise": 10000, "cgstPaise": 12, "sgstPaise": 13 } ],
+  "taxablePaise": 10000, "cgstPaise": 12, "sgstPaise": 13,
+  "gstSlabs": [ { "gstPercent": 0.25, "taxablePaise": 10000, "cgstPaise": 12, "sgstPaise": 13, "taxPaise": 25 } ] }
+```
+
+The online cart quote has the same slab shape (`20-orders-payments-admin-config.md`, Addendum 10).
+
+```dart
+class BillLine { /* ...as before... */ int taxablePaise, cgstPaise, sgstPaise; }
+class BillView { /* ...as before... */ List<GstSlab> gstSlabs; }
+```

@@ -212,10 +212,10 @@ class PageOf<T> { List<T> items; int page, size, total; bool totalExact, hasMore
 class Item { String productId; int qty; }
 class Cart { List<Item> items; String? customerMobile, couponCode; String? coinMode; int? percent; }
 class ManualDiscount { int amountPaise; String? reason, approverPin; }
-class BillLine { String productId, name, soldBy; int qty, unitPricePaise, linePaise, discountPaise, netPaise; num gstPercent; }
+class BillLine { String productId, name, soldBy; int qty, unitPricePaise, linePaise, discountPaise, netPaise, taxablePaise, cgstPaise, sgstPaise; num gstPercent; }
 class BillView { List<BillLine> lines; int subtotalPaise, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise,
   taxablePaise, cgstPaise, sgstPaise, coinsToEarn, customerCoinBalance, roundOffPaise, manualDiscountPaise;
-  String? couponCode; List<String> warnings; }
+  String? couponCode; List<String> warnings; List<GstSlab> gstSlabs; /* one per rate, lowest first: gstPercent, taxablePaise, cgstPaise, sgstPaise, taxPaise */ }
 ```
 8. **Acceptance.**
    - Given 2 rice at Rs 125 (5% GST), when quoted, then total 25000, taxable 23810, CGST 595, SGST 595.

@@ -1,6 +1,8 @@
 package com.vijay.mall.pos.app;
 
 import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstSlab;
+import com.vijay.mall.common.tax.GstSlabs;
 import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.FlashPricing;
@@ -205,9 +207,13 @@ public class PosService implements ReferenceLookup {
 
   private static BillView view(BillCalculator.Bill b, Quote q, long coinsToEarn, int balance, long roundOff, long manual) {
     List<BillLine> lines = b.lines().stream().map(l -> new BillLine(l.productId(), l.name(), l.soldBy(), l.qty(),
-        l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent())).toList();
+        l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.tax().taxable(), l.tax().cgst(),
+        l.tax().sgst())).toList();
+    List<GstSlab> slabs = GstSlabs.of(b.lines().stream().map(BillCalculator.Line::gstPercent).toList(),
+        b.lines().stream().map(BillCalculator.Line::tax).toList());
     return new BillView(lines, b.subtotalPaise(), q.couponCode(), q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(),
-        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff, manual);
+        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff, manual,
+        slabs);
   }
 
   private Priced price(List<Item> items) {

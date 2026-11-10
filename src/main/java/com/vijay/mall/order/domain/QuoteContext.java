@@ -1,6 +1,11 @@
 package com.vijay.mall.order.domain;
 
 import com.vijay.mall.catalog.domain.PricedLine;
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstSlab;
+import com.vijay.mall.common.tax.GstSlabs;
+import com.vijay.mall.common.tax.TaxSplit;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,8 +44,16 @@ public final class QuoteContext {
   public boolean couponBlocksCoins;
   /** When set, these lines are used as they are (counter sales price their own lines). */
   public final List<PricedLine> preset;
+  /** The GST of each line in the order of {@link #lines}, set by the GST step; empty for counter quotes, which price their own GST. */
+  public List<LineGst> gstLines = List.of();
   /** Messages for the customer about anything that could not be applied. */
   public final List<String> warnings = new ArrayList<>();
+
+  /**
+   * The GST of one line: its rate and HSN, whether the shop ever saved a rate for the product, and the split of what the customer pays for
+   * the line (after its coupon and coin share).
+   */
+  public record LineGst(BigDecimal gstPercent, String hsn, boolean configured, TaxSplit split) {}
 
   /** A context whose lines come from the catalog. */
   public QuoteContext(UUID userId, QuoteRequest request) { this(userId, request, null); }
@@ -57,6 +70,11 @@ public final class QuoteContext {
   /** The coupon share of line i, or 0 when the coupon step gave no split. */
   private long couponShare(int i) { return couponByLine.size() == lines.size() ? couponByLine.get(i) : 0; }
 
+  /** The coupon share of every line, or {@code null} when the coupon step gave no split. */
+  public long[] couponShares() {
+    return couponByLine.size() == lines.size() ? couponByLine.stream().mapToLong(Long::longValue).toArray() : null;
+  }
+
   /**
    * Freezes the context into the immutable {@link Quote} returned to the app, including each line's coupon share and the per-category coupon breakdown.
    */
@@ -64,13 +82,18 @@ public final class QuoteContext {
     List<Quote.Line> out = new ArrayList<>();
     for (int i = 0; i < lines.size(); i++) {
       PricedLine l = lines.get(i);
+      LineGst g = gstLines.size() == lines.size() ? gstLines.get(i) : null;
       out.add(new Quote.Line(l.productId(), l.name(), l.qty(), l.unitPricePaise(), l.lineTotalPaise(), l.coinRedeemable(),
           l.earnsCoins(), l.nameGu(), l.unitLabel(), l.categoryId(), couponShare(i), l.flashSaleId(),
           l.flashSaleId() == null ? l.unitPricePaise() : l.listUnitPricePaise(),
-          l.flashSaleId() == null ? 0 : (l.listUnitPricePaise() - l.unitPricePaise()) * l.qty()));
+          l.flashSaleId() == null ? 0 : (l.listUnitPricePaise() - l.unitPricePaise()) * l.qty(),
+          g == null ? GstRates.ZERO : g.gstPercent(), g == null ? "" : g.hsn(), g == null ? 0 : g.split().taxable(),
+          g == null ? 0 : g.split().cgst(), g == null ? 0 : g.split().sgst(), g != null && g.configured()));
     }
+    List<GstSlab> slabs = GstSlabs.of(gstLines.stream().map(LineGst::gstPercent).toList(), gstLines.stream().map(LineGst::split).toList());
+    TaxSplit tax = GstSlabs.total(slabs);
     return new Quote(out, subtotal, couponCode, couponDiscount, coinsUsed, coinDiscount, deliveryFee, total,
-        coinsToEarn, List.copyOf(warnings), couponByCategory(), couponMinOrder);
+        coinsToEarn, List.copyOf(warnings), couponByCategory(), couponMinOrder, tax.taxable(), tax.cgst(), tax.sgst(), tax.tax(), slabs);
   }
 
   /** Per category of the cart: what it costs and how much of the coupon discount it received. Empty without a coupon discount. */

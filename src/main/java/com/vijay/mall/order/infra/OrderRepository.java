@@ -3,9 +3,13 @@ package com.vijay.mall.order.infra;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.ShopIdentity;
 import com.vijay.mall.common.persistence.BoundedCount;
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstSlabs;
+import com.vijay.mall.common.tax.TaxSplit;
 import com.vijay.mall.order.domain.OrderViews;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
@@ -88,9 +92,18 @@ public class OrderRepository {
    * @param redeemable whether coins may pay for it
    * @param couponDiscount this line's share of the coupon discount, in paise
    * @param imageUrl the product picture now, kept with the line
+   * @param gstPercent the GST rate, {@code hsn} the HSN and the next three the taxable value, CGST and SGST of the line at order time (null: not recorded)
    */
   public record NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
-                        boolean redeemable, String nameGu, String unitLabel, long couponDiscount, String imageUrl) {
+                        boolean redeemable, String nameGu, String unitLabel, long couponDiscount, String imageUrl,
+                        BigDecimal gstPercent, String hsn, Long taxablePaise, Long cgstPaise, Long sgstPaise) {
+    /** A line without a GST split (stored as not recorded). */
+    public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
+                   boolean redeemable, String nameGu, String unitLabel, long couponDiscount, String imageUrl) {
+      this(productId, name, unitPrice, qty, lineTotal, earns, redeemable, nameGu, unitLabel, couponDiscount, imageUrl,
+          null, null, null, null, null);
+    }
+
     /** A line without picture. */
     public NewItem(UUID productId, String name, long unitPrice, int qty, long lineTotal, boolean earns,
                    boolean redeemable, String nameGu, String unitLabel, long couponDiscount) {
@@ -232,6 +245,11 @@ public class OrderRepository {
     e.earnsCoins = i.earns();
     e.coinRedeemable = i.redeemable();
     e.imageUrl = i.imageUrl();
+    e.gstPercent = i.gstPercent();
+    e.hsn = i.hsn();
+    e.taxablePaise = i.taxablePaise();
+    e.cgstPaise = i.cgstPaise();
+    e.sgstPaise = i.sgstPaise();
     items.save(e);
   }
 
@@ -265,7 +283,33 @@ public class OrderRepository {
   public List<OrderViews.Item> items(UUID orderId) {
     return items.findByOrderIdOrderByName(orderId).stream()
         .map(i -> new OrderViews.Item(i.productId, i.name, i.qty, i.unitPricePaise, i.lineTotalPaise, i.nameGu,
-            i.unitLabel, i.couponDiscountPaise, i.imageUrl)).toList();
+            i.unitLabel, i.couponDiscountPaise, i.imageUrl, i.gstPercent == null ? null : GstRates.normalize(i.gstPercent), i.hsn,
+            i.taxablePaise, i.cgstPaise, i.sgstPaise)).toList();
+  }
+
+  /**
+   * The GST of each of these orders, from their stored lines in one query. An order whose lines have no recorded GST (placed before it was
+   * kept) is {@link OrderViews.Gst#NOT_RECORDED}; ids without lines are left out.
+   */
+  public Map<UUID, OrderViews.Gst> gstOf(Collection<UUID> orderIds) {
+    if (orderIds.isEmpty()) return Map.of();
+    Map<UUID, List<Object[]>> byOrder = items.gstFor(orderIds).stream().collect(Collectors.groupingBy(r -> (UUID) r[0]));
+    Map<UUID, OrderViews.Gst> out = new HashMap<>();
+    byOrder.forEach((id, groups) -> {
+      if (groups.stream().anyMatch(r -> r[1] == null)) {
+        out.put(id, OrderViews.Gst.NOT_RECORDED);
+        return;
+      }
+      List<BigDecimal> rates = groups.stream().map(r -> (BigDecimal) r[1]).toList();
+      List<TaxSplit> splits = groups.stream().map(r -> {
+        long taxable = ((Number) r[2]).longValue();
+        long cgst = ((Number) r[3]).longValue();
+        long sgst = ((Number) r[4]).longValue();
+        return new TaxSplit(taxable + cgst + sgst, taxable, cgst, sgst);
+      }).toList();
+      out.put(id, OrderViews.Gst.of(GstSlabs.of(rates, splits)));
+    });
+    return out;
   }
 
   /** The order's status changes, oldest first. */

@@ -4,6 +4,7 @@ import com.vijay.mall.common.persistence.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
@@ -27,6 +28,12 @@ class OrderItemEntity extends BaseEntity {
   @Column(name = "image_url") String imageUrl;
   @Column(name = "earns_coins_snapshot") boolean earnsCoins;
   @Column(name = "coin_redeemable_snapshot") boolean coinRedeemable;
+  /** The GST rate, HSN and split of this line at order time; all null for an order placed before GST was recorded. */
+  BigDecimal gstPercent;
+  String hsn;
+  Long taxablePaise;
+  Long cgstPaise;
+  Long sgstPaise;
 
   /** For JPA. */
   protected OrderItemEntity() {}

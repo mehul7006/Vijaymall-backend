@@ -210,6 +210,9 @@ Units first (`/admin/units`), categories (`/admin/categories`), then products (`
 
 **AdminProduct** (admin endpoints): all Product fields plus `qtyOnHand` (int, exact stock), `lowThreshold` (int, alert level), `active` (boolean), `hotStart`/`hotEnd` (instant|null). Here `hotSale` is the raw flag (not time-adjusted) and `inStock`/`qtyAvailable` mirror the Product meaning. Full field list: `id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl, inStock, qtyAvailable, hotSale, earnsCoins, coinRedeemable, qtyOnHand, lowThreshold, active, hotStart, hotEnd, productGroupId, rating, reviewCount`.
 
+**Admin product rows carry the GST (Addendum 10).** `GET /admin/products` rows and `GET /admin/products/{id}` have, next to every AdminProduct field, `gstPercent` (number, `0`, `0.25`, `1.5` ... as saved in the counter details), `hsn` (string, `""` when none) and `gstConfigured` (boolean). `gstConfigured: false` means nobody saved a rate for that product: it shows `0` and `""`, so show a "GST not set" badge instead of a real 0%. The values are read fresh on every call (not from the list cache), so after `PUT /admin/products/{id}/pos` the next list shows the new rate at once. Create, update and patch answers are unchanged (plain AdminProduct); read `GET /admin/products/{id}` for the rate.
+
+
 **Review**: `{ id: uuid, rating: int 1..5, comment: string (may be ""), reviewer: string (first name only, "Customer" when the user has no name), createdAt: instant, verified: boolean (true when written for a delivered order) }`.
 
 **Category**: `{ id: uuid, nameEn: string, nameGu: string, imageUrl: string|null, sortOrder: int }`.

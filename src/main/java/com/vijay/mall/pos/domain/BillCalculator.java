@@ -65,11 +65,7 @@ public final class BillCalculator {
         }
         long[] gross = drafts.stream().mapToLong(Draft::linePaise).toArray();
         long subtotal = Arrays.stream(gross).sum();
-        long[] afterCoupon = IntStream.range(0, gross.length)
-                .mapToLong(i -> gross[i] - Math.min(Math.max(0, couponByLine[i]), gross[i])).toArray();
-        long remaining = Arrays.stream(afterCoupon).sum();
-        long other = Math.max(0, Math.min(otherDiscount, remaining));
-        long[] net = GstCalculator.netAfterDiscount(afterCoupon, other);
+        long[] net = GstCalculator.netPerLine(gross, couponByLine, Arrays.stream(couponByLine).sum(), otherDiscount);
         long applied = subtotal - Arrays.stream(net).sum();
         List<Line> lines = IntStream.range(0, drafts.size()).mapToObj(i -> {
             Draft d = drafts.get(i);

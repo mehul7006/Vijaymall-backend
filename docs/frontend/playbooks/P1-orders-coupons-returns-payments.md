@@ -92,7 +92,7 @@ Cart screen fields (what the app holds and sends):
 
 Screen elements: line list (image, name by language, `unitLabel`, stepper capped at 99), coupon box + "See offers", coin selector (None / All / Percent slider), fulfilment toggle, price summary, warnings strip, "Place order".
 
-Price summary rows come straight from the quote: `subtotalPaise`, `couponDiscountPaise`, `coinDiscountPaise`, `deliveryFeePaise`, `totalPaise`, `coinsToEarn`.
+Price summary rows come straight from the quote: `subtotalPaise`, `couponDiscountPaise`, `coinDiscountPaise`, `deliveryFeePaise`, `totalPaise`, `coinsToEarn`. The GST by slab comes from `gstSlabs[]` and the four `...TotalPaise` fields (Prices include GST; the delivery fee is outside the slabs; see Addendum 10 of `20-orders-payments-admin-config.md`).
 
 ### 1.4 API sequence
 
@@ -164,12 +164,14 @@ class QuoteLine {
   final int qty; final int unitPricePaise, lineTotalPaise, couponDiscountPaise;
   final bool coinRedeemable, earnsCoins;
   final String? flashSaleId; final int listPricePaise, flashDiscountPaise; // section 4
+  final num gstPercent; final String hsn; final int taxablePaise, cgstPaise, sgstPaise; final bool gstConfigured; // GST, see Addendum 10 in 20-orders-payments-admin-config.md
 }
 class CategoryDiscount { final String categoryId; final int subtotalPaise, discountPaise; }
 class Quote {
   final List<QuoteLine> lines; final int subtotalPaise; final String? couponCode;
   final int couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise, coinsToEarn;
   final List<String> warnings; final List<CategoryDiscount> couponByCategory; // empty without a coupon discount
+  final int taxableTotalPaise, cgstTotalPaise, sgstTotalPaise, taxTotalPaise; final List<GstSlab> gstSlabs; // delivery fee is in no slab
 }
 ```
 
@@ -574,8 +576,9 @@ Order detail `GET /orders/{id}` (`OrderView`):
 | `status` | enum | `PAYMENT_PENDING, PLACED, CONFIRMED, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, PICKED_UP, CANCELLED` |
 | `fulfilment` | `DELIVERY` / `PICKUP` | decides the last steps |
 | `paymentMethod`, `paymentStatus` | `COD`/`ONLINE`; `NONE`/`INITIATED`/`CAPTURED`/`REFUNDED`/`FAILED` | |
-| `items[]` | `productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, couponDiscountPaise, imageUrl?` | frozen at order time. `imageUrl` is a snapshot (nullable). A flash product can appear as two rows. |
+| `items[]` | `productId, name, qty, unitPricePaise, lineTotalPaise, nameGu, unitLabel, couponDiscountPaise, imageUrl?, gstPercent?, hsn?, taxablePaise?, cgstPaise?, sgstPaise?` (the GST fields are null on orders placed before GST was recorded) | frozen at order time. `imageUrl` is a snapshot (nullable). A flash product can appear as two rows. |
 | money | `subtotalPaise, couponCode?, couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise, totalPaise` | same as the quote at order time |
+| GST | `gstRecorded, taxableTotalPaise?, cgstTotalPaise?, sgstTotalPaise?, taxTotalPaise?, gstSlabs[]` | frozen at order time; `gstRecorded:false`, nulls and `[]` for old orders. Same fields on the list rows. |
 | `coinsEarned` | int | credited on DELIVERED/PICKED_UP; always `0` once CANCELLED |
 | `address` | `{id,label,line1,area,pincode,isDefault}` or null | snapshot; null for pickup |
 | `paymentSession` | object or null | only while `PAYMENT_PENDING` and the attempt is open |

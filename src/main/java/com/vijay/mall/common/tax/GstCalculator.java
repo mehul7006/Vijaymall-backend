@@ -52,4 +52,26 @@ public final class GstCalculator {
         long[] d = allocate(Math.min(discount, Arrays.stream(lines).sum()), lines);
         return IntStream.range(0, lines.length).mapToLong(i -> lines[i] - d[i]).toArray();
     }
+
+    /**
+     * Net payable per line when a coupon (already split per line) and then another discount (coins, a manual discount) come off.
+     * The coupon share of a line never exceeds the line; the other discount (capped at what is left) is spread over what every line
+     * still costs. When the coupon has no usable split (missing, wrong size, or not adding up to {@code couponDiscount}) the whole
+     * discount is spread over the lines at once.
+     *
+     * @param gross the line amounts before any discount
+     * @param couponShares the coupon's share of each line in the same order, or {@code null} when there is no split
+     * @param couponDiscount the coupon discount of the whole basket
+     * @param otherDiscount coins and any other discount, spread over what every line still costs
+     */
+    public static long[] netPerLine(long[] gross, long[] couponShares, long couponDiscount, long otherDiscount) {
+        boolean split = couponShares != null && couponShares.length == gross.length && Arrays.stream(couponShares).sum() == couponDiscount;
+        if (!split) {
+            return netAfterDiscount(gross, Math.max(0, Math.min(couponDiscount + otherDiscount, Arrays.stream(gross).sum())));
+        }
+        long[] afterCoupon = IntStream.range(0, gross.length)
+                .mapToLong(i -> gross[i] - Math.min(Math.max(0, couponShares[i]), gross[i])).toArray();
+        long remaining = Arrays.stream(afterCoupon).sum();
+        return netAfterDiscount(afterCoupon, Math.max(0, Math.min(otherDiscount, remaining)));
+    }
 }

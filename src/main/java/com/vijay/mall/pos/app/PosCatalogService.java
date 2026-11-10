@@ -2,6 +2,7 @@ package com.vijay.mall.pos.app;
 
 import java.math.BigDecimal;
 import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.ProductGst;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.ProductData;
@@ -282,6 +283,12 @@ public class PosCatalogService {
 
   /** Product lookups by id for pricing. */
   public Map<UUID, ProductPos> attributesFor(Collection<UUID> ids) { return repo.forProducts(ids); }
+
+  /**
+   * The GST rate and HSN of many products in one query (for quotes and admin lists). A product with no saved counter details comes
+   * back as the default 0% / no HSN with {@code configured} false.
+   */
+  public Map<UUID, ProductGst> gstFor(Collection<UUID> ids) { return repo.gstFor(ids); }
 
   Map<UUID, ProductData> productsById(Collection<UUID> ids) {
     return catalog.posProducts(ids).stream().collect(Collectors.toMap(ProductData::id, Function.identity()));

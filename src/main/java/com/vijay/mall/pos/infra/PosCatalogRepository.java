@@ -1,6 +1,7 @@
 package com.vijay.mall.pos.infra;
 
 import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.ProductGst;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.SoldBy;
 import java.time.Instant;
@@ -51,6 +52,17 @@ public class PosCatalogRepository {
   /** The products among {@code ids} that really have a saved row (the others only get the defaults from {@link #forProducts}). */
   public Set<UUID> configured(Collection<UUID> ids) {
     return ids.isEmpty() ? Set.of() : Set.copyOf(pos.configuredIds(ids));
+  }
+
+  /**
+   * GST rate and HSN of many products in one query. A product with no saved row is {@link ProductGst#UNSET} (not configured), so
+   * the caller can tell "0% on purpose" from "never set".
+   */
+  public Map<UUID, ProductGst> gstFor(Collection<UUID> ids) {
+    if (ids.isEmpty()) return Map.of();
+    Map<UUID, ProductGst> found = pos.byIds(ids).stream().collect(Collectors.toMap(e -> e.productId,
+        e -> new ProductGst(GstRates.normalize(e.gstPercent), e.hsn == null ? "" : e.hsn, true)));
+    return ids.stream().distinct().collect(Collectors.toMap(Function.identity(), id -> found.getOrDefault(id, ProductGst.UNSET)));
   }
 
   /** Creates or updates the counter attributes of a product. */

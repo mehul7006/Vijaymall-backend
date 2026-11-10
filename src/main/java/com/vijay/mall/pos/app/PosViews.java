@@ -2,6 +2,7 @@ package com.vijay.mall.pos.app;
 
 import java.math.BigDecimal;
 import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.GstSlab;
 import com.vijay.mall.inventory.domain.LotInfo;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
@@ -99,19 +100,36 @@ public final class PosViews {
   public record Rung(List<RungLine> lines) {}
 
   /**
-   * One priced line of a bill in paise: gross line amount, discount share, net amount and the GST percent applied.
+   * One priced line of a bill in paise: gross line amount, discount share, net amount, the GST percent applied and the split of the net
+   * amount into taxable value, CGST and SGST (the same figures the finished sale stores).
    */
   public record BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
-                         long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent) {}
+                         long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, long taxablePaise, long cgstPaise,
+                         long sgstPaise) {
+    /** A line whose GST split is not shown. */
+    public BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
+                    long discountPaise, long netPaise, BigDecimal gstPercent) {
+      this(productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, 0, 0, 0);
+    }
+  }
 
   /**
    * A priced basket: lines, coupon and coin discounts, round-off, total, GST split, coins that would be earned and
-   * the customer's coin balance, all money in paise.
+   * the customer's coin balance, all money in paise. {@code gstSlabs} has one entry per GST rate on the bill, lowest rate first; its amounts
+   * add up to {@code taxablePaise}, {@code cgstPaise} and {@code sgstPaise}.
    */
   public record BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                          int coinsUsed, long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise,
                          long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings, long roundOffPaise,
-                         long manualDiscountPaise) {
+                         long manualDiscountPaise, List<GstSlab> gstSlabs) {
+    /** A bill that shows no GST slabs. */
+    public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
+                    long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
+                    List<String> warnings, long roundOffPaise, long manualDiscountPaise) {
+      this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise,
+          coinsToEarn, customerCoinBalance, warnings, roundOffPaise, manualDiscountPaise, List.of());
+    }
+
     /** A bill with no manual discount. */
     public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
                     long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,

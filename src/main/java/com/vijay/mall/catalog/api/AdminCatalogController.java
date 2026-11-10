@@ -5,12 +5,15 @@ import com.vijay.mall.catalog.app.ImageStore;
 import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminCategory;
 import com.vijay.mall.catalog.domain.AdminProduct;
+import com.vijay.mall.catalog.domain.AdminProductRow;
 import com.vijay.mall.catalog.domain.HotBanner;
 import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.common.security.CurrentUser;
+import com.vijay.mall.common.tax.ProductGst;
+import com.vijay.mall.pos.app.PosCatalogService;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -140,11 +143,13 @@ public class AdminCatalogController {
 
   private final CatalogService catalog;
   private final ImageStore images;
+  private final PosCatalogService pos;
 
-  /** Creates the controller with the catalog service and the image store used for product pictures. */
-  public AdminCatalogController(CatalogService catalog, ImageStore images) {
+  /** Creates the controller with the catalog service, the image store used for product pictures and the pos service that holds GST rates. */
+  public AdminCatalogController(CatalogService catalog, ImageStore images, PosCatalogService pos) {
     this.catalog = catalog;
     this.images = images;
+    this.pos = pos;
   }
 
   /**
@@ -159,7 +164,7 @@ public class AdminCatalogController {
    * @param size page size (clamped by the service)
    */
   @GetMapping("/products")
-  public Page<AdminProduct> list(@RequestParam(required = false) String q,
+  public Page<AdminProductRow> list(@RequestParam(required = false) String q,
                                  @RequestParam(required = false) UUID categoryId,
                                  @RequestParam(required = false) Boolean hotSale,
                                  @RequestParam(required = false) Boolean active,
@@ -167,7 +172,10 @@ public class AdminCatalogController {
                                  @RequestParam(required = false) String sort,
                                  @RequestParam(defaultValue = "0") int page,
                                  @RequestParam(defaultValue = "20") int size) {
-    return catalog.adminList(q, categoryId, hotSale, active, lowStock, sort, page, size);
+    Page<AdminProduct> found = catalog.adminList(q, categoryId, hotSale, active, lowStock, sort, page, size);
+    // GST is read fresh for the page in one query: the list itself may come from the catalog cache, the rates must never be stale
+    Map<UUID, ProductGst> gst = pos.gstFor(found.items().stream().map(AdminProduct::id).toList());
+    return found.withItems(found.items().stream().map(p -> AdminProductRow.of(p, gst.getOrDefault(p.id(), ProductGst.UNSET))).toList());
   }
 
   /**
@@ -185,9 +193,15 @@ public class AdminCatalogController {
     }, p -> p.id().toString(), ref -> catalog.adminGet(UUID.fromString(ref)));
   }
 
-  /** Returns one product with its stock numbers; 404 {@code NOT_FOUND} when the id is unknown. */
+  /**
+   * Returns one product with its stock numbers and its saved GST rate and HSN ({@code gstConfigured} false when none was saved);
+   * 404 {@code NOT_FOUND} when the id is unknown.
+   */
   @GetMapping("/products/{id}")
-  public AdminProduct get(@PathVariable UUID id) { return catalog.adminGet(id); }
+  public AdminProductRow get(@PathVariable UUID id) {
+    AdminProduct p = catalog.adminGet(id);
+    return AdminProductRow.of(p, pos.gstFor(List.of(id)).getOrDefault(id, ProductGst.UNSET));
+  }
 
   /**
    * Replaces a product's details, stock level and alert threshold. PUT means replace: send the whole form, and use PATCH for a partial edit.
