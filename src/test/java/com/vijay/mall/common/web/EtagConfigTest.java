@@ -13,9 +13,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 class EtagConfigTest {
   @Test
-  void onlyTheFourCatalogListsAreRegistered() {
+  void onlyTheCatalogListsAndTheGstMasterReadsAreRegisteredAndNeverTheSuggest() {
     var reg = new EtagConfig().catalogEtagFilter();
-    assertThat(reg.getUrlPatterns()).containsExactlyInAnyOrder("/api/v1/categories", "/api/v1/product-groups", "/api/v1/units", "/api/v1/hot-sale");
+    assertThat(reg.getUrlPatterns()).containsExactlyInAnyOrder("/api/v1/categories", "/api/v1/product-groups", "/api/v1/units", "/api/v1/hot-sale",
+        "/api/v1/gst/hsn", "/api/v1/gst/hsn/*", "/api/v1/gst/rates");
+    assertThat(reg.getUrlPatterns()).doesNotContain("/api/v1/gst/suggest");
   }
 
   @Test
