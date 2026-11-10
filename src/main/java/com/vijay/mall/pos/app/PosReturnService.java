@@ -201,10 +201,17 @@ public class PosReturnService {
                             long otherSharePaise, long clawbackPaise, long refundPaise, long taxablePaise, long cgstPaise,
                             long sgstPaise) {}
 
-  /** What a return would refund and reverse for GST, without recording it. */
+  /**
+   * What a return would refund and reverse for GST, without recording it. The coin and credit figures are what the real return
+   * will do: {@code coinsClawedBack} earned coins taken back (at most what the customer still has unspent) worth
+   * {@code coinsClawedBackPaise}, {@code coinsRestored} spent coins given back worth {@code coinsRestoredPaise},
+   * {@code creditAdjustmentPaise} the part of the refund that lowers what the customer owes on a credit bill instead of being
+   * paid out, and {@code payOutPaise} the rest, which is paid out.
+   */
   public record Preview(UUID saleId, String invoiceNo, String couponPolicy, long refundPaise, long couponShareRemovedPaise,
                         long otherShareRemovedPaise, long couponClawbackPaise, long taxablePaise, long cgstPaise, long sgstPaise,
-                        List<PreviewLine> lines) {}
+                        List<PreviewLine> lines, int coinsClawedBack, long coinsClawedBackPaise, int coinsRestored,
+                        long coinsRestoredPaise, long creditAdjustmentPaise, long payOutPaise) {}
 
   /**
    * Shows the exact refund of a return, per line, with the coupon share that leaves with the units, coins and counter discount
@@ -218,7 +225,8 @@ public class PosReturnService {
     SaleRecord sale = sales.find(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
     checkWindow(sale, admin);
     Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
-    Worked w = work(sale, byId, merge(in.items(), byId));
+    Plan plan = plan(sale, byId, merge(in.items(), byId));
+    Worked w = plan.worked();
     CouponReturnMath.Plan m = w.math();
     List<PreviewLine> lines = new ArrayList<>();
     for (ReturnItemRecord r : w.items()) {
@@ -227,24 +235,23 @@ public class PosReturnService {
       lines.add(new PreviewLine(i.id(), i.productId(), i.name(), r.qty(), m.grossPaise()[k], m.couponSharePaise()[k], m.otherSharePaise()[k],
           m.clawbackPaise()[k], r.refundPaise(), r.taxablePaise(), r.cgstPaise(), r.sgstPaise()));
     }
+    int clawed = sale.customerId() == null ? 0 : wallet.previewClawback(sale.customerId(), plan.claw());
+    long creditAdjust = sale.customerId() == null || sale.creditPaise() == 0 ? 0
+        : credit.previewReturnAdjustment(sale.customerId(), saleId, sale.creditPaise(), plan.refundTotal());
     return new Preview(saleId, sale.invoiceNo(), w.policy(), lines.stream().mapToLong(PreviewLine::refundPaise).sum(),
         lines.stream().mapToLong(PreviewLine::couponSharePaise).sum(), lines.stream().mapToLong(PreviewLine::otherSharePaise).sum(),
         m.clawbackTotalPaise(), lines.stream().mapToLong(PreviewLine::taxablePaise).sum(),
-        lines.stream().mapToLong(PreviewLine::cgstPaise).sum(), lines.stream().mapToLong(PreviewLine::sgstPaise).sum(), lines);
+        lines.stream().mapToLong(PreviewLine::cgstPaise).sum(), lines.stream().mapToLong(PreviewLine::sgstPaise).sum(), lines,
+        clawed, wallet.coinValuePaise(clawed), plan.restore(), wallet.coinValuePaise(plan.restore()), creditAdjust, plan.refundTotal() - creditAdjust);
   }
 
-  private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
-    SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
-    checkWindow(sale, admin);
-    Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
-    Map<UUID, Integer> wanted = merge(in.items(), byId);
-    ReturnedSoFar prior = sales.returnedSoFar(saleId, sale.items());
+  /** The refund and the coin movement of a return, worked out before anything is changed: the one plan the return and its preview share. */
+  private record Plan(Worked worked, long refundTotal, int claw, int restore) {}
 
+  private Plan plan(SaleRecord sale, Map<UUID, SaleItemRecord> byId, Map<UUID, Integer> wanted) {
+    ReturnedSoFar prior = sales.returnedSoFar(sale.id(), sale.items());
     Worked worked = work(sale, byId, wanted);
-    List<ReturnItemRecord> items = worked.items();
-    long clawbackTotal = worked.math().clawbackTotalPaise();
-
-    long refundTotal = items.stream().mapToLong(ReturnItemRecord::refundPaise).sum();
+    long refundTotal = worked.items().stream().mapToLong(ReturnItemRecord::refundPaise).sum();
     long grossReturned = wanted.entrySet().stream()
         .mapToLong(e -> ReturnMath.shareOfReturn(byId.get(e.getKey()).linePaise(), byId.get(e.getKey()).qty(),
             byId.get(e.getKey()).returnedQty(), e.getValue())).sum();
@@ -253,6 +260,21 @@ public class PosReturnService {
         : ReturnMath.coinsDelta(sale.coinsEarned(), cumulativeGross, sale.subtotalPaise(), prior.coinsClawedBack());
     int restore = sale.customerId() == null ? 0
         : ReturnMath.coinsDelta(sale.coinsUsed(), cumulativeGross, sale.subtotalPaise(), prior.coinsRestored());
+    return new Plan(worked, refundTotal, claw, restore);
+  }
+
+  private UUID doRefund(UUID cashierId, boolean admin, UUID saleId, String idemKey, ReturnInput in) {
+    SaleRecord sale = sales.lockAndFind(saleId).orElseThrow(() -> ApiException.notFound("Bill"));
+    checkWindow(sale, admin);
+    Map<UUID, SaleItemRecord> byId = sale.items().stream().collect(Collectors.toMap(SaleItemRecord::id, Function.identity()));
+    Map<UUID, Integer> wanted = merge(in.items(), byId);
+    Plan plan = plan(sale, byId, wanted);
+    Worked worked = plan.worked();
+    List<ReturnItemRecord> items = worked.items();
+    long clawbackTotal = worked.math().clawbackTotalPaise();
+    long refundTotal = plan.refundTotal();
+    int claw = plan.claw();
+    int restore = plan.restore();
 
     Instant now = clock.instant();
     // Goods bought on credit come back first against what the customer still owes; only the rest is paid out.

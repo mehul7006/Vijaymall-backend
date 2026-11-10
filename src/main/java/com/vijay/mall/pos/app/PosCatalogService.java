@@ -1,5 +1,7 @@
 package com.vijay.mall.pos.app;
 
+import java.math.BigDecimal;
+import com.vijay.mall.pos.domain.GstRates;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
@@ -39,9 +41,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** Finds products at the counter (scan or search) and keeps their counter attributes and barcodes. */
 @Service
 public class PosCatalogService {
-  /** The GST percentages the system accepts for a product (also what an offline till may send). */
-  public static final List<Integer> GST_RATES = List.of(0, 3, 5, 12, 18, 28);
-
   private final CatalogService catalog;
   private final PosCatalogRepository repo;
   private final ShopService shop;
@@ -194,11 +193,21 @@ public class PosCatalogService {
         repo.barcodesOf(productId));
   }
 
-  /** Saves counter attributes and replaces the barcodes. Weighed items become counter-only. */
+  /**
+   * Saves counter attributes and replaces the barcodes. Weighed items become counter-only.
+   *
+   * <p>{@code gstPercent} and {@code hsn} are optional and follow one rule: a value that is left out, null (or, for the HSN, blank) keeps
+   * what is stored; an explicit value wins. When nothing is stored yet (no counter attributes: rate 0 and no HSN) the defaults 0 and
+   * an empty HSN apply. An untouched field of an edit form therefore never wipes a saved rate or HSN. The rate must be one of
+   * {@link GstRates#ALLOWED}.
+   */
   @Transactional
-  public PosAttributes save(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, List<String> barcodes,
+  public PosAttributes save(UUID productId, SoldBy soldBy, String plu, BigDecimal gstPercentIn, String hsn, List<String> barcodes,
                             UUID actor) {
     catalog.adminGet(productId);
+    ProductPos stored = repo.find(productId).orElse(ProductPos.defaults(productId));
+    BigDecimal gstPercent = gstPercentIn == null ? stored.gstPercent() : GstRates.require(gstPercentIn, "gstPercent");
+    String hsnToSave = hsn == null || hsn.isBlank() ? stored.hsn() : hsn.strip();
     String code = plu == null || plu.isBlank() ? null : plu.trim();
     boolean digits = code != null && code.matches("\\d{1,6}");
     if (soldBy == SoldBy.WEIGHT && (code == null || !digits)) {
@@ -206,7 +215,6 @@ public class PosCatalogService {
     }
     if (code != null && !digits) throw ApiException.validation("plu", "digits only, up to 6");
     if (code != null) code = normalizePlu(code);
-    if (!GST_RATES.contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
     List<String> codes = barcodes == null ? List.of() : barcodes.stream().map(String::strip).filter(c -> !c.isEmpty()).distinct().toList();
     if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
       throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");
@@ -219,12 +227,12 @@ public class PosCatalogService {
     }
     Optional<ProductPos> samePlu = code == null ? Optional.empty() : repo.findByPlu(code).filter(x -> !x.productId().equals(productId));
     if (samePlu.isPresent()) throw ApiException.conflict("PLU_TAKEN", "Item code already used by another product", Map.of("plu", code));
-    repo.save(new ProductPos(productId, soldBy, code, gstPercent, hsn == null ? "" : hsn.strip()), clock.instant());
+    repo.save(new ProductPos(productId, soldBy, code, gstPercent, hsnToSave == null ? "" : hsnToSave), clock.instant());
     repo.replaceBarcodes(productId, codes, clock.instant()).ifPresent(taken -> {
       throw ApiException.conflict("BARCODE_TAKEN", "Barcode already belongs to another product", Map.of("barcode", taken));
     });
     catalog.setPosOnly(productId, soldBy == SoldBy.WEIGHT);
-    audit.log(actor, "UPDATE", "product_pos", productId, soldBy + " gst " + gstPercent + " barcodes " + codes.size());
+    audit.log(actor, "UPDATE", "product_pos", productId, soldBy + " gst " + GstRates.plain(gstPercent) + " barcodes " + codes.size());
     return attributes(productId);
   }
 

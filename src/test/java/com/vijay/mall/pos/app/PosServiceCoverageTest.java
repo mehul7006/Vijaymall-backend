@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -79,7 +80,7 @@ class PosServiceCoverageTest {
     when(shop.get()).thenReturn(PosTestData.shop());
     ProductData riceData = PosTestData.product(rice, "Rice", 5900, true);
     when(catalog.productsById(any())).thenReturn(Map.of(rice, riceData));
-    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006")));
+    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006")));
     when(counters.next("INVOICE", "2026-27")).thenReturn(42L);
     when(sales.findByIdem(anyString())).thenReturn(Optional.empty());
   }
@@ -157,8 +158,8 @@ class PosServiceCoverageTest {
 
   @Test void hold_quantityBoundsFollowHowTheProductIsSold() {
     UUID loose = UUID.randomUUID();
-    when(catalogMock.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006"),
-        loose, new ProductPos(loose, SoldBy.WEIGHT, "101", 5, "1701")));
+    when(catalogMock.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006"),
+        loose, new ProductPos(loose, SoldBy.WEIGHT, "101", GstRates.of(5), "1701")));
     when(holds.insert(any(), anyString(), any(), anyString(), any())).thenReturn(new PosRecords.HoldRecord(UUID.randomUUID(), cashier, "", null, "{}", NOW));
     service.hold(cashier, "", new Cart(List.of(new Item(rice, 9999), new Item(loose, 25000)), null, null, null, null));
     for (var bad : List.of(new Item(rice, 0), new Item(rice, 10000), new Item(loose, 100001), new Item(UUID.randomUUID(), -3))) {

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,13 +53,13 @@ class PosCatalogServiceCoverageTest {
         s.invoicePrefix(), s.receiptFooter(), "2", WeighedMode.PRICE_PAISE));
     ProductData data = PosTestData.product(cheap, "Chaff", 10, true); // Rs 0.10 a kilo
     when(catalog.posProducts(any())).thenReturn(List.of(data));
-    when(repo.forProducts(any())).thenReturn(Map.of(cheap, new ProductPos(cheap, SoldBy.WEIGHT, "123450", 0, "")));
+    when(repo.forProducts(any())).thenReturn(Map.of(cheap, new ProductPos(cheap, SoldBy.WEIGHT, "123450", GstRates.of(0), "")));
     when(inventory.stocks(any())).thenReturn(Map.of(cheap, new InventoryRepository.Stock(cheap, 1000000, 5)));
     when(repo.barcodesOf(any())).thenReturn(List.of());
   }
 
   @Test void scan_priceLabelThatWouldBeOverOneHundredKilos_isOutOfRange() {
-    when(repo.findByPlu("123450")).thenReturn(Optional.of(new ProductPos(cheap, SoldBy.WEIGHT, "123450", 0, "")));
+    when(repo.findByPlu("123450")).thenReturn(Optional.of(new ProductPos(cheap, SoldBy.WEIGHT, "123450", GstRates.of(0), "")));
     assertThatThrownBy(() -> service.scan(ean("212345099999"))) // Rs 999.99 of a Rs 0.10/kg item is 9999 kg
         .isInstanceOf(ApiException.class).hasMessageContaining("out of range");
   }
@@ -67,10 +68,10 @@ class PosCatalogServiceCoverageTest {
     UUID actor = UUID.randomUUID();
     when(catalog.adminGet(cheap)).thenReturn(mock(AdminProduct.class));
     when(repo.findByPlu("123450")).thenReturn(Optional.empty());
-    when(repo.find(cheap)).thenReturn(Optional.of(new ProductPos(cheap, SoldBy.WEIGHT, "123450", 0, "")));
+    when(repo.find(cheap)).thenReturn(Optional.of(new ProductPos(cheap, SoldBy.WEIGHT, "123450", GstRates.of(0), "")));
     when(repo.replaceBarcodes(eq(cheap), any(), any())).thenReturn(Optional.empty());
     // 13 characters but not the scale prefix, and the scale prefix but not 13 characters
-    var saved = service.save(cheap, SoldBy.WEIGHT, "123450", 0, "1", List.of("8901234567890", "2ABC"), actor);
+    var saved = service.save(cheap, SoldBy.WEIGHT, "123450", GstRates.of(0), "1", List.of("8901234567890", "2ABC"), actor);
     assertThat(saved.soldBy()).isEqualTo(SoldBy.WEIGHT);
     assertThat(saved.posOnly()).isTrue();
     verify(repo).replaceBarcodes(cheap, List.of("8901234567890", "2ABC"), NOW);

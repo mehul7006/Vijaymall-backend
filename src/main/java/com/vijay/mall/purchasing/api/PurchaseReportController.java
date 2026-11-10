@@ -1,5 +1,6 @@
 package com.vijay.mall.purchasing.api;
 
+import java.math.BigDecimal;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.purchasing.app.PurchaseReportService;
 import java.time.LocalDate;
@@ -24,7 +25,7 @@ public class PurchaseReportController {
   public Page<PurchaseReportService.RegisterView> register(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to, @RequestParam(required = false) UUID supplierId,
-      @RequestParam(required = false) UUID productId, @RequestParam(required = false) Integer gstRate, @RequestParam(defaultValue = "0") int page,
+      @RequestParam(required = false) UUID productId, @RequestParam(required = false) BigDecimal gstRate, @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
     return reports.register(from, to, supplierId, productId, gstRate, page, size);
   }

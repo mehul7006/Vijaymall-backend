@@ -1,5 +1,7 @@
 package com.vijay.mall.pos.domain;
 
+import com.vijay.mall.common.web.GstRateJson;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -26,5 +28,5 @@ public record CreditNoteData(
 
 
     /** One returned line: the name, how it is sold, quantity (grams for a weighed item), GST percent and the refund for it. */
-    public record Line(String name, SoldBy soldBy, int qty, int gstPercent, long refundPaise) { }
+    public record Line(String name, SoldBy soldBy, int qty, @GstRateJson BigDecimal gstPercent, long refundPaise) { }
 }

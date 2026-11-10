@@ -10,8 +10,8 @@ class ReceiptTextTest {
   private static ReceiptData sample(boolean extras) {
     return new ReceiptData("Vijay Super Mall", "12 Market Road Rajkot Gujarat", extras ? "9876543210" : "",
         extras ? "24ABCDE1234F1Z5" : "", "VSM/2026-27/000042", "27-10-2026 10:30", "Asha", extras ? "9000000001" : "",
-        List.of(new ReceiptLine("Basmati Rice 5kg premium long grain", SoldBy.UNIT, 2, 50000, 100000, 5),
-            new ReceiptLine("Tomato", SoldBy.WEIGHT, 1250, 4000, 5000, 0)),
+        List.of(new ReceiptLine("Basmati Rice 5kg premium long grain", SoldBy.UNIT, 2, 50000, 100000, GstRates.of(5)),
+            new ReceiptLine("Tomato", SoldBy.WEIGHT, 1250, 4000, 5000, GstRates.of(0))),
         105000, extras ? 5000 : 0, extras ? 1000 : 0, 99000, 94000, 2500, 2500,
         List.of(new ReceiptData.PaymentLine("CASH", 50000), new ReceiptData.PaymentLine("UPI", 49000)),
         extras ? 500 : 0, extras ? 9 : 0, "Thank you! Visit again.");
@@ -53,7 +53,7 @@ class ReceiptTextTest {
 
   private static ReceiptData withRoundOff(long roundOff) {
     return new ReceiptData("Shop", "Road", "", "", "INV-1", "01-01-2026", "Asha", "",
-        List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 10050, 10050, 0)), 10050, 0, 0, 10000, 10000, 0, 0,
+        List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 10050, 10050, GstRates.of(0))), 10050, 0, 0, 10000, 10000, 0, 0,
         List.of(new ReceiptData.PaymentLine("CASH", 10000)), 0, 0, "Thanks", 0, roundOff);
   }
 
@@ -64,7 +64,7 @@ class ReceiptTextTest {
   }
 
   @Test void shorterConstructorsDefaultTheMissingParts() {
-    var lines = List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 100, 100, 0));
+    var lines = List.of(new ReceiptLine("Rice", SoldBy.UNIT, 1, 100, 100, GstRates.of(0)));
     var pays = List.of(new ReceiptData.PaymentLine("CASH", 100));
     var noRound = new ReceiptData("S", "A", "", "", "I", "D", "C", "", lines, 100, 0, 0, 100, 100, 0, 0, pays, 0, 0, "F", 25);
     assertThat(noRound.manualDiscountPaise()).isEqualTo(25);

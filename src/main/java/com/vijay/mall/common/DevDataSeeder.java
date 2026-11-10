@@ -3,9 +3,11 @@ package com.vijay.mall.common;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.Category;
+import com.vijay.mall.payment.app.MoneyAccountService;
 import com.vijay.mall.pos.app.PosCatalogService;
 import com.vijay.mall.pos.app.StaffService;
 import com.vijay.mall.pos.domain.BarcodeParser;
+import com.vijay.mall.pos.domain.GstRates;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.promotion.app.PromotionService;
 import com.vijay.mall.promotion.domain.Coupon;
@@ -27,25 +29,31 @@ import org.springframework.stereotype.Component;
 public class DevDataSeeder implements CommandLineRunner {
   private static final Logger log = LoggerFactory.getLogger(DevDataSeeder.class);
 
-  
+  /** The counter accounts the till needs to show its UPI and card buttons: kind, name and identifier (all provider {@code manual}). */
+  private static final List<String[]> COUNTER_ACCOUNTS = List.of(new String[] {"UPI", "Counter UPI", ""},
+      new String[] {"CARD_TERMINAL", "Card machine", "DEV0001"});
+
   private final CatalogService catalog;
   private final WalletService wallet;
   private final PromotionService promotions;
   private final PosCatalogService posCatalog;
   private final StaffService staff;
+  private final MoneyAccountService accounts;
 
   /** Creates the seeder. */
   public DevDataSeeder(CatalogService catalog, WalletService wallet, PromotionService promotions,
-                       PosCatalogService posCatalog, StaffService staff) {
+                       PosCatalogService posCatalog, StaffService staff, MoneyAccountService accounts) {
     this.catalog = catalog;
     this.wallet = wallet;
     this.promotions = promotions;
     this.posCatalog = posCatalog;
     this.staff = staff;
+    this.accounts = accounts;
   }
 
   @Override
   public void run(String... args) {
+    seedCounterAccounts();
     if (!catalog.categories().isEmpty()) return;
     Category grocery = catalog.createCategory("Grocery", "કરિયાણું", 1, true);
     Category dairy = catalog.createCategory("Dairy", "ડેરી", 2, true);
@@ -72,16 +80,26 @@ public class DevDataSeeder implements CommandLineRunner {
     int[] gst = {5, 5, 5, 0, 5, 12, 18, 12, 5, 18, 18, 18};
     for (int i = 0; i < packs.length; i++) {
       String body = "89010000" + String.format("%04d", i + 1);
-      posCatalog.save(packs[i].id(), SoldBy.UNIT, null, gst[i], "", List.of(body + BarcodeParser.checkDigit(body)), null);
+      posCatalog.save(packs[i].id(), SoldBy.UNIT, null, GstRates.of(gst[i]), "", List.of(body + BarcodeParser.checkDigit(body)), null);
     }
     AdminProduct sugar = p(grocery, "Loose Sugar", "છૂટી ખાંડ", 5000, 4500, "kg", "per kg", false, 25000);
-    posCatalog.save(sugar.id(), SoldBy.WEIGHT, "101", 5, "1701", List.of(), null);
+    posCatalog.save(sugar.id(), SoldBy.WEIGHT, "101", GstRates.of(5), "1701", List.of(), null);
     staff.create("cashier@vijaysupermall.local", "Counter 1", null, false, null);
 
     wallet.createRule(new StoredRule(null, new CoinRule("Spend 1000 get 10", 100000, 10, CoinMode.PRO_RATA, 0),
         null, null, true), null);
     promotions.create(new Coupon(null, "FESTIVE50", Coupon.FLAT, 5000, 99900, 0, null, 0, 0, 0, null, null, true), null);
     log.info("Dev sample data created");
+  }
+
+  /** Adds the manual UPI account and card machine when no account of that name exists yet, so the till offers card and UPI; safe to run again. */
+  private void seedCounterAccounts() {
+    for (String[] a : COUNTER_ACCOUNTS) {
+      boolean exists = accounts.list(null, null, a[1], 0, 50).items().stream().anyMatch(x -> x.name().equalsIgnoreCase(a[1]));
+      if (exists) continue;
+      accounts.create(null, new MoneyAccountService.Input(a[1], a[0], "manual", a[2], null, null, "Dev sample data"));
+      log.info("Dev money account created: {}", a[1]);
+    }
   }
 
   private AdminProduct p(Category c, String en, String gu, long mrp, long price, String unit, String pack, boolean hot, int qty) {

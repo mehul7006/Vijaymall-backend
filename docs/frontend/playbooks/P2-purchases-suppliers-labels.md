@@ -64,7 +64,7 @@ ADMIN. No settings. Names are unique after trimming, collapsing runs of spaces a
 
 | field | type | required | validation / default |
 |---|---|---|---|
-| `q` | string query | no | matches name, phone, GSTIN (contains, any case; `%` and `_` are literal). Debounce 300 ms. |
+| `q` | string query | no | matches name, phone, GSTIN or e-mail (contains, any case; `%` and `_` are literal). Debounce 300 ms. |
 | `active` | bool query | no | omit = both; the purchase-form picker must send `active=true` |
 | `page`,`size` | int | no | 0 / 20 (max 50) |
 
@@ -79,6 +79,8 @@ Row shows `name`, `phone`, `gstin`, `purchaseCount`, `lastInvoiceNo` (`""` when 
 | `stateCode` | string | no | exactly 2 digits (400 "2 digit GST state code"); if `gstin` present it must equal `gstin[0..2]` (400 "does not match the state in the GSTIN (24)"); if left blank it is taken from the GSTIN | `""` |
 | `phone` | string | no | max 20, only digits, space, `+`, `-` (400 on `phone`) | `""` |
 | `address` | string | no | max 300 | `""` |
+| `email` | string | no | max 254; simple `name@host.tld` (no spaces, one `@`, a dot after it) else 400 on `email`; searchable with `q` | `""` |
+| `pincode` | string | no | exactly 6 digits else 400 on `pincode` | `""` |
 | `paymentTermsDays` | int | no | 0..365 (400 otherwise). Sending null on PUT resets it to **0** | 0 |
 
 Client mirror: uppercase GSTIN as typed; auto-fill `stateCode` from the first two GSTIN digits and make the field read-only while a GSTIN is present.
@@ -110,13 +112,13 @@ Client mirror: uppercase GSTIN as typed; auto-fill `stateCode` from the first tw
 ### 1.7 Dart models
 ```dart
 class Supplier {
-  final String id, name, phone, gstin, stateCode, address, lastInvoiceNo; // strings never null ("" when empty)
+  final String id, name, phone, gstin, stateCode, address, email, pincode, lastInvoiceNo; // strings never null ("" when empty)
   final int paymentTermsDays, purchaseCount, totalDuePaise, balancePaise, creditPaise;
   final bool active;
   final DateTime createdAt;
   final DateTime? lastPurchaseAt; // null when no purchases
 }
-class SupplierBody { String name; String? gstin, stateCode, phone, address; int? paymentTermsDays; }
+class SupplierBody { String name; String? gstin, stateCode, phone, address, email, pincode; int? paymentTermsDays; }
 ```
 
 ### 1.8 Acceptance
@@ -180,7 +182,7 @@ ADMIN. Settings that matter:
 | `productId` | uuid | yes | must exist (400 on `productId` "a product does not exist") | |
 | `qty` | int | yes | 1..1,000,000 | |
 | `freeQty` | int | no | >= 0; `qty + freeQty` <= 1,000,000 (400 on `freeQty`) | 0 |
-| `unitCostPaise` | int | yes | 0..100,000,000, invoice price **before tax**, whole paise | |
+| `unitCostPaise` | decimal number | yes | 0..100,000,000, invoice price **before tax**, paise with **at most 4 decimals** (JSON `5.5`, `5.5000` and `55` are fine; 5 decimals = 400 "at most 4 decimals" on `unitCostPaise`; missing = 400 "is required"). Returned without needless zeros (`55`, `5.5`). For a weighed product: qty in grams, cost per gram (see the weighed-products edge case in 2.6) | |
 | `discountPercent` | decimal | no | 0..100, max 2 decimals | |
 | `discountPaise` | int | no | >= 0, not above `qty*unitCostPaise`; give percent OR amount | |
 | `gstPercent` | int | no | one of 0,3,5,12,18,28 (400 on `gstPercent`) | the product's GST % |
@@ -231,12 +233,12 @@ Client mirror: restrict GST/freight GST dropdowns to the six rates; hide `discou
 **2.5.1 Is there a preview/compute endpoint?** No. There is no `/purchases/preview` or `/compute`. The server computes everything at save time. The app must therefore compute **nothing authoritative**: it must never send line totals, tax amounts, landed costs or the final total as facts (the request has no such fields). After saving, display only server figures.
 
 **2.5.2 What the app MAY compute (display-only estimate, label it "approx. - final amount is calculated by the server")**
-- `gross = qty * unitCostPaise` per line (this equals the response's `lineCostPaise`).
+- `gross = round_half_up(qty * unitCostPaise)` to whole paise per line (this equals the response's `lineCostPaise`; for a whole-number cost it is plain `qty * unitCostPaise`).
 - A running count of lines and of units `qty + freeQty`.
 - An optional approximate total using the rules below. If you implement it, it must use integer paise and the exact order; but the server's spreading of document discount and freight uses largest-remainder allocation, so an estimate can differ by a few paise. **Therefore do not send `expectedTotalPaise` from an estimate** unless the user typed the invoice grand total from the paper bill (see 2.5.6).
 
 Exact server order (for the estimate), all in paise with half-up rounding:
-1. `gross = qty*unitCostPaise` (free units cost nothing).
+1. `gross = round_half_up(qty*unitCostPaise)` (free units cost nothing).
 2. Line discount = `round(gross*discountPercent/100)` if percent > 0 else `discountPaise`. `afterLine = gross - lineDiscount`.
 3. Document discount = `round(sum(afterLine)*docDiscountPercent/100)` if percent > 0 else `docDiscountPaise`; spread over lines in proportion to `afterLine`; `taxable = afterLine - share`. (So the document discount lowers the GST base.)
 4. Per line: rate = 0 if mode is NONE else `gstPercent`; `gst = round(taxable*rate/100)`; `cess = round(taxable*cessPercent/100)` (0 under NONE). Intra-state: `cgst = floor(gst/2)`, `sgst = gst - cgst` (odd paisa to SGST); inter-state: all `igst`. `lineTotal = taxable + gst + cess`.
@@ -269,7 +271,7 @@ Landed unit cost (server) = (line taxable + non-creditable tax + line's share of
 - Double tap on Save: same key -> second call returns the first purchase (201) and stock is added once.
 - Timeout: retry identical body + key. Never regenerate the key on retry.
 - Same product twice: client must merge rows (server 400 on `items`).
-- Weighed products are stocked in grams; the purchase `qty` is then grams and unit cost semantics are undefined by the backend; warn or block weighed products if the shop sells by weight (unverified business rule).
+- Weighed products are stocked in grams: the purchase `qty` is grams and `unitCostPaise` is the cost **per gram**, which may be fractional (up to 4 decimals). Worked example, Rs 55 per kg, 12 kg: Rs 55/kg = 5500 paise/kg = 5.5 paise/gram, so send `qty: 12000, unitCostPaise: 5.5`; the line is 12000 x 5.5 = **66000 paise** (Rs 660). Let the user type the price per kg and divide by 1000 on the client (as a decimal string, not a double), or type per gram directly. Do not round the per-gram cost on the client: send up to 4 decimals.
 - Back-dated invoices: `invoiceDate` may be in the past; future dates 400. `dueDate` before `invoiceDate` 400.
 - Large purchases: max 200 lines; paginate nothing, but virtualize the list.
 - Offline: do not queue purchases without persisting the key + body together.
@@ -281,7 +283,7 @@ Landed unit cost (server) = (line taxable + non-creditable tax + line's share of
 ```dart
 enum GstMode { regular, composition, none }       // JSON REGULAR|COMPOSITION|NONE
 class PurchaseLineInput {
-  String productId; int qty; int unitCostPaise;
+  String productId; int qty; double unitCostPaise; // decimal, up to 4 places (use Decimal/string if you need exactness)
   int? freeQty, discountPaise, gstPercent, mrpPaise, sellingPricePaise;
   double? discountPercent, cessPercent;          // send as JSON numbers, max 2 decimals
   String? hsn, batchNo; String? expiryDate;      // yyyy-MM-dd
@@ -297,11 +299,12 @@ class PurchaseInput {
 }
 class PurchaseLookup {
   String productId, name, hsn; int gstPercent, mrpPaise, pricePaise, qtyOnHand;
-  int? lastPurchaseCostPaise; double? lastLandedUnitCostPaise; String? lastSupplierName, lastInvoiceDate, lastPurchaseId;
+  double? lastPurchaseCostPaise, lastLandedUnitCostPaise; String? lastSupplierName, lastInvoiceDate, lastPurchaseId;
 }
 ```
 
 ### 2.8 Acceptance
+- Given a weighed product bought at Rs 55/kg, 12 kg, When I send `qty: 12000, unitCostPaise: 5.5`, Then the line shows `unitCostPaise` 5.5, `lineCostPaise` 66000 and the total is 66000 paise; a cost with 5 decimals shows the error "at most 4 decimals" under the cost field.
 - Given product GST 18 %, REGULAR, qty 10 free 2, cost 10000, When I save, Then `taxablePaise==100000`, `cgstPaise==9000`, `sgstPaise==9000`, `totalCostPaise==118000`, line `landedUnitCostPaise==8333.3333`, and stock rises by 12.
 - Given a supplier GSTIN starting `27` and shop state `24`, When I save, Then `interState==true`, `igstPaise>0`, `cgstPaise+sgstPaise==0`.
 - Given `gstMode:"composition"` (lowercase), Then response `gstMode=="COMPOSITION"` and landed cost includes tax.
@@ -392,7 +395,7 @@ class PurchaseView {
 }
 class PurchaseItemView {
   final String id, productId, name, hsn, batchNo;
-  final int qty, freeQty, unitCostPaise, lineCostPaise /* qty*unitCost, gross */, lineDiscountPaise, docDiscountSharePaise,
+  final double unitCostPaise; final int qty, freeQty, lineCostPaise /* qty*unitCost, gross */, lineDiscountPaise, docDiscountSharePaise,
             taxablePaise, gstPercent, cgstPaise, sgstPaise, igstPaise, cessPaise, lineTotalPaise, returnedQty, landedTotalPaise;
   final double? discountPercent; final double cessPercent;
   final double landedUnitCostPaise, landedUnitCostRoundedPaise;  // FRACTIONAL
@@ -622,7 +625,7 @@ ADMIN.
 | field | type | required | validation |
 |---|---|---|---|
 | `amountPaise` | int | yes | >= 1; not above supplier `creditPaise` |
-| `mode` | enum | yes | `CASH`,`UPI`,`CARD`,`BANK`,`CHEQUE` (CREDIT_NOTE not allowed here; 400 on `mode`) |
+| `mode` | enum | yes | `CASH`,`UPI`,`CARD`,`BANK`,`CHEQUE`. `CREDIT_NOTE` is read as a string (max 20 chars) but is refused: 400 on `mode` with the message "CREDIT_NOTE is not allowed for refunds"; any other unknown mode: "must be CASH, UPI, CARD, BANK or CHEQUE" |
 | `reference` | string | no | max 80 |
 | `receivedAt` | instant | no | default now; not > 10 min in the future (400 on `receivedAt`) |
 | `moneyAccountId` | uuid | no | stored only |
@@ -644,7 +647,7 @@ Show the sheet only when the supplier's `creditPaise > 0`; default amount = `cre
    - `kind`: `PURCHASE` (+, document total, dated by invoice date), `PAYMENT` (-, any payment incl. CREDIT_NOTE ones), `CREDIT_USED` (+, the other half of a credit payment), `DEBIT_NOTE` (-, `reference` = DN number, `mode` ""), `SUPPLIER_REFUND` (+, `purchaseId` null, `invoiceNo` ""). Order within a day: PURCHASE, PAYMENT, CREDIT_USED, DEBIT_NOTE, SUPPLIER_REFUND, then time.
    - `amountPaise` signed (plus = shop owes more). `balancePaise` = running balance after the row, exact on every page (starts at `openingBalancePaise`). `closingBalancePaise` = opening + sum of **all** rows in range (not only the page). Without `to`, closing == supplier `balancePaise` == `totalDuePaise` == its `payables` line.
    - Sample from tests: bought 100000, paid 100000, returned 40000 -> opening for `from` later = -40000.
-3. Credit lookup for "pay with credit": list `GET /admin/purchases?supplierId=<id>&paymentStatus=PAID&size=50` and keep those with `duePaise < 0`, then `GET /admin/purchases/{id}/returns` and offer the notes of such purchases. Available on a note = `min(note.totalPaise - already used, -purchase.duePaise)`; the server enforces it and reports `details.availablePaise` on `CREDIT_EXCEEDS_AVAILABLE` (there is no endpoint listing "available per note", so let the server tell you). Then call section 4.4 step 3.
+3. Credit lookup for "pay with credit": use `GET /admin/suppliers/{id}/credit-notes?page=0&size=20` (size 1..50, newest first): rows `{ id, number, date, createdAt, purchaseId, invoiceNo, amountPaise, usedPaise, availablePaise }`; `id` is the `debitNoteId` for the payment, `availablePaise` is exactly what the credit payment would allow now (offer notes with `availablePaise > 0` and cap the amount at it; larger = 422 `CREDIT_EXCEEDS_AVAILABLE`); 404 unknown supplier. The older way, kept for reference: list `GET /admin/purchases?supplierId=<id>&paymentStatus=PAID&size=50` and keep those with `duePaise < 0`, then `GET /admin/purchases/{id}/returns` and offer the notes of such purchases. Available on a note = `min(note.totalPaise - already used, -purchase.duePaise)`; the server enforces it and reports `details.availablePaise` on `CREDIT_EXCEEDS_AVAILABLE` (there is no endpoint listing "available per note", so let the server tell you). Then call section 4.4 step 3.
 4. Refund: `POST /admin/suppliers/{id}/refunds`, `Idempotency-Key`:
 ```json
 { "amountPaise": 45000, "mode": "BANK", "reference": "UTR77", "moneyAccountId": null }

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import java.math.BigDecimal;
 import com.vijay.mall.common.persistence.BaseEntity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
@@ -18,7 +19,7 @@ class PosSaleItemEntity extends BaseEntity {
   long linePaise;
   long discountPaise;
   long netPaise;
-  int gstPercent;
+  BigDecimal gstPercent;
   String hsn;
   long taxablePaise;
   long cgstPaise;

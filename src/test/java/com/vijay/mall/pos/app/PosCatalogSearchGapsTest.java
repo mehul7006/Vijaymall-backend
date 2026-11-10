@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -52,7 +53,7 @@ class PosCatalogSearchGapsTest {
     service = new PosCatalogService(catalog, repo, mock(ShopService.class), inventory, mock(AuditService.class), Clock.fixed(NOW, ZoneOffset.UTC));
     when(repo.forProducts(any())).thenAnswer(i -> {
       Collection<UUID> ids = i.getArgument(0);
-      return ids.stream().collect(java.util.stream.Collectors.toMap(x -> x, x -> new ProductPos(x, SoldBy.UNIT, null, 5, "1006")));
+      return ids.stream().collect(java.util.stream.Collectors.toMap(x -> x, x -> new ProductPos(x, SoldBy.UNIT, null, GstRates.of(5), "1006")));
     });
     when(inventory.stocks(any())).thenReturn(Map.of(rice, new InventoryRepository.Stock(rice, 40, 5), dal, new InventoryRepository.Stock(dal, 9, 5)));
     when(repo.barcodesOf(any())).thenReturn(List.of("8901"));
@@ -79,14 +80,14 @@ class PosCatalogSearchGapsTest {
 
   @Test void anItemCodeIsMatchedWithoutLeadingZeros() {
     when(repo.productByBarcode("000101")).thenReturn(Optional.empty());
-    when(repo.findByPlu("101")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.WEIGHT, "101", 5, "")));
+    when(repo.findByPlu("101")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.WEIGHT, "101", GstRates.of(5), "")));
     when(catalog.posSearch(eq("000101"), eq(Set.of(dal)), isNull(), eq(0), eq(20))).thenReturn(page(product(dal, "Toor Dal", "kg", "")));
     assertThat(service.search("000101", 0, 20).items().get(0).productId()).isEqualTo(dal);
   }
 
   @Test void barcodeAndItemCodeOfTwoProductsBothComeBeforeNameMatches() {
     when(repo.productByBarcode("1234")).thenReturn(Optional.of(rice));
-    when(repo.findByPlu("1234")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.UNIT, "1234", 5, "")));
+    when(repo.findByPlu("1234")).thenReturn(Optional.of(new ProductPos(dal, SoldBy.UNIT, "1234", GstRates.of(5), "")));
     when(catalog.posSearch(eq("1234"), eq(Set.of(rice, dal)), isNull(), eq(0), eq(20))).thenReturn(page(product(rice, "A", "pc", ""), product(dal, "B", "pc", "")));
     assertThat(service.search("1234", 0, 20).total()).isEqualTo(2);
   }

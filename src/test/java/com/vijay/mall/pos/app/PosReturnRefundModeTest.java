@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -67,7 +68,7 @@ class PosReturnRefundModeTest {
   }
 
   private void billPaid(PaymentRecord... payments) {
-    var item = new PosRecords.SaleItemRecord(itemId, UUID.randomUUID(), "Soap", SoldBy.UNIT, 4, 2500, 10000, 1000, 9000, 12, "3401",
+    var item = new PosRecords.SaleItemRecord(itemId, UUID.randomUUID(), "Soap", SoldBy.UNIT, 4, 2500, 10000, 1000, 9000, GstRates.of(12), "3401",
         8036, 482, 482, 0);
     var sale = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, null, null, 10000, null, 0, 0, 1000, 9000, 8036, 482, 482, 0, null, 0,
         NOW, List.of(item), List.of(payments));

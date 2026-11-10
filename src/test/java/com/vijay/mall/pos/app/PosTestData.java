@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.SaleItemRecord;
@@ -28,7 +29,7 @@ final class PosTestData {
   }
 
   static SaleItemRecord item(UUID saleItem, UUID product, int qty, long unit, long net, int gst, int returned) {
-    return new SaleItemRecord(saleItem, product, "Item", SoldBy.UNIT, qty, unit, unit * qty, unit * qty - net, net, gst, "", net, 0, 0,
+    return new SaleItemRecord(saleItem, product, "Item", SoldBy.UNIT, qty, unit, unit * qty, unit * qty - net, net, GstRates.of(gst), "", net, 0, 0,
         returned);
   }
 

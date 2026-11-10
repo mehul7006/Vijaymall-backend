@@ -5,13 +5,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vijay.mall.common.audit.AuditService;
+import com.vijay.mall.common.cache.AppCaches;
 import com.vijay.mall.common.live.WalletChanged;
+import com.vijay.mall.wallet.domain.CoinMode;
+import com.vijay.mall.wallet.domain.CoinRule;
+import com.vijay.mall.wallet.domain.CoinSettings;
+import com.vijay.mall.wallet.domain.StoredRule;
 import com.vijay.mall.wallet.infra.WalletRepository;
 import java.time.Clock;
 import java.time.Instant;
@@ -22,8 +28,11 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 class WalletServiceCoverageTest {
@@ -111,5 +120,79 @@ class WalletServiceCoverageTest {
     verify(events).publishEvent(ev.capture());
     assertThat(ev.getValue().delta()).isEqualTo(-3);
     assertThat(ev.getValue().reason()).isEqualTo("EXPIRE");
+  }
+
+  // ----- only one earning rule may be active -----
+  private static StoredRule rule(UUID id, boolean active) {
+    return new StoredRule(id, new CoinRule("R", 100, 1, CoinMode.PRO_RATA, 0), null, null, active);
+  }
+
+  @Test void createRule_active_switchesEveryOtherRuleOffBeforeSavingAndEmptiesTheCache() {
+    UUID id = UUID.randomUUID();
+    AppCaches caches = mock(AppCaches.class);
+    service.setCaches(caches);
+    when(repo.insertRule(any())).thenReturn(id);
+    when(repo.rule(id)).thenReturn(Optional.of(rule(id, true)));
+    service.createRule(rule(null, true), user);
+    InOrder order = inOrder(repo);
+    order.verify(repo).deactivateAllRules();
+    order.verify(repo).insertRule(any());
+    verify(caches).invalidate(AppCaches.Name.COIN_RULES);
+  }
+
+  @Test void createRule_inactive_leavesTheActiveRuleAlone() {
+    UUID id = UUID.randomUUID();
+    when(repo.insertRule(any())).thenReturn(id);
+    when(repo.rule(id)).thenReturn(Optional.of(rule(id, false)));
+    service.createRule(rule(null, false), user);
+    verify(repo, never()).deactivateAllRules();
+    verify(repo, never()).deactivateOtherRules(any());
+  }
+
+  @Test void updateRule_active_switchesTheOthersOffBeforeSaving() {
+    UUID id = UUID.randomUUID();
+    when(repo.rule(id)).thenReturn(Optional.of(rule(id, true)));
+    service.updateRule(id, rule(null, true), user);
+    InOrder order = inOrder(repo);
+    order.verify(repo).deactivateOtherRules(id);
+    order.verify(repo).updateRule(eq(id), any());
+  }
+
+  @Test void updateRule_inactive_switchesNothingElse() {
+    UUID id = UUID.randomUUID();
+    when(repo.rule(id)).thenReturn(Optional.of(rule(id, true)));
+    service.updateRule(id, rule(null, false), user);
+    verify(repo, never()).deactivateOtherRules(any());
+    verify(repo).updateRule(eq(id), any());
+  }
+
+  @Test void ruleChange_insideATransaction_emptiesTheCacheAgainAfterTheCommit() {
+    AppCaches caches = mock(AppCaches.class);
+    service.setCaches(caches);
+    UUID id = UUID.randomUUID();
+    when(repo.rule(id)).thenReturn(Optional.of(rule(id, false)));
+    TransactionSynchronizationManager.initSynchronization();
+    try {
+      service.updateRule(id, rule(null, false), user);
+      verify(caches).invalidate(AppCaches.Name.COIN_RULES);
+      TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+      verify(caches, org.mockito.Mockito.times(2)).invalidate(AppCaches.Name.COIN_RULES);
+    } finally {
+      TransactionSynchronizationManager.clear();
+    }
+  }
+
+  // ----- what a return would take back -----
+  @Test void previewClawback_isCappedByTheOpenLotsAndTakesNothingWhenThereIsNothingToTake() {
+    when(repo.openCoins(user, NOW)).thenReturn(7L);
+    assertThat(service.previewClawback(user, 10)).isEqualTo(7);
+    assertThat(service.previewClawback(user, 5)).isEqualTo(5);
+    assertThat(service.previewClawback(user, 0)).isZero();
+    verify(repo, org.mockito.Mockito.times(2)).openCoins(user, NOW);
+  }
+
+  @Test void coinValuePaise_usesTheCoinValueSetting() {
+    when(repo.settings()).thenReturn(new CoinSettings(150, 50, 12));
+    assertThat(service.coinValuePaise(4)).isEqualTo(600);
   }
 }

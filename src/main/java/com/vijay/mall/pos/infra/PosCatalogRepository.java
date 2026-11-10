@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import com.vijay.mall.pos.domain.GstRates;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.SoldBy;
 import java.time.Instant;
@@ -28,7 +29,7 @@ public class PosCatalogRepository {
   public Instant lastChange() { return pos.lastChange(); }
 
   private static ProductPos toDomain(ProductPosEntity e) {
-    return new ProductPos(e.productId, SoldBy.valueOf(e.soldBy), e.plu, e.gstPercent, e.hsn);
+    return new ProductPos(e.productId, SoldBy.valueOf(e.soldBy), e.plu, GstRates.normalize(e.gstPercent), e.hsn);
   }
 
   /** The counter attributes saved for a product, if any. */

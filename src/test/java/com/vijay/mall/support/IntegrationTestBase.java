@@ -4,6 +4,7 @@ import com.vijay.mall.MallApplication;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
@@ -125,6 +126,21 @@ public abstract class IntegrationTestBase {
       all.add(Map.of("code", m.get("code"), "enabled", code.equals(m.get("code")) ? enabled : m.get("enabled")));
     }
     return call(HttpMethod.PUT, "/api/v1/admin/payment-methods", adminToken, all, null);
+  }
+
+  /**
+   * Only one coin rule can be active, so a test that switches rules leaves the sample data's rule off or deleted. Puts the dev sample
+   * rule back as the one active rule (through the API, so the rule cache is emptied too) for the tests that run after it.
+   */
+  @AfterEach
+  protected void restoreSampleCoinRule() {
+    List<Map<String, Object>> rule = jdbc.queryForList(
+        "select id::text id, spend_paise, coins, mode, min_order_paise, active from coin_rule where name = 'Spend 1000 get 10'");
+    boolean othersActive = jdbc.queryForObject("select count(*) from coin_rule where active and name <> 'Spend 1000 get 10'", Long.class) > 0;
+    if (rule.isEmpty() || (Boolean.TRUE.equals(rule.get(0).get("active")) && !othersActive)) return;
+    Map<String, Object> r = rule.get(0);
+    call(HttpMethod.PUT, "/api/v1/admin/coin-rules/" + r.get("id"), adminToken(), Map.of("name", "Spend 1000 get 10",
+        "spendPaise", r.get("spend_paise"), "coins", r.get("coins"), "mode", r.get("mode"), "minOrderPaise", r.get("min_order_paise"), "active", true), null);
   }
 
   /** GET that returns a JSON array of objects. */

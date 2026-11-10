@@ -28,8 +28,12 @@ import tools.jackson.databind.json.JsonMapper;
 public class NotificationService {
   private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
-  /** One page of the person's notifications, plus how many are still unread. */
-  public record Inbox(List<NotificationRepository.Row> items, int page, int size, long total, long unread) {}
+  /**
+   * One page of the person's notifications, plus how many are still unread. {@code total} is exact up to 10,000; beyond that
+   * {@code totalExact} is false and {@code hasMore} still says exactly whether another page follows.
+   */
+  public record Inbox(List<NotificationRepository.Row> items, int page, int size, long total, boolean totalExact, boolean hasMore,
+                      long unread) {}
 
   private final NotificationRepository repo;
   private final PushSender push;
@@ -208,7 +212,7 @@ public class NotificationService {
    */
   public Inbox inbox(UUID userId, int page, int size) {
     Page<NotificationRepository.Row> p = repo.page(userId, Math.max(0, page), Page.clampSize(size));
-    return new Inbox(p.items(), p.page(), p.size(), p.total(), repo.unread(userId));
+    return new Inbox(p.items(), p.page(), p.size(), p.total(), p.totalExact(), p.hasMore(), repo.unread(userId));
   }
 
   /** Marks one notification read. Reading it twice is fine; someone else's is "not found". */

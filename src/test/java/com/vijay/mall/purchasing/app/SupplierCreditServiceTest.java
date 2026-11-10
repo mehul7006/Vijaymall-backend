@@ -115,7 +115,7 @@ class SupplierCreditServiceTest {
 
   @Test
   void aNegativePageIsTheFirstPageAndAKeyIsRequired() {
-    when(suppliers.find(supplierId)).thenReturn(Optional.of(new SupplierRepository.Supplier(supplierId, "S", "s", "", "", "", "", 0, true, NOW, NOW)));
+    when(suppliers.find(supplierId)).thenReturn(Optional.of(new SupplierRepository.Supplier(supplierId, "S", "s", "", "", "", "", "", "", 0, true, NOW, NOW)));
     when(repo.totals(supplierId, null, null)).thenReturn(new SupplierLedgerRepository.Totals(0, 0));
     when(repo.statement(supplierId, null, null, 0, 0, 50)).thenReturn(new Page<>(List.of(), 0, 50, 0));
     assertThat(service.statement(supplierId, null, null, -3, 500).rows().page()).isZero();
@@ -123,5 +123,32 @@ class SupplierCreditServiceTest {
         .isInstanceOf(ApiException.class);
     assertThatThrownBy(() -> service.payWithCredit(actor, " ", UUID.randomUUID(), new PurchaseService.PaymentInput(1, "CREDIT_NOTE", null, null, null, null, null)))
         .isInstanceOf(ApiException.class);
+  }
+
+  @Test
+  void aRefundInCreditNoteModeAnswersThePlainMessageAndAnOtherBadModeListsTheModes() {
+    assertThatThrownBy(() -> service.refund(actor, "k", supplierId, new SupplierCreditService.RefundInput(1, " credit_note ", null, null, null)))
+        .isInstanceOfSatisfying(ApiException.class, e -> {
+          assertThat(e.getMessage()).isEqualTo("CREDIT_NOTE is not allowed for refunds");
+          assertThat(e.details()).extractingByKey("fields").asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+              .containsEntry("mode", "CREDIT_NOTE is not allowed for refunds");
+        });
+    assertThatThrownBy(() -> service.refund(actor, "k", supplierId, new SupplierCreditService.RefundInput(1, "BARTER", null, null, null)))
+        .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getMessage()).isEqualTo("must be CASH, UPI, CARD, BANK or CHEQUE"));
+  }
+
+  @Test
+  void creditNotesShowWhatIsUsedAndWhatTheCreditUseApiWouldStillAllow() {
+    when(suppliers.find(supplierId)).thenReturn(Optional.of(new SupplierRepository.Supplier(supplierId, "S", "s", "", "", "", "", "", "", 0, true, NOW, NOW)));
+    UUID purchase = UUID.randomUUID();
+    var open = new SupplierLedgerRepository.NoteRow(UUID.randomUUID(), "DN-2", purchase, "INV-1", NOW, 500, 100, -300);
+    var gone = new SupplierLedgerRepository.NoteRow(UUID.randomUUID(), "DN-1", purchase, "INV-1", NOW.minusSeconds(60), 500, 0, 50);
+    when(repo.notes(supplierId, 0, 50)).thenReturn(new Page<>(List.of(open, gone), 0, 50, 2));
+    var page = service.creditNotes(supplierId, -1, 500);
+    assertThat(page.items()).extracting(SupplierCreditService.CreditNoteView::number, SupplierCreditService.CreditNoteView::usedPaise,
+        SupplierCreditService.CreditNoteView::availablePaise).containsExactly(org.assertj.core.groups.Tuple.tuple("DN-2", 100L, 300L),
+        org.assertj.core.groups.Tuple.tuple("DN-1", 0L, 0L));
+    when(suppliers.find(supplierId)).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.creditNotes(supplierId, 0, 10)).isInstanceOf(ApiException.class);
   }
 }

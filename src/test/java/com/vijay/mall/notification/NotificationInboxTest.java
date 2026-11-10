@@ -38,6 +38,18 @@ class NotificationInboxTest {
     assertThat(inbox.items()).containsExactly(row);
     assertThat(inbox.unread()).isEqualTo(1);
     assertThat(inbox.total()).isEqualTo(1);
+    assertThat(inbox.totalExact()).isTrue();
+    assertThat(inbox.hasMore()).isFalse();
+  }
+
+  @Test
+  void inboxPassesOnTheInexactTotalAndHasMore() {
+    when(repo.page(user, 2, 20)).thenReturn(new Page<>(List.of(), 2, 20, 10_000, false, true));
+    when(repo.unread(user)).thenReturn(0L);
+    var inbox = service.inbox(user, 2, 20);
+    assertThat(inbox.totalExact()).isFalse();
+    assertThat(inbox.hasMore()).isTrue();
+    assertThat(inbox.total()).isEqualTo(10_000);
   }
 
   @Test

@@ -20,8 +20,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class SupplierRepository {
   /** A supplier. */
-  public record Supplier(UUID id, String name, String nameKey, String gstin, String stateCode, String phone, String address, int paymentTermsDays,
-                         boolean active, Instant createdAt, Instant updatedAt) {}
+  public record Supplier(UUID id, String name, String nameKey, String gstin, String stateCode, String phone, String address, String email, String pincode,
+                         int paymentTermsDays, boolean active, Instant createdAt, Instant updatedAt) {}
 
   /**
    * What the purchases say about a supplier. {@code totalDuePaise} is negative when the supplier owes the shop; {@code creditPaise} is the part of
@@ -35,7 +35,7 @@ public class SupplierRepository {
 
   private static Supplier supplier(ResultSet r, int row) throws SQLException {
     return new Supplier(r.getObject("id", UUID.class), r.getString("name"), r.getString("name_key"), r.getString("gstin"), r.getString("state_code"),
-        r.getString("phone"), r.getString("address"), r.getInt("payment_terms_days"), r.getBoolean("active"), Sql.instant(r, "created_at"),
+        r.getString("phone"), r.getString("address"), r.getString("email"), r.getString("pincode"), r.getInt("payment_terms_days"), r.getBoolean("active"), Sql.instant(r, "created_at"),
         Sql.instant(r, "updated_at"));
   }
 
@@ -53,20 +53,22 @@ public class SupplierRepository {
   /** Inserts the supplier unless one with the same name key exists; true when this call created it (safe when two requests race). */
   public boolean insertIfAbsent(Supplier s) {
     return jdbc.sql("""
-        insert into supplier (id, name, name_key, gstin, state_code, phone, address, payment_terms_days, active, created_at, updated_at)
-        values (:id, :name, :key, :gstin, :state, :phone, :address, :terms, :active, :at, :at) on conflict (name_key) do nothing""")
+        insert into supplier (id, name, name_key, gstin, state_code, phone, address, email, pincode, payment_terms_days, active, created_at, updated_at)
+        values (:id, :name, :key, :gstin, :state, :phone, :address, :email, :pincode, :terms, :active, :at, :at) on conflict (name_key) do nothing""")
         .param("id", s.id()).param("name", s.name()).param("key", s.nameKey()).param("gstin", s.gstin()).param("state", s.stateCode())
-        .param("phone", s.phone()).param("address", s.address()).param("terms", s.paymentTermsDays()).param("active", s.active())
+        .param("phone", s.phone()).param("address", s.address()).param("email", s.email()).param("pincode", s.pincode())
+        .param("terms", s.paymentTermsDays()).param("active", s.active())
         .param("at", Sql.ts(s.createdAt())).update() == 1;
   }
 
   /** Replaces the editable fields. A name that another supplier already uses fails with a duplicate-key error. */
   public void update(Supplier s, Instant now) {
     jdbc.sql("""
-        update supplier set name = :name, name_key = :key, gstin = :gstin, state_code = :state, phone = :phone, address = :address,
+        update supplier set name = :name, name_key = :key, gstin = :gstin, state_code = :state, phone = :phone, address = :address, email = :email, pincode = :pincode,
           payment_terms_days = :terms, updated_at = :at where id = :id""")
         .param("id", s.id()).param("name", s.name()).param("key", s.nameKey()).param("gstin", s.gstin()).param("state", s.stateCode())
-        .param("phone", s.phone()).param("address", s.address()).param("terms", s.paymentTermsDays()).param("at", Sql.ts(now)).update();
+        .param("phone", s.phone()).param("address", s.address()).param("email", s.email()).param("pincode", s.pincode())
+        .param("terms", s.paymentTermsDays()).param("at", Sql.ts(now)).update();
   }
 
   /** Turns a supplier on or off. */
@@ -83,12 +85,12 @@ public class SupplierRepository {
         .param("phone", phone).param("gstin", gstin).param("state", stateCode).param("at", Sql.ts(now)).param("id", id).update();
   }
 
-  /** Suppliers by name, searchable by name, phone or GSTIN (contains, any case), with a bounded total. */
+  /** Suppliers by name, searchable by name, phone, GSTIN or e-mail (contains, any case), with a bounded total. */
   public Page<Supplier> page(String q, Boolean active, int page, int size) {
     List<String> c = new ArrayList<>();
     Map<String, Object> params = new LinkedHashMap<>();
     if (q != null && !q.isBlank()) {
-      c.add("(s.name_key like :q escape '\\' or s.phone like :q escape '\\' or lower(s.gstin) like :q escape '\\')");
+      c.add("(s.name_key like :q escape '\\' or s.phone like :q escape '\\' or lower(s.gstin) like :q escape '\\' or lower(s.email) like :q escape '\\')");
       params.put("q", "%" + Sql.escapeLike(key(q)) + "%");
     }
     if (active != null) {

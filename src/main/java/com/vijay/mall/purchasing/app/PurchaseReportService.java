@@ -1,9 +1,11 @@
 package com.vijay.mall.purchasing.app;
 
+import com.vijay.mall.common.web.GstRateJson;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.pos.domain.InvoiceNumbers;
+import com.vijay.mall.purchasing.domain.PurchaseMath;
 import com.vijay.mall.purchasing.infra.PurchaseReportRepository;
 import com.vijay.mall.purchasing.infra.PurchaseReportRepository.AgeingRow;
 import com.vijay.mall.purchasing.infra.PurchaseReportRepository.DiscountRow;
@@ -25,13 +27,13 @@ public class PurchaseReportService {
   /** One purchase line in the register (money in paise, the landed unit cost has 4 decimals). */
   @Schema(name = "PurchaseRegisterRow")
   public record RegisterView(UUID purchaseId, String invoiceNo, LocalDate invoiceDate, UUID supplierId, String supplierName, String gstMode,
-                             UUID productId, String productName, int qty, int freeQty, long unitCostPaise, long discountPaise, long taxablePaise,
-                             int gstPercent, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise, long lineTotalPaise,
+                             UUID productId, String productName, int qty, int freeQty, BigDecimal unitCostPaise, long discountPaise, long taxablePaise,
+                             @GstRateJson BigDecimal gstPercent, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise, long lineTotalPaise,
                              BigDecimal landedUnitCostPaise) {}
 
   /** Input tax of one GST mode and rate, net of debit notes. Creditable tax is claimed back (REGULAR); the rest is part of the cost. */
   @Schema(name = "PurchaseGstLine")
-  public record GstLine(String gstMode, int gstPercent, long taxablePaise, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise,
+  public record GstLine(String gstMode, @GstRateJson BigDecimal gstPercent, long taxablePaise, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise,
                         long creditablePaise, long nonCreditablePaise) {}
 
   /** The input GST report: one line per mode and rate, and the sums. */
@@ -73,12 +75,12 @@ public class PurchaseReportService {
   }
 
   /** The purchase lines in the range, newest first; filters are optional. */
-  public Page<RegisterView> register(LocalDate from, LocalDate to, UUID supplierId, UUID productId, Integer gstRate, int page, int size) {
+  public Page<RegisterView> register(LocalDate from, LocalDate to, UUID supplierId, UUID productId, BigDecimal gstRate, int page, int size) {
     LocalDate[] r = range(from, to);
     Page<PurchaseReportRepository.RegisterRow> p = repo.register(r[0], r[1], supplierId, productId, gstRate, Math.max(0, page), Page.clampSize(size));
     Map<UUID, String> names = catalog.names(p.items().stream().map(PurchaseReportRepository.RegisterRow::productId).distinct().toList());
     return p.withItems(p.items().stream().map(x -> new RegisterView(x.purchaseId(), x.invoiceNo(), x.invoiceDate(), x.supplierId(), x.supplierName(),
-        x.gstMode(), x.productId(), names.getOrDefault(x.productId(), "?"), x.qty(), x.freeQty(), x.unitCostPaise(), x.discountPaise(), x.taxablePaise(),
+        x.gstMode(), x.productId(), names.getOrDefault(x.productId(), "?"), x.qty(), x.freeQty(), PurchaseMath.plain(x.unitCostPaise()), x.discountPaise(), x.taxablePaise(),
         x.gstPercent(), x.cgstPaise(), x.sgstPaise(), x.igstPaise(), x.cessPaise(), x.lineTotalPaise(), x.landedUnitCost().setScale(4))).toList());
   }
 

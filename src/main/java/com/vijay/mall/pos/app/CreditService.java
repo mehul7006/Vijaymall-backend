@@ -51,7 +51,7 @@ public class CreditService {
 
   /**
    * A customer in the till's credit picker. The mobile number is masked ({@code 98XXXXXX10}); the full number is only given by the
-   * account lookup of one customer.
+   * account lookup of one customer. {@code name} is never null: a customer without a name shows the masked mobile.
    * @param blocked whether the customer is blocked and cannot be given credit
    */
   @Schema(name = "CreditCustomer")
@@ -140,8 +140,15 @@ public class CreditService {
     if (q != null && q.length() > 100) throw ApiException.validation("q", "must be at most 100 characters");
     if (everyone && text.length() < 2) throw ApiException.validation("q", "enter at least 2 characters to search all customers");
     Page<CreditRepository.Pick> p = credit.pick(text.isEmpty() ? null : "%" + text + "%", everyone, Math.max(0, page), Page.clampSize(size));
-    return p.withItems(p.items().stream().map(c -> new PickView(c.userId(), c.name(), mask(c.mobile()), c.limitPaise(), c.balancePaise(),
-        CreditMath.available(c.limitPaise(), c.balancePaise()), c.blocked())).toList());
+    return p.withItems(p.items().stream().map(c -> new PickView(c.userId(), displayName(c.name(), c.mobile()), mask(c.mobile()), c.limitPaise(),
+        c.balancePaise(), CreditMath.available(c.limitPaise(), c.balancePaise()), c.blocked())).toList());
+  }
+
+  /** The name to show in the picker: the customer's name, else the masked mobile number, else "Customer"; never null. */
+  static String displayName(String name, String mobile) {
+    if (name != null && !name.isBlank()) return name;
+    String masked = mask(mobile);
+    return masked == null ? "Customer" : masked;
   }
 
   /** {@code 9876543210} becomes {@code 98XXXXXX10}; a missing number stays empty and a short one shows nothing useful. */
@@ -190,7 +197,15 @@ public class CreditService {
   // ---------- goods coming back ----------
   /** How much of a refund just cancels what the customer owes for this bill (see CreditMath.returnAdjustment). */
   public long returnAdjustment(UUID customerId, UUID saleId, long creditOnBill, long refundPaise, Instant now) {
-    CreditRepository.Account a = credit.lock(customerId, now);
+    return adjustment(credit.lock(customerId, now), saleId, creditOnBill, refundPaise);
+  }
+
+  /** The same figure as {@link #returnAdjustment} for a return preview: nothing is locked or created. */
+  public long previewReturnAdjustment(UUID customerId, UUID saleId, long creditOnBill, long refundPaise) {
+    return adjustment(credit.find(customerId), saleId, creditOnBill, refundPaise);
+  }
+
+  private long adjustment(CreditRepository.Account a, UUID saleId, long creditOnBill, long refundPaise) {
     return CreditMath.returnAdjustment(creditOnBill, credit.returnedAgainst(saleId), refundPaise, a.balancePaise());
   }
 

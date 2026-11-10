@@ -3,6 +3,8 @@ package com.vijay.mall.pos.app;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.pos.domain.Gtin;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.SoldBy;
@@ -39,18 +41,18 @@ public class BarcodeGenerationService {
   private final PosCatalogRepository repo;
   private final BarcodeSequenceRepository sequences;
   private final ShopService shop;
-  private final BarcodeProps props;
+  private final RuntimeSettings settings;
   private final AuditService audit;
   private final Clock clock;
 
   /** Creates the service. */
   public BarcodeGenerationService(CatalogService catalog, PosCatalogRepository repo, BarcodeSequenceRepository sequences,
-                                  ShopService shop, BarcodeProps props, AuditService audit, Clock clock) {
+                                  ShopService shop, RuntimeSettings settings, AuditService audit, Clock clock) {
     this.catalog = catalog;
     this.repo = repo;
     this.sequences = sequences;
     this.shop = shop;
-    this.props = props;
+    this.settings = settings;
     this.audit = audit;
     this.clock = clock;
   }
@@ -84,8 +86,14 @@ public class BarcodeGenerationService {
     return code.length() == 13 && Gtin.isValid(code) && prefixes.stream().anyMatch(code::startsWith);
   }
 
+  /** The store prefix in force; a value that did not come through the admin screen and is not valid falls back to the default. */
+  private String storePrefix() {
+    String prefix = settings.get(Settings.BARCODE_STORE_PREFIX).strip();
+    return prefix.matches("2\\d{0,3}") ? prefix : Settings.BARCODE_STORE_PREFIX.fallback();
+  }
+
   private String allocate(UUID variantId) {
-    String prefix = props.storePrefix();
+    String prefix = storePrefix();
     int width = 12 - prefix.length();
     for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       long n = sequences.next(prefix);

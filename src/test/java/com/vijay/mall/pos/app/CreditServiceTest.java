@@ -142,6 +142,17 @@ class CreditServiceTest {
 
   // ----- the till's picker -----
   @Test
+  void aCustomerWithoutANameShowsTheMaskedMobileInThePicker() {
+    when(repo.pick(eq(null), eq(false), eq(0), eq(20))).thenReturn(new Page<>(List.of(
+        new CreditRepository.Pick(customer, null, "9876543210", 3000, 0, false),
+        new CreditRepository.Pick(UUID.randomUUID(), "  ", "9811122233", 3000, 0, false),
+        new CreditRepository.Pick(UUID.randomUUID(), null, null, 3000, 0, false)), 0, 20, 3));
+    var names = service.pick(null, false, 0, 20).items();
+    assertThat(names).extracting(CreditService.PickView::name).containsExactly("98XXXXXX10", "98XXXXXX33", "Customer");
+    assertThat(names).extracting(CreditService.PickView::name).doesNotContainNull();
+  }
+
+  @Test
   void thePickerMasksTheMobileAndWorksOutWhatIsLeft() {
     UUID blocked = UUID.randomUUID();
     when(repo.pick(eq("%asha%"), eq(false), eq(0), eq(20))).thenReturn(new Page<>(List.of(
@@ -150,6 +161,7 @@ class CreditServiceTest {
         new CreditRepository.Pick(UUID.randomUUID(), "Chitra", null, 0, 0, false)), 0, 20, 3));
     var page = service.pick(" A%sha_ ", false, -2, 500 - 480);
     assertThat(page.items()).extracting(CreditService.PickView::maskedMobile).containsExactly("98XXXXXX10", "XXXX", null);
+    assertThat(page.items()).extracting(CreditService.PickView::name).containsExactly("Asha", "Bina", "Chitra");
     assertThat(page.items().get(0).availablePaise()).isEqualTo(7000);
     assertThat(page.items().get(0).limitPaise()).isEqualTo(10000);
     assertThat(page.items().get(1).availablePaise()).as("over the limit: never negative").isZero();

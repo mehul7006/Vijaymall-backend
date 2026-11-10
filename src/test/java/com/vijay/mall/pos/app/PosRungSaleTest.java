@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -99,14 +100,18 @@ class PosRungSaleTest {
     when(shop.get()).thenReturn(PosTestData.shop());
     when(catalog.productsById(any())).thenReturn(Map.of(rice, PosTestData.product(rice, "Rice", 5900, true),
         atta, PosTestData.product(atta, "Loose Atta", 4000, true), old, PosTestData.product(old, "Old Soap", 1000, false)));
-    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006"),
-        atta, new ProductPos(atta, SoldBy.WEIGHT, "12", 0, "1101"), old, new ProductPos(old, SoldBy.UNIT, null, 18, "3401")));
+    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006"),
+        atta, new ProductPos(atta, SoldBy.WEIGHT, "12", GstRates.of(0), "1101"), old, new ProductPos(old, SoldBy.UNIT, null, GstRates.of(18), "3401")));
     when(counters.next(anyString(), anyString())).thenReturn(42L);
     when(sales.findByIdem(anyString())).thenReturn(Optional.empty());
     when(sales.find(any())).thenReturn(Optional.of(mock(SaleRecord.class)));
   }
 
-  private RungLine line(UUID p, Integer qty, Long price, Integer gst, Long discount) { return new RungLine(p, qty, price, gst, discount, null, null); }
+  private RungLine line(UUID p, Integer qty, Long price, Integer gst, Long discount) { return new RungLine(p, qty, price, gst == null ? null : GstRates.of(gst), discount, null, null); }
+
+  private static RungLine withGst(RungLine l, String rate) {
+    return new RungLine(l.productId(), l.qty(), l.unitPricePaise(), new java.math.BigDecimal(rate), l.discountPaise(), l.name(), l.linePaise());
+  }
 
   private RungLine rice(int qty, long price) { return line(rice, qty, price, 5, null); }
 
@@ -145,10 +150,10 @@ class PosRungSaleTest {
   void aBillAtOldPricesIsRecordedAtThosePricesWithTheTaxWorkedOutFromThem() {
     ring(rung(rice(2, 5000)), 10000); // the catalog says 59.00 now
     SaleRecord s = stored();
-    TaxSplit tax = GstCalculator.split(10000, 5);
+    TaxSplit tax = GstCalculator.split(10000, GstRates.of(5));
     assertThat(s.totalPaise()).isEqualTo(10000);
     assertThat(s.items().get(0).unitPricePaise()).isEqualTo(5000);
-    assertThat(s.items().get(0).gstPercent()).isEqualTo(5);
+    assertThat(s.items().get(0).gstPercent()).isEqualByComparingTo("5");
     assertThat(s.items().get(0).hsn()).isEqualTo("1006");
     assertThat(s.taxablePaise()).isEqualTo(tax.taxable());
     assertThat(s.cgstPaise()).isEqualTo(tax.cgst());
@@ -169,13 +174,13 @@ class PosRungSaleTest {
   void aBillThatMatchesTheCatalogHasNoExceptions() {
     ring(rung(rice(1, 5900)), 5900);
     verify(exceptions, never()).record(any(), anyList());
-    assertThat(stored().taxablePaise()).isEqualTo(GstCalculator.split(5900, 5).taxable());
+    assertThat(stored().taxablePaise()).isEqualTo(GstCalculator.split(5900, GstRates.of(5)).taxable());
   }
 
   @Test
   void aChangedGstRateIsKeptAsRungAndFlagged() {
     ring(line(rice, 1, 5900L, 12, null), 5900);
-    assertThat(stored().items().get(0).gstPercent()).isEqualTo(12);
+    assertThat(stored().items().get(0).gstPercent()).isEqualByComparingTo("12");
     OfflineFinding f = flagged().get(0);
     assertThat(f.kind()).isEqualTo(OfflineExceptionKind.GST_CHANGED);
     assertThat(f.expected()).isEqualTo("5");
@@ -197,7 +202,7 @@ class PosRungSaleTest {
     assertThat(s.items().get(0).discountPaise()).isEqualTo(800);
     assertThat(s.items().get(0).netPaise()).isEqualTo(11000);
     assertThat(s.subtotalPaise()).as("the receipt adds up: lines after their own discount").isEqualTo(11000);
-    assertThat(s.taxablePaise()).isEqualTo(GstCalculator.split(11000, 5).taxable());
+    assertThat(s.taxablePaise()).isEqualTo(GstCalculator.split(11000, GstRates.of(5)).taxable());
     OfflineFinding f = flagged().get(0);
     assertThat(f.kind()).isEqualTo(OfflineExceptionKind.DISCOUNT);
     assertThat(f.actual()).isEqualTo("800");
@@ -232,7 +237,7 @@ class PosRungSaleTest {
   @Test
   void aWeighedItemKeepsItsGramSemantics() {
     // 500 g at Rs 40.00 per kg = Rs 20.00
-    RungLine l = new RungLine(atta, 500, 4000L, 0, null, "Atta loose", 2000L);
+    RungLine l = new RungLine(atta, 500, 4000L, GstRates.of(0), null, "Atta loose", 2000L);
     ring(rung(l), 2000);
     SaleRecord s = stored();
     assertThat(s.items().get(0).soldBy()).isEqualTo(SoldBy.WEIGHT);
@@ -244,7 +249,7 @@ class PosRungSaleTest {
 
   @Test
   void aBlankTillNameFallsBackToTheCatalogName() {
-    ring(new Rung(List.of(new RungLine(rice, 1, 5900L, 5, 0L, "  ", null))), 5900);
+    ring(new Rung(List.of(new RungLine(rice, 1, 5900L, GstRates.of(5), 0L, "  ", null))), 5900);
     assertThat(stored().items().get(0).name()).isEqualTo("Rice");
   }
 
@@ -378,8 +383,8 @@ class PosRungSaleTest {
     refused(() -> ring(line(rice, -1, 100L, 5, null), 100), "quantity");
     refused(() -> ring(line(rice, 1, null, 5, null), 100), "unitPricePaise");
     refused(() -> ring(line(rice, 1, -1L, 5, null), 100), "unitPricePaise");
-    refused(() -> ring(line(rice, 1, 100L, null, null), 100), "gstPercent");
-    refused(() -> ring(line(rice, 1, 100L, 7, null), 100), "gstPercent");
+    refused(() -> ring(line(rice, 1, 100L, null, null), 100), "must be one of");
+    refused(() -> ring(line(rice, 1, 100L, 7, null), 100), "must be one of");
     refused(() -> ring(line(rice, 1, 100L, 5, -5L), 100), "discountPaise");
   }
 
@@ -396,7 +401,7 @@ class PosRungSaleTest {
 
   @Test
   void aLineAmountThatIsNotPriceTimesQuantityIsRefused() {
-    refused(() -> ring(new Rung(List.of(new RungLine(rice, 2, 5000L, 5, null, null, 9999L))), 9999), "line amount");
+    refused(() -> ring(new Rung(List.of(new RungLine(rice, 2, 5000L, GstRates.of(5), null, null, 9999L))), 9999), "line amount");
   }
 
   @Test
@@ -443,5 +448,34 @@ class PosRungSaleTest {
     assertThat(new SaleInput(cart(), List.of(), null).rung()).isNull();
     assertThat(new SaleInput(cart(), List.of(), null, null).rung()).isNull();
     assertThat(new SaleInput(cart(), List.of(), null, null, null, true).rung()).isNull();
+  }
+
+  /* 5900 paise at 1.5%: 5900 * 100 / 101.5 = 5812.807, so taxable 5813 and tax 87 (CGST 43, SGST 44). */
+  @Test
+  void aFractionalRateOnTheBillIsKeptSplitAndFlaggedAgainstTheCatalog() {
+    ring(withGst(line(rice, 1, 5900L, null, null), "1.5"), 5900);
+    SaleRecord s = stored();
+    assertThat(s.items().get(0).gstPercent()).isEqualByComparingTo("1.5");
+    assertThat(s.taxablePaise()).isEqualTo(5813);
+    assertThat(s.cgstPaise()).isEqualTo(43);
+    assertThat(s.sgstPaise()).isEqualTo(44);
+    OfflineFinding f = flagged().get(0);
+    assertThat(f.kind()).isEqualTo(OfflineExceptionKind.GST_CHANGED);
+    assertThat(f.expected()).isEqualTo("5");
+    assertThat(f.actual()).isEqualTo("1.5");
+  }
+
+  @Test
+  void aRateWrittenWithTrailingZerosIsTheSameRateAsTheCatalogs() {
+    ring(new RungLine(old, 1, 1000L, new java.math.BigDecimal("18.00"), null, null, null), 1000);
+    assertThat(flagged()).extracting(OfflineFinding::kind).containsExactly(OfflineExceptionKind.PRODUCT_INACTIVE);
+  }
+
+  @Test
+  void ratesOutsideTheAllowedSetAreRefusedForTheFieldWithTheFixedText() {
+    refused(() -> ring(withGst(line(rice, 1, 100L, null, null), "18.5"), 100), "must be one of 0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40");
+    for (String ok : new String[] {"0.25", "40"}) {
+      ring(withGst(line(rice, 1, 5900L, null, null), ok), 5900);
+    }
   }
 }

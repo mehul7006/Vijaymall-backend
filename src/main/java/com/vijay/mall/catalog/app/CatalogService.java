@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -261,6 +262,16 @@ public class CatalogService {
   public List<Category> categories() {
     return caches == null ? categories.listActive()
         : caches.get(AppCaches.Name.CATEGORIES, "active", categories::listActive);
+  }
+
+  /**
+   * The English name of a category, active or not, for other modules that need only the label (for example the GST master matching a
+   * product by name and category).
+   * @param id the category id; may be {@code null}
+   * @return the name, or empty when the id is {@code null} or unknown
+   */
+  public Optional<String> categoryName(UUID id) {
+    return id == null ? Optional.empty() : categories.find(id).map(Category::nameEn);
   }
 
   /** The shop list. Products with no stock are left out; use the overload to include them. */

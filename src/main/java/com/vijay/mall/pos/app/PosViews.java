@@ -1,5 +1,7 @@
 package com.vijay.mall.pos.app;
 
+import java.math.BigDecimal;
+import com.vijay.mall.common.web.GstRateJson;
 import com.vijay.mall.inventory.domain.LotInfo;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
@@ -90,7 +92,7 @@ public final class PosViews {
    * @param linePaise      the line amount the till charged before discount (optional; when given it must equal price x quantity,
    *                       with weighed items priced per 1000 g)
    */
-  public record RungLine(UUID productId, Integer qty, Long unitPricePaise, Integer gstPercent, Long discountPaise, String name,
+  public record RungLine(UUID productId, Integer qty, Long unitPricePaise, @GstRateJson BigDecimal gstPercent, Long discountPaise, String name,
                          Long linePaise) {}
 
   /** The bill as rung at an offline till. */
@@ -100,7 +102,7 @@ public final class PosViews {
    * One priced line of a bill in paise: gross line amount, discount share, net amount and the GST percent applied.
    */
   public record BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
-                         long discountPaise, long netPaise, int gstPercent) {}
+                         long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent) {}
 
   /**
    * A priced basket: lines, coupon and coin discounts, round-off, total, GST split, coins that would be earned and
@@ -155,12 +157,12 @@ public final class PosViews {
    * to show "after N more the price is X").
    */
   public record PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                           int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                           @GstRateJson BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                            boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
                            String variantName, String displayName, LotInfo lot) {
     /** A product with no lot information (no lot-priced stock). */
     public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                       boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
                       String variantName, String displayName) {
       this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
@@ -169,7 +171,7 @@ public final class PosViews {
 
     /** A product without pack size, unit or variant details: the display name is the plain name. */
     public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                       boolean coinRedeemable, boolean earnsCoins, List<String> barcodes) {
       this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
           coinRedeemable, earnsCoins, barcodes, "", "", "", name);
@@ -186,7 +188,7 @@ public final class PosViews {
   }
 
   /** The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes. */
-  public record PosAttributes(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, boolean posOnly,
+  public record PosAttributes(UUID productId, SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent, String hsn, boolean posOnly,
                               List<String> barcodes) {}
 
   /**

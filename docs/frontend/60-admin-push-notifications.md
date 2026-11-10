@@ -99,7 +99,7 @@ Request fields:
 | `segmentId` | UUID | Only with `SEGMENT`: a saved segment |
 | `segment` | object | Only with `SEGMENT`: inline `{ "match": "ALL", "rules": [...] }` instead of `segmentId`. Give exactly one of `segmentId` and `segment` |
 
-`USERS` needs at least one id or number. Sending `userIds`, `mobiles`, `segmentId` or `segment` with another audience is a validation error. An unknown `audience` string is HTTP 400 `VALIDATION_FAILED` with message `Bad request`.
+`USERS` needs at least one id or number. Sending `userIds`, `mobiles`, `segmentId` or `segment` with another audience is a validation error. An unknown `audience` string is HTTP 400 `VALIDATION_FAILED` with `details.fields.audience` = `must be one of ALL, CUSTOMERS, STAFF, ADMINS, CASHIERS, USERS, SEGMENT`; the top-level message is the usual `Please check the highlighted fields`. A missing `audience` reads `is required`.
 
 Examples:
 
@@ -146,7 +146,7 @@ Response:
 { "audience": "CUSTOMERS", "recipients": 1250, "withDevices": 810 }
 ```
 
-Allowed for `ALL`, `CUSTOMERS`, `STAFF`, `ADMINS`, `CASHIERS`. `USERS` and `SEGMENT` answer 400 `VALIDATION_FAILED` (`USERS` has nothing to size; for `SEGMENT` use the preview, 3.6). An unknown audience is 400 `VALIDATION_FAILED` ("Bad request").
+Allowed for `ALL`, `CUSTOMERS`, `STAFF`, `ADMINS`, `CASHIERS`. `USERS` and `SEGMENT` answer 400 `VALIDATION_FAILED` (`USERS` has nothing to size; for `SEGMENT` use the preview, 3.6). An unknown audience is 400 `VALIDATION_FAILED` with `details.fields.audience` = `must be one of ALL, CUSTOMERS, STAFF, ADMINS, CASHIERS, USERS, SEGMENT`.
 
 ### 3.3 `GET /broadcasts?page=0&size=20`
 

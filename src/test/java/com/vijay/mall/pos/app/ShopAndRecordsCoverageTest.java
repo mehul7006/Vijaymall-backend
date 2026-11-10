@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -99,7 +100,7 @@ class ShopAndRecordsCoverageTest {
   }
 
   @Test void billCalculator_couponPerLineMustMatchLineCount() {
-    var draft = new BillCalculator.Draft(UUID.randomUUID(), "A", SoldBy.UNIT, 1, 1000, 5, "1");
+    var draft = new BillCalculator.Draft(UUID.randomUUID(), "A", SoldBy.UNIT, 1, 1000, GstRates.of(5), "1");
     assertThatThrownBy(() -> BillCalculator.build(List.of(draft), new long[] {1, 2}, 0))
         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("one coupon amount per line");
     var ok = BillCalculator.build(List.of(draft), new long[] {100}, 0);

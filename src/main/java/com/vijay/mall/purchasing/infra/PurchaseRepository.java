@@ -1,5 +1,7 @@
 package com.vijay.mall.purchasing.infra;
 
+import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.web.GstRateJson;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.persistence.BoundedCount;
 import java.math.BigDecimal;
@@ -38,8 +40,8 @@ public class PurchaseRepository {
                        String attachmentType) {}
 
   /** One received product line with every computed figure; free units are in {@code freeQty}. */
-  public record Line(UUID id, UUID productId, int qty, int freeQty, long unitCostPaise, BigDecimal discountPercent, long lineDiscountPaise,
-                     long docDiscountSharePaise, long taxablePaise, int gstPercent, long cgstPaise, long sgstPaise, long igstPaise,
+  public record Line(UUID id, UUID productId, int qty, int freeQty, BigDecimal unitCostPaise, BigDecimal discountPercent, long lineDiscountPaise,
+                     long docDiscountSharePaise, long taxablePaise, @GstRateJson BigDecimal gstPercent, long cgstPaise, long sgstPaise, long igstPaise,
                      BigDecimal cessPercent, long cessPaise, long lineTotalPaise, long landedTotalPaise, BigDecimal landedUnitCost, String hsn,
                      Long mrpPaise, Long sellingPricePaise, String batchNo, LocalDate expiryDate, boolean applyToVariant, int returnedQty) {}
 
@@ -53,7 +55,7 @@ public class PurchaseRepository {
 
   /** A product's earlier purchase, for the price history and the "last purchase cost" lookup. */
   public record PriceRow(UUID purchaseId, UUID supplierId, String supplierName, String invoiceNo, LocalDate invoiceDate, int qty, int freeQty,
-                         long unitCostPaise, BigDecimal landedUnitCost, Long mrpPaise, Long sellingPricePaise, Instant createdAt) {}
+                         BigDecimal unitCostPaise, BigDecimal landedUnitCost, Long mrpPaise, Long sellingPricePaise, Instant createdAt) {}
 
   /** One supplier's totals in the payables summary. */
   public record SupplierDue(UUID supplierId, String name, long purchasedPaise, long paidPaise, long duePaise, long overduePaise, long overdueCount) {}
@@ -81,8 +83,8 @@ public class PurchaseRepository {
 
   private static Line line(ResultSet r, int row) throws SQLException {
     return new Line(r.getObject("id", UUID.class), r.getObject("product_id", UUID.class), r.getInt("qty"), r.getInt("free_qty"),
-        r.getLong("unit_cost_paise"), r.getBigDecimal("discount_percent"), r.getLong("line_discount_paise"), r.getLong("doc_discount_share_paise"),
-        r.getLong("taxable_paise"), r.getInt("gst_percent"), r.getLong("cgst_paise"), r.getLong("sgst_paise"), r.getLong("igst_paise"),
+        r.getBigDecimal("unit_cost_paise"), r.getBigDecimal("discount_percent"), r.getLong("line_discount_paise"), r.getLong("doc_discount_share_paise"),
+        r.getLong("taxable_paise"), GstRates.normalize(r.getBigDecimal("gst_percent")), r.getLong("cgst_paise"), r.getLong("sgst_paise"), r.getLong("igst_paise"),
         r.getBigDecimal("cess_percent"), r.getLong("cess_paise"), r.getLong("line_total_paise"), r.getLong("landed_total_paise"),
         r.getBigDecimal("landed_unit_cost"), r.getString("hsn"), r.getObject("mrp_paise", Long.class), r.getObject("selling_price_paise", Long.class),
         r.getString("batch_no"), r.getObject("expiry_date", LocalDate.class), r.getBoolean("apply_to_variant"), r.getInt("returned_qty"));
@@ -282,7 +284,7 @@ public class PurchaseRepository {
         where i.product_id = :product order by p.created_at desc, p.id desc limit :limit""").param("product", productId).param("limit", limit)
         .query((r, n) -> new PriceRow(r.getObject("id", UUID.class), r.getObject("supplier_id", UUID.class), r.getString("supplier_name"),
             r.getString("invoice_no"), r.getObject("invoice_date", LocalDate.class), r.getInt("qty"), r.getInt("free_qty"),
-            r.getLong("unit_cost_paise"), r.getBigDecimal("landed_unit_cost"), r.getObject("mrp_paise", Long.class),
+            r.getBigDecimal("unit_cost_paise"), r.getBigDecimal("landed_unit_cost"), r.getObject("mrp_paise", Long.class),
             r.getObject("selling_price_paise", Long.class), Sql.instant(r, "created_at"))).list();
   }
 }

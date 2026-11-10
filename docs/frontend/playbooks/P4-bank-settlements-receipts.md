@@ -74,7 +74,7 @@ ADMIN only. A migration seeds one account `Cash drawer` (kind `CASH`, provider `
 |---|---|---|
 | `kind` | enum | case-insensitive; anything else -> 400 `kind` ("BANK, GATEWAY, UPI, CARD_TERMINAL or CASH") |
 | `active` | bool | omit = both. Default the UI to `active=true` with a "show switched-off" toggle |
-| `q` | string | matches name, provider or identifier (`%` and `_` are literal) |
+| `q` | string | matches name, provider, identifier or IFSC (`%` and `_` are literal) |
 | `page`, `size` | int | 0 / 20 |
 
 **Create / edit form** (PUT replaces all fields: always send the whole form)
@@ -85,6 +85,7 @@ ADMIN only. A migration seeds one account `Cash drawer` (kind `CASH`, provider `
 | `kind` | enum | yes | one of the five kinds (case-insensitive, stored upper-case) |
 | `provider` | string | no | free code, max 40, stored lower-case; blank -> `manual`. Use `razorpay`, `paytm`, `manual`, ... Match the code the settlement/gateway adapter uses (`razorpay`) |
 | `identifier` | string | no | max 60: last 4 digits, UPI id, or terminal id (it is what the till sends as `terminalId`) |
+| `ifsc` | string | no | **BANK accounts only** (any other kind: 400 `ifsc` "only a BANK account has an IFSC code"). Trimmed and upper-cased by the server; must match `^[A-Z]{4}0[A-Z0-9]{6}$`, e.g. `HDFC0001234` (else 400 `ifsc`). Blank or missing = none (returned as `null`). Returned in the account JSON and in the list; PUT replaces all fields, so send it again on edit |
 | `settlesToAccountId` | uuid | no | only for GATEWAY / UPI / CARD_TERMINAL (else 400 `settlesToAccountId`); target must exist and be an ACTIVE `BANK` (400); cannot be itself (400, on PUT) |
 | `note` | string | no | max 300 |
 
@@ -96,7 +97,7 @@ Row actions: Edit, Deactivate / Activate, Delete (only for unused accounts), Ope
 ```json
 { "name": "Razorpay", "kind": "GATEWAY", "provider": "razorpay", "identifier": "", "settlesToAccountId": "<bank uuid>", "note": "" }
 ```
-   -> 201 Account `{ id, name, kind, provider, identifier, settlesToAccountId, active, note, createdAt, updatedAt }`. Errors: 400 `VALIDATION_FAILED` (map `details.fields.{name|kind|provider|identifier|note|settlesToAccountId}`), 409 `DUPLICATE_ACCOUNT_NAME`.
+   -> 201 Account `{ id, name, kind, provider, identifier, ifsc, settlesToAccountId, active, note, createdAt, updatedAt }`. Errors: 400 `VALIDATION_FAILED` (map `details.fields.{name|kind|provider|identifier|ifsc|note|settlesToAccountId}`), 409 `DUPLICATE_ACCOUNT_NAME`.
 3. Edit: `PUT /admin/money-accounts/{id}` same body -> 200. Extra errors: 404 `NOT_FOUND`; 409 `ACCOUNT_IN_USE` with `details.fields.kind` when `kind` is changed after the account has any receipt, entry, settlement, or another account pointing at it (disable the kind dropdown once used; or just show the error).
 4. `POST /admin/money-accounts/{id}/deactivate` (no body) -> 200 Account `active:false`. Idempotent. 409 `LAST_CASH_ACCOUNT` (the last active CASH account) or 409 `ACCOUNT_IN_USE` (an active account still settles into this bank: deactivate those first).
 5. `POST /admin/money-accounts/{id}/activate` -> 200. Idempotent.
@@ -119,10 +120,11 @@ enum AccountKind { BANK, GATEWAY, UPI, CARD_TERMINAL, CASH }
 class MoneyAccount {
   final String id, name, kind, provider, identifier, note; // strings never null ("" when empty)
   final String? settlesToAccountId;
+  final String? ifsc; // BANK only, upper case, null when none
   final bool active;
   final DateTime createdAt, updatedAt;
 }
-class MoneyAccountBody { String name, kind; String? provider, identifier, note, settlesToAccountId; }
+class MoneyAccountBody { String name, kind; String? provider, identifier, ifsc, note, settlesToAccountId; }
 ```
 
 ### 2.8 Acceptance
@@ -218,7 +220,7 @@ ADMIN. No settings.
 ```json
 { "direction": "OUT", "amountPaise": 2500, "at": "2026-01-02T10:00:00Z", "note": "bank charge" }
 ```
-   -> 201 `{ id, moneyAccountId, at, direction, amountPaise, sourceType, sourceId, note, createdBy }` (`sourceType` is null for hand entries; the book shows it as `MANUAL`). Then reload the book.
+   -> 201 `{ id, moneyAccountId, at, direction, amountPaise, sourceType, sourceId, note, createdBy }` (`sourceType` is null for hand entries; the book shows it as `MANUAL`). Then reload the book. A bad entry reports **every** wrong field in one `400 VALIDATION_FAILED` (`details.fields` can hold `direction`, `amountPaise` and `note` together, for example direction `SIDE` with amount 0 gives both `direction` and `amountPaise`), so mark all of them at once.
 
 ### 4.5 State / derived
 - `balancePaise` on each line and `openingBalancePaise` (balance before `from`) are computed by the server. Never recompute running balances in the app; when paging, show the server's value per line.
@@ -241,7 +243,7 @@ class EntryBody { String direction; int amountPaise; DateTime? at; String? note;
 ### 4.8 Acceptance
 - Given opening IN 100000 on 1 Jan and a bank charge OUT 2500 on 2 Jan, when I open the book for 2 Jan, then opening is 100000 and the line shows balance 97500.
 - Given I tap Save twice with the same key, when both succeed, then there is one entry.
-- Given amount 0 or direction "SIDEWAYS", when I save, then field errors show and nothing is saved.
+- Given amount 0 or direction "SIDEWAYS", when I save, then field errors show and nothing is saved. Given both are wrong at once, then `details.fields` has both `direction` and `amountPaise`.
 - Given a range over 400 days, when I load, then an error is shown on the date field.
 
 ---
@@ -554,6 +556,8 @@ ADMIN. Limits: file at most 2 MB and 5000 data rows (the web server itself refus
 
 ### 10.3 Screens and fields (multipart/form-data)
 
+Only `file` is a real file part. Every other row is declared as a plain request parameter on the server (`@RequestParam`), which is why Swagger shows them as **query parameters**. The server accepts each of them either in the query string (`POST /admin/settlements/import?moneyAccountId=...&dateColumn=...`) or as a text field of the multipart body next to `file`; both work (the integration tests send them as multipart fields). Pick one style and send each name once. The column below is called "Part" for the form-field style.
+
 | Part | Type | Required | Validation / default |
 |---|---|---|---|
 | `file` | file (.csv) | yes | see limits; empty file / no data rows -> 400 `CSV_INVALID` |
@@ -575,7 +579,7 @@ Cell rules: amounts accept `1,234.50`, `Rs 99`, `Rs. 99`, a rupee sign, and nega
 
 ### 10.4 API sequence
 1. Let the admin pick the file and the account, then preview the header row on the client (first line) to let them map columns with dropdowns pre-filled by case-insensitive name match. Remember the mapping per account (local storage) since statements repeat.
-2. `POST /admin/settlements/import` as `multipart/form-data` with the parts above (the `file` part named `file`).
+2. `POST /admin/settlements/import` as `multipart/form-data` with the `file` part named `file` and the other options as form fields or query parameters (see 10.3).
 3. 200 result:
 ```json
 { "settlementId": "…", "alreadyImported": false, "rows": 4, "matched": 2, "unmatched": 2, "netPaise": 15730 }

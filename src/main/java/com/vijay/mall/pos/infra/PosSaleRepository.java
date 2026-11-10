@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import com.vijay.mall.pos.domain.GstRates;
 import com.vijay.mall.pos.domain.PosRecords.PaymentRecord;
 import com.vijay.mall.pos.domain.PosRecords.ReturnItemRecord;
 import com.vijay.mall.pos.domain.PosRecords.ReturnRecord;
@@ -225,7 +226,7 @@ public class PosSaleRepository {
 
   private static SaleItemRecord toItem(PosSaleItemEntity i) {
     return new SaleItemRecord(i.id, i.productId, i.name, SoldBy.valueOf(i.soldBy), i.qty, i.unitPricePaise, i.linePaise,
-        i.discountPaise, i.netPaise, i.gstPercent, i.hsn, i.taxablePaise, i.cgstPaise, i.sgstPaise, i.returnedQty, i.couponSharePaise, i.costPaise);
+        i.discountPaise, i.netPaise, GstRates.normalize(i.gstPercent), i.hsn, i.taxablePaise, i.cgstPaise, i.sgstPaise, i.returnedQty, i.couponSharePaise, i.costPaise);
   }
 
   /** The credit note created with this idempotency key, if any. */

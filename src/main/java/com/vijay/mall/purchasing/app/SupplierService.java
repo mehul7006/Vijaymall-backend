@@ -25,19 +25,24 @@ import org.springframework.transaction.annotation.Transactional;
 public class SupplierService {
   /** What the admin types for a supplier. */
   @Schema(name = "SupplierInput")
-  public record Input(String name, String gstin, String stateCode, String phone, String address, Integer paymentTermsDays) {}
+  public record Input(String name, String gstin, String stateCode, String phone, String address, String email, String pincode,
+                      Integer paymentTermsDays) {}
 
   /**
    * A supplier with what the purchases say about it. {@code balancePaise} (the same figure as {@code totalDuePaise}) is what the shop owes the
    * supplier, negative when the supplier owes the shop; {@code creditPaise} is the part that can be used on another purchase or refunded.
    */
   @Schema(name = "SupplierView")
-  public record View(UUID id, String name, String phone, String gstin, String stateCode, String address, int paymentTermsDays, boolean active,
+  public record View(UUID id, String name, String phone, String gstin, String stateCode, String address, String email, String pincode,
+                     int paymentTermsDays, boolean active,
                      Instant createdAt, String lastInvoiceNo, Instant lastPurchaseAt, long purchaseCount, long totalDuePaise,
                      long balancePaise, long creditPaise) {}
 
   private static final Pattern GSTIN = Pattern.compile("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$");
   private static final Pattern PHONE = Pattern.compile("^[0-9+ \\-]{0,20}$");
+  private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+  private static final Pattern PINCODE = Pattern.compile("^[0-9]{6}$");
+  private static final int MAX_EMAIL = 254;
   private static final Pattern STATE = Pattern.compile("^[0-9]{2}$");
 
   private final SupplierRepository repo;
@@ -52,7 +57,7 @@ public class SupplierService {
   }
 
   /** Checked and cleaned values of a supplier. */
-  private record Clean(String name, String gstin, String state, String phone, String address, int terms) {}
+  private record Clean(String name, String gstin, String state, String phone, String address, String email, String pincode, int terms) {}
 
   private static String text(String v) { return v == null ? "" : v.strip(); }
 
@@ -60,6 +65,20 @@ public class SupplierService {
   static String cleanPhone(String phone) {
     String p = text(phone);
     if (!PHONE.matcher(p).matches()) throw ApiException.validation("phone", "digits, spaces, + and - only, at most 20 characters");
+    return p;
+  }
+
+  /** Cleans an e-mail address: empty or at most 254 characters of the simple form name@host.tld. */
+  static String cleanEmail(String email) {
+    String e = text(email);
+    if (!e.isEmpty() && (e.length() > MAX_EMAIL || !EMAIL.matcher(e).matches())) throw ApiException.validation("email", "not a valid e-mail address (at most 254 characters)");
+    return e;
+  }
+
+  /** Cleans a pincode: empty or exactly 6 digits. */
+  static String cleanPincode(String pincode) {
+    String p = text(pincode);
+    if (!p.isEmpty() && !PINCODE.matcher(p).matches()) throw ApiException.validation("pincode", "6 digits");
     return p;
   }
 
@@ -84,11 +103,12 @@ public class SupplierService {
     String name = text(in.name()).replaceAll("\\s+", " ");
     int terms = in.paymentTermsDays() == null ? 0 : in.paymentTermsDays();
     String gstin = cleanGstin(in.gstin());
-    return new Clean(name, gstin, cleanState(in.stateCode(), gstin, "stateCode"), cleanPhone(in.phone()), text(in.address()), terms);
+    return new Clean(name, gstin, cleanState(in.stateCode(), gstin, "stateCode"), cleanPhone(in.phone()), text(in.address()), cleanEmail(in.email()),
+        cleanPincode(in.pincode()), terms);
   }
 
   private Supplier build(UUID id, Clean c, boolean active, Instant now) {
-    return new Supplier(id, c.name(), SupplierRepository.key(c.name()), c.gstin(), c.state(), c.phone(), c.address(), c.terms(), active, now, now);
+    return new Supplier(id, c.name(), SupplierRepository.key(c.name()), c.gstin(), c.state(), c.phone(), c.address(), c.email(), c.pincode(), c.terms(), active, now, now);
   }
 
   /** Adds a supplier. Fails with 409 {@code SUPPLIER_EXISTS} (naming the existing id) when the name is already used. */
@@ -135,7 +155,7 @@ public class SupplierService {
     return views(List.of(s)).getFirst();
   }
 
-  /** Suppliers by name, searchable by name, phone or GSTIN; {@code active} null shows both. */
+  /** Suppliers by name, searchable by name, phone, GSTIN or e-mail; {@code active} null shows both. */
   public Page<View> list(String q, Boolean active, int page, int size) {
     Page<Supplier> p = repo.page(q, active, Math.max(0, page), Page.clampSize(size));
     return p.withItems(views(p.items()));
@@ -145,7 +165,7 @@ public class SupplierService {
     Map<UUID, Stats> stats = repo.stats(suppliers.stream().map(Supplier::id).toList());
     return suppliers.stream().map(s -> {
       Stats t = stats.get(s.id());
-      return new View(s.id(), s.name(), s.phone(), s.gstin(), s.stateCode(), s.address(), s.paymentTermsDays(), s.active(), s.createdAt(),
+      return new View(s.id(), s.name(), s.phone(), s.gstin(), s.stateCode(), s.address(), s.email(), s.pincode(), s.paymentTermsDays(), s.active(), s.createdAt(),
           t.lastInvoiceNo(), t.lastPurchaseAt(), t.purchaseCount(), t.totalDuePaise(), t.totalDuePaise(), t.creditPaise());
     }).toList();
   }
@@ -169,7 +189,7 @@ public class SupplierService {
     } else {
       String n = text(name).replaceAll("\\s+", " ");
       if (n.isEmpty()) throw ApiException.validation("supplierName", "1 to 120 characters");
-      Supplier fresh = new Supplier(UUID.randomUUID(), n, SupplierRepository.key(n), cleanGstin, cleanState, cleanPhone, "", 0, true, now, now);
+      Supplier fresh = new Supplier(UUID.randomUUID(), n, SupplierRepository.key(n), cleanGstin, cleanState, cleanPhone, "", "", "", 0, true, now, now);
       if (repo.insertIfAbsent(fresh)) audit.log(actor, "SUPPLIER_CREATE", "supplier", fresh.id(), n + " (from a purchase)");
       s = repo.findByKey(fresh.nameKey()).orElseThrow();
     }

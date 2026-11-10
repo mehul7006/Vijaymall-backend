@@ -32,6 +32,10 @@ public class SupplierLedgerRepository {
   /** A debit note with how much of it was already used as credit. */
   public record Note(UUID id, UUID purchaseId, UUID supplierId, String noteNo, long totalPaise, long creditUsedPaise) {}
 
+  /** A debit note of a supplier with the due amount of its purchase, from which the credit still available follows. */
+  public record NoteRow(UUID id, String noteNo, UUID purchaseId, String invoiceNo, Instant createdAt, long totalPaise, long creditUsedPaise,
+                        long purchaseDuePaise) {}
+
   /** A refund from a supplier. */
   public record Refund(UUID id, UUID supplierId, long amountPaise, String mode, String reference, UUID moneyAccountId, Instant receivedAt,
                        UUID createdBy, Instant createdAt) {}
@@ -100,6 +104,27 @@ public class SupplierLedgerRepository {
         from purchase_return r join purchase p on p.id = r.purchase_id where r.id = :id for update of r""").param("id", id)
         .query((r, i) -> new Note(r.getObject("id", UUID.class), r.getObject("purchase_id", UUID.class), r.getObject("supplier_id", UUID.class),
             r.getString("note_no"), r.getLong("total_paise"), r.getLong("credit_used_paise"))).optional();
+  }
+
+  /**
+   * The credit a debit note can still give: what it has not given yet, but never more than the credit its purchase still holds (a negative
+   * amount due). The one rule behind both the list of credit notes and the credit-use check.
+   */
+  public static long available(long totalPaise, long creditUsedPaise, long purchaseDuePaise) {
+    return Math.max(0, Math.min(totalPaise - creditUsedPaise, -purchaseDuePaise));
+  }
+
+  /** One page of a supplier's debit notes, newest first (two reads: the page and a bounded count). */
+  public Page<NoteRow> notes(UUID supplierId, int page, int size) {
+    List<NoteRow> fetched = jdbc.sql("""
+        select r.id, r.note_no, r.purchase_id, p.invoice_no, r.created_at, r.total_paise, r.credit_used_paise, p.due_paise
+        from purchase_return r join purchase p on p.id = r.purchase_id where p.supplier_id = :s
+        order by r.created_at desc, r.id desc limit :n offset :o""").param("s", supplierId).param("n", size + 1).param("o", (long) page * size)
+        .query((r, i) -> new NoteRow(r.getObject("id", UUID.class), r.getString("note_no"), r.getObject("purchase_id", UUID.class),
+            r.getString("invoice_no"), Sql.instant(r, "created_at"), r.getLong("total_paise"), r.getLong("credit_used_paise"), r.getLong("due_paise")))
+        .list();
+    return BoundedCount.assemble(fetched, page, size, () -> Sql.boundedCount(jdbc, "purchase_return r join purchase p on p.id = r.purchase_id where p.supplier_id = :s",
+        Map.of("s", supplierId)));
   }
 
   /**

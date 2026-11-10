@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,15 +50,15 @@ class PosCatalogBarcodeChecksTest {
       Collection<UUID> ids = inv.getArgument(0);
       return List.of(riceData, sugarData).stream().filter(p -> ids.contains(p.id())).toList();
     });
-    when(repo.forProducts(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, ""),
-        sugar, new ProductPos(sugar, SoldBy.WEIGHT, "101", 5, "")));
+    when(repo.forProducts(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), ""),
+        sugar, new ProductPos(sugar, SoldBy.WEIGHT, "101", GstRates.of(5), "")));
     when(inventory.stocks(any())).thenReturn(Map.of(rice, new InventoryRepository.Stock(rice, 40, 5),
         sugar, new InventoryRepository.Stock(sugar, 25000, 5)));
     when(repo.barcodesOf(any())).thenReturn(List.of());
-    when(repo.findByPlu("101")).thenReturn(Optional.of(new ProductPos(sugar, SoldBy.WEIGHT, "101", 5, "")));
+    when(repo.findByPlu("101")).thenReturn(Optional.of(new ProductPos(sugar, SoldBy.WEIGHT, "101", GstRates.of(5), "")));
   }
 
-  private void save(List<String> codes) { service.save(rice, SoldBy.UNIT, null, 5, "", codes, UUID.randomUUID()); }
+  private void save(List<String> codes) { service.save(rice, SoldBy.UNIT, null, GstRates.of(5), "", codes, UUID.randomUUID()); }
 
   @Test void save_wrongCheckDigitOnAStandardLengthIsRejectedWithAPlainMessage() {
     assertThatThrownBy(() -> save(List.of("4006381333932"))).isInstanceOf(ApiException.class)

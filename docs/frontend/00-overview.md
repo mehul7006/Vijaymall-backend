@@ -91,7 +91,7 @@ All of these are `400 VALIDATION_FAILED` with `details.fields[<field>]` set. The
 |---|---|---|
 | A required field left out or `null` (code, kind, value, nameEn ...) | the field | `is required` |
 | A number below its minimum / above its maximum | the field | `must be 0 or more` / `must be 99 or less` |
-| A word that is not one of the allowed values (`fulfilment`, `coinMode`) | the field | `must be DELIVERY or PICKUP`, `must be NONE, ALL or PERCENT`; for long lists `must be one of PLACED, CONFIRMED, ...` |
+| A word that is not one of the allowed values (`fulfilment`, `coinMode`) | the field | `must be DELIVERY or PICKUP`, `must be NONE, ALL or PERCENT`; a list of up to three allowed values reads `must be A, B or C` (two: `must be A or B`), a longer list reads `must be one of A, B, C, D` (for example `must be one of PLACED, CONFIRMED, ...`, `audience: must be one of ALL, CUSTOMERS, STAFF, ADMINS, CASHIERS, USERS, SEGMENT`, the refunds `status` filter reads `must be PENDING, PROCESSING, ISSUED or FAILED`). Do not hard-code the text: show the message from `details.fields` |
 | Text where a whole number goes (`items[0].qty: "two"`) | `items[0].qty` | `must be a whole number` |
 | A decimal where a number goes | the field | `must be a number` |
 | A fraction or a decimal point where a whole number goes (stock `delta: 1.5`, coin `paisePerCoin: 1.5`; `5.0` is refused too, send `5`) | the field | `must be a whole number` (never silently cut down) |

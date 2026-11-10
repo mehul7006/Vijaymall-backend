@@ -209,6 +209,21 @@ public class OrderReturnService {
     return new Prepared(order, lines, asked, perLine, plan, reason, policy);
   }
 
+  /** The coins a return moves, worked out before anything is changed: the one plan the return and its preview share. */
+  private record CoinPlan(int claw, int restore) {}
+
+  private static CoinPlan coinPlan(Prepared p, OrderReturnRepository.Totals prior) {
+    OrderRepository.Row order = p.order();
+    long cumulativeGross = 0;
+    for (OrderRepository.ItemRow l : p.lines()) {
+      cumulativeGross += OrderReturnMath.share(l.lineTotalPaise(), l.qty(), 0, l.returnedQty() + p.perLine().getOrDefault(l.id(), 0));
+    }
+    int claw = order.coinsCredited()
+        ? OrderReturnMath.coinsDelta(order.coinsEarned(), cumulativeGross, order.subtotal(), prior.coinsClawedBack()) : 0;
+    int restore = OrderReturnMath.coinsDelta(order.coinsUsed(), cumulativeGross, order.subtotal(), prior.coinsRestored());
+    return new CoinPlan(claw, restore);
+  }
+
   private UUID doCreate(UUID actor, UUID orderId, String idemKey, Input in) {
     Prepared p = prepare(orderId, in);
     OrderRepository.Row order = p.order();
@@ -221,12 +236,10 @@ public class OrderReturnService {
     List<InventoryService.Item> restock = new ArrayList<>();
     List<InventoryService.Item> defectiveGoods = new ArrayList<>();
     long refund = 0;
-    long cumulativeGross = 0;
     for (int k = 0; k < lines.size(); k++) {
       OrderRepository.ItemRow l = lines.get(k);
       ItemInput i = p.asked().get(l.productId());
       int returning = p.perLine().getOrDefault(l.id(), 0);
-      cumulativeGross += OrderReturnMath.share(l.lineTotalPaise(), l.qty(), 0, l.returnedQty() + returning);
       if (returning == 0) continue;
       long lineRefund = p.plan().refundPaise()[k];
       boolean back = i.restock() == null || i.restock();
@@ -242,15 +255,10 @@ public class OrderReturnService {
       throw ApiException.conflict("REFUND_EXCEEDS_ORDER", "More than the order was worth", Map.of("totalPaise", order.total()));
     }
 
-    int clawed = 0;
-    int restored = 0;
-    if (order.coinsCredited()) {
-      int claw = OrderReturnMath.coinsDelta(order.coinsEarned(), cumulativeGross, order.subtotal(), prior.coinsClawedBack());
-      clawed = wallet.clawback(order.userId(), claw, returnId);
-    }
-    int restore = OrderReturnMath.coinsDelta(order.coinsUsed(), cumulativeGross, order.subtotal(), prior.coinsRestored());
-    wallet.restore(order.userId(), restore, returnId);
-    restored = restore;
+    CoinPlan coins = coinPlan(p, prior);
+    int clawed = order.coinsCredited() ? wallet.clawback(order.userId(), coins.claw(), returnId) : 0;
+    wallet.restore(order.userId(), coins.restore(), returnId);
+    int restored = coins.restore();
 
     if (!restock.isEmpty()) inventory.release(restock, returnId, "ORDER_RETURN");
     // goods that are not fit to sell are kept apart for the owner to decide on, not lost
@@ -287,11 +295,16 @@ public class OrderReturnService {
    * @param coinShareRemovedPaise the coin value that leaves with them
    * @param couponClawbackPaise coupon discount of the kept pieces taken back out of this refund (0 under KEEP)
    * @param deliveryFeeRefundedPaise always 0: the delivery fee is not refunded
+   * @param coinsClawedBack earned coins the return takes back (at most what the customer still has unspent), as the recorded return will
+   * @param coinsClawedBackPaise their value in paise
+   * @param coinsRestored spent coins the return gives back, as the recorded return will
+   * @param coinsRestoredPaise their value in paise
    */
   @Schema(name = "ReturnPreview")
   public record PreviewView(UUID orderId, String orderNo, String couponPolicy, long refundPaise, long couponShareRemovedPaise,
                             long coinShareRemovedPaise, long couponClawbackPaise, long deliveryFeeRefundedPaise,
-                            List<PreviewItem> items) {}
+                            List<PreviewItem> items, int coinsClawedBack, long coinsClawedBackPaise, int coinsRestored,
+                            long coinsRestoredPaise) {}
 
   /**
    * The refund a return would give, with the coupon and coin share per line. Same checks and the same maths as {@link #create}, no
@@ -311,9 +324,11 @@ public class OrderReturnService {
       items.add(new PreviewItem(l.id(), l.productId(), l.name(), returning, plan.grossPaise()[k], plan.couponSharePaise()[k],
           plan.otherSharePaise()[k], plan.clawbackPaise()[k], plan.refundPaise()[k]));
     }
+    CoinPlan coins = tx.execute(_ -> coinPlan(p, returns.totals(orderId)));
+    int clawed = wallet.previewClawback(p.order().userId(), coins.claw());
     return new PreviewView(orderId, p.order().orderNo(), p.policy(), items.stream().mapToLong(PreviewItem::refundPaise).sum(),
         items.stream().mapToLong(PreviewItem::couponSharePaise).sum(), items.stream().mapToLong(PreviewItem::coinSharePaise).sum(),
-        plan.clawbackTotalPaise(), 0, items);
+        plan.clawbackTotalPaise(), 0, items, clawed, wallet.coinValuePaise(clawed), coins.restore(), wallet.coinValuePaise(coins.restore()));
   }
 
   /** The returns of one order, oldest first. {@code onlyFor} limits it to the customer's own order (null for staff). */

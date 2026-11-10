@@ -29,7 +29,7 @@ public final class ReceiptText {
             String qty = l.soldBy() == SoldBy.WEIGHT
                     ? "%d.%03d kg".formatted(l.qty() / 1000, l.qty() % 1000)
                     : "%d x %s".formatted(l.qty(), Money.plain(l.unitPricePaise()));
-            out.add(split("  " + qty + " (" + l.gstPercent() + "%)", Money.plain(l.netPaise()), width));
+            out.add(split("  " + qty + " (" + GstRates.plain(l.gstPercent()) + "%)", Money.plain(l.netPaise()), width));
         });
         out.add("-".repeat(width));
         out.add(split("Subtotal", Money.plain(r.subtotalPaise()), width));
@@ -73,7 +73,7 @@ public final class ReceiptText {
         r.lines().forEach(l -> {
             wrap(l.name(), width).forEach(out::add);
             String qty = l.soldBy() == SoldBy.WEIGHT ? "%d.%03d kg".formatted(l.qty() / 1000, l.qty() % 1000) : "%d".formatted(l.qty());
-            out.add(split("  Returned " + qty + " (" + l.gstPercent() + "%)", Money.plain(l.refundPaise()), width));
+            out.add(split("  Returned " + qty + " (" + GstRates.plain(l.gstPercent()) + "%)", Money.plain(l.refundPaise()), width));
         });
         out.add("-".repeat(width));
         out.add(split("Taxable", Money.plain(r.taxablePaise()), width));

@@ -268,7 +268,7 @@ public class PaymentService {
   public Page<PaymentRepository.RefundRow> refunds(String status, int page, int size) {
     String s = status == null || status.isBlank() ? null : status.trim().toUpperCase();
     if (s != null && !List.of("PENDING", "PROCESSING", "ISSUED", "FAILED").contains(s)) {
-      throw ApiException.validation("status", "PENDING, PROCESSING, ISSUED or FAILED");
+      throw ApiException.validation("status", "must be PENDING, PROCESSING, ISSUED or FAILED");
     }
     return repo.refundPage(s, Math.max(0, page), Page.clampSize(size));
   }

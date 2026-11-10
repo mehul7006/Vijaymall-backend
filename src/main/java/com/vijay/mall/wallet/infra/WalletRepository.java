@@ -60,6 +60,8 @@ public class WalletRepository {
    */
   public record ExpiredLot(UUID id, UUID userId, int remaining) {}
 
+  private static final UUID NO_RULE = new UUID(0, 0);
+
   private final WalletJpa wallets;
   private final LedgerJpa ledger;
   private final LotUseJpa lotUses;
@@ -98,6 +100,9 @@ public class WalletRepository {
   public List<LotAllocator.Lot> openLotsForUpdate(UUID userId, Instant now) {
     return ledger.openLotsForUpdate(userId, now).stream().map(l -> new LotAllocator.Lot(l.id, l.remaining, l.expiresAt)).toList();
   }
+
+  /** Coins still unspent in the user's open lots, read without a lock. */
+  public long openCoins(UUID userId, Instant now) { return ledger.openCoins(userId, now); }
 
   /** Adds or removes coins from the remaining amount of one earned lot. */
   @Transactional
@@ -203,6 +208,21 @@ public class WalletRepository {
     fill(e, r);
     return rules.save(e).id;
   }
+
+  /**
+   * Switches every earning rule except the given one off, so only one rule is ever active. Takes the activation lock
+   * first, so two simultaneous activations run one after the other; the unique index {@code coin_rule_one_active} is the
+   * last safety net. Must run before the rule that is switched on is written.
+   */
+  @Transactional
+  public void deactivateOtherRules(UUID keep) {
+    rules.lockActivation();
+    rules.deactivateExcept(keep);
+  }
+
+  /** Same as {@link #deactivateOtherRules(UUID)} for a rule that does not exist yet: every active rule is switched off. */
+  @Transactional
+  public void deactivateAllRules() { deactivateOtherRules(NO_RULE); }
 
   /** Overwrites an existing earning rule. */
   @Transactional

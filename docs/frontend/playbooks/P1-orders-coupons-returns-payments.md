@@ -817,8 +817,10 @@ Remaining returnable per product (compute for the stepper only): sum of `qty` of
    { "orderId": "...", "orderNo": "VM-1024", "couponPolicy": "KEEP", "refundPaise": 31500,
      "couponShareRemovedPaise": 3500, "coinShareRemovedPaise": 0, "couponClawbackPaise": 0, "deliveryFeeRefundedPaise": 0,
      "items": [ { "orderItemId": "...", "productId": "...", "name": "Oil", "qty": 1, "grossPaise": 35000,
-                  "couponSharePaise": 3500, "coinSharePaise": 0, "clawbackPaise": 0, "refundPaise": 31500 } ] }
+                  "couponSharePaise": 3500, "coinSharePaise": 0, "clawbackPaise": 0, "refundPaise": 31500 } ],
+     "coinsClawedBack": 12, "coinsClawedBackPaise": 1200, "coinsRestored": 5, "coinsRestoredPaise": 500 }
    ```
+   The four coin fields are the coin movement of the return that follows, computed by the same server code (no second formula): `coinsClawedBack` = earned coins taken back (capped at what the customer still has unspent, so it equals the recorded return's `coinsClawedBack`), `coinsRestored` = spent coins given back, plus their value in paise. Show them under the refund ("12 coins (Rs 12) taken back, 5 coins (Rs 5) given back"). Preview and recorded return agree on `refundPaise`, `couponClawbackPaise`, `coinsClawedBack` and `coinsRestored` (proved by an integration test for KEEP and CLAWBACK_BELOW_MINIMUM).
    Per line: `refundPaise = grossPaise - couponSharePaise - coinSharePaise - clawbackPaise` exactly. Show "Price Rs 350 - coupon Rs 35 - coins Rs 0 - taken back Rs 0 = refund Rs 315". `deliveryFeeRefundedPaise` is always 0: say "Delivery fee is not refunded". Preview rows are per order line (`orderItemId`).
 3. Confirm: `POST /api/v1/admin/orders/{id}/returns` with header `Idempotency-Key: <uuid>`, same body, `reason` required. Response **201** `ReturnView` (fields in 10.3). Show `refundPaise` and `refundMode`: for `CASH` tell the cashier to hand cash; for `ONLINE` "sent to the customer's payment method".
 4. Refresh the order and its returns. An SSE `order` event arrives with `status == previousStatus` (something changed). **The order's `paymentStatus` is not changed by a return** (it stays `CAPTURED`); read refunds from the returns list or the refunds queue.

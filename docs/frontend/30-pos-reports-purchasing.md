@@ -85,7 +85,7 @@ Cross-references (documented in the catalog document, not here): `POST /api/v1/a
 
 **Units.** A product is sold `UNIT` (quantity = pieces) or `WEIGHT` (quantity = **grams**; the product price is paise **per 1000 g**). Weighed line amount = `round_half_up(pricePaise * grams / 1000)`. Allowed quantity per line: 1..9999 pieces, 1..100000 grams (100 kg). Stock for weighed products is also held in grams (a sale takes `grams` from stock), so purchases and stock takes of weighed products are in grams **(inferred from how sales take stock)**.
 
-**GST.** Prices are GST-inclusive. Per line, after discounts: `taxable = round_half_up(net * 100 / (100 + gstPercent))`, `tax = net - taxable`, `CGST = floor(tax / 2)`, `SGST = tax - CGST` (SGST can be 1 paise more than CGST). The bill's `taxablePaise`, `cgstPaise`, `sgstPaise` are the sums over lines. Allowed `gstPercent` values: 0, 3, 5, 12, 18, 28. Intra-state only (no IGST).
+**GST.** Prices are GST-inclusive. Per line, after discounts: `taxable = round_half_up(net * 100 / (100 + gstPercent))`, `tax = net - taxable`, `CGST = floor(tax / 2)`, `SGST = tax - CGST` (SGST can be 1 paise more than CGST). The bill's `taxablePaise`, `cgstPaise`, `sgstPaise` are the sums over lines. Allowed `gstPercent` values (a JSON number, decimals allowed): 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40; anything else is a 400 with `fields.gstPercent` = `must be one of 0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40`. The maths is exact integer arithmetic on the rate in hundredths of a percent and gives the same paise as before for the whole-number rates. Rates are returned as plain JSON numbers without needless zeros (`18`, `5`, `1.5`, `0.25`, never `18.0` or `18.00`): read them as `num`. Intra-state only (no IGST).
 
 **Discount order.** Coupon first (a category coupon lowers only the lines it covers, and their GST), then coins, then a manual discount typed at the till. Coin and manual discounts are spread over the remaining line amounts proportionally (largest-remainder, so paise add up exactly). A line never goes below 0.
 
@@ -219,7 +219,7 @@ Period rules shared by the three period reports (`summary`, `credit`, `counter-c
 | product.pricePaise | long | per piece, or per 1000 g when `soldBy=WEIGHT` |
 | product.mrpPaise | long | printed MRP |
 | product.soldBy | `UNIT`/`WEIGHT` | |
-| product.gstPercent / hsn | int / string | GST rate and HSN |
+| product.gstPercent / hsn | number / string | GST rate (decimal, e.g. 1.5) and HSN |
 | product.plu | string or null | item code for scale labels |
 | product.posOnly | bool | counter-only (all weighed items are) |
 | product.qtyOnHand | int | stock; grams for weighed items |
@@ -697,8 +697,8 @@ The day is by bill time (`createdAt`, which is `soldAt` for offline bills).
 |---|---|---|---|
 | soldBy | `UNIT`/`WEIGHT` | yes (`@NotNull`) | `WEIGHT` makes the product counter-only (`posOnly=true`) and its price per 1000 g |
 | plu | string | required for `WEIGHT` | 1 to 6 digits (`\d{1,6}`); leading zeros ignored; must be unique across products |
-| gstPercent | int | yes in practice (absent = 0) | one of 0, 3, 5, 12, 18, 28 |
-| hsn | string | no | trimmed, free text |
+| gstPercent | number | no | one of 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40 (numeric compare: `18`, `18.0`, `18.00` are all 18). **Left out or `null` keeps the stored rate**; an explicit value (also an explicit `0`) wins. With nothing stored yet (a product never configured) the default 0 applies |
+| hsn | string | no | trimmed, free text. **Left out, `null` or blank keeps the stored HSN**; a non-blank value replaces it. With nothing stored the HSN is empty |
 | barcodes | string[] | no | each 4-32 of letters, digits, dashes; blanks removed, duplicates removed; unique across products; for `WEIGHT` products no 13-digit code starting with the shop's weighed prefix |
 - **Response**: 200 same shape as GET.
 - **Errors**:
@@ -958,7 +958,7 @@ Each bill in `sales[]` may carry a `rung` snapshot:
 
 | field | rules |
 |---|---|
-| `rung.lines[]` | at least one; each: `productId` (must exist), `qty` > 0 (pieces; **grams for weighed items**), `unitPricePaise` >= 0 (per piece, or per 1000 g for weighed items), `gstPercent` one of 0, 3, 5, 12, 18, 28, `discountPaise` >= 0 and not more than the line (default 0), `name` optional, `linePaise` optional but, if sent, must equal price x qty (weighed: the amount the till charged) |
+| `rung.lines[]` | at least one; each: `productId` (must exist), `qty` > 0 (pieces; **grams for weighed items**), `unitPricePaise` >= 0 (per piece, or per 1000 g for weighed items), `gstPercent` one of 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40 (a number; 18 and 18.0 are the same), `discountPaise` >= 0 and not more than the line (default 0), `name` optional, `linePaise` optional but, if sent, must equal price x qty (weighed: the amount the till charged) |
 | `payments` | modes `CASH`, `UPI`, `CARD`; must add up **exactly** to the as-rung total (line amounts less discounts, with the shop's `gst.roundOff` applied). Anything else is refused |
 | `cart.customerMobile` | optional: the only part of `cart` that is read when `rung` is present (the customer is linked to the bill; **no coins are earned** on an as-rung bill) |
 | `manualDiscount` | optional fixed amount the till already applied; recorded without a manager PIN check and always raises a `DISCOUNT` exception |
@@ -1221,3 +1221,44 @@ Each stored bill line keeps `couponSharePaise` (the part of its `discountPaise` 
 `refundPaise = grossPaise - couponSharePaise - otherSharePaise - clawbackPaise` per line (`otherSharePaise` = coins and manual discount). The cashier return window applies to the preview as well (`422 RETURN_NEEDS_ADMIN`). Show it before the cashier confirms.
 
 Checklist (counter): [ ] re-quote after every basket change; [ ] show per-line discount from the quote; [ ] return screen calls the preview first; [ ] print/show the coupon lines of the credit note; [ ] handle `ITEM`/`FLASH_ITEMS` reasons.
+
+## Addendum 8: GST rates
+
+**Allowed rates.** `gstPercent` is now a decimal everywhere (product counter attributes, bill lines, offline `rung.lines[]`, purchase lines, the purchase `gstRate` report filter and the GST-by-rate report): **0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40** (the CBIC rates in force since 22 Sep 2025). Send a JSON number: `18`, `18.0` and `18.00` are the same rate, `1.5` and `1.50` too (compared numerically, never as text). Any other value, for example `18.5`, `7`, `1` or `41`, answers `400 VALIDATION_FAILED` with `fields.gstPercent` = `must be one of 0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40` (on an offline bill the line is `REJECTED` with that message).
+
+**Output format.** Every response writes the rate as a plain JSON number without needless zeros: `18` (not `18.0`), `5`, `1.5`, `0.25`, `40`, `0`. In Dart read it as `num` (a `0.25` is a `double`, an `18` an `int`); do not declare it `int`.
+
+**Money does not change for the whole-number rates.** The split keeps its rules (`taxable = round_half_up(net * 100 / (100 + rate))`, `CGST = floor(tax / 2)`, `SGST = tax - CGST`); a test compares the new code with the old integer code paise by paise. Receipts print `(1.5%)`, `(18%)`.
+
+**Optional rate and HSN on `PUT /admin/products/{id}/pos`.** `gstPercent` and `hsn` may be left out. Left out or `null` (for `hsn` also blank) keeps what is stored; an explicit value wins (an explicit `0` sets 0 %). Only when nothing is stored (a product never configured: rate 0 and no HSN) do the defaults 0 and empty apply. An untouched form field must therefore be left out of the body, not sent as `0` or `""`. There is no way to clear an HSN by sending blank.
+
+Request, 1.5 % (e.g. a rate-controlled item):
+
+```json
+PUT /api/v1/admin/products/{id}/pos
+{ "soldBy": "UNIT", "gstPercent": 1.5, "hsn": "7113" }
+-> 200 { "productId": "uuid", "soldBy": "UNIT", "plu": null, "gstPercent": 1.5, "hsn": "7113", "posOnly": false, "barcodes": [] }
+```
+
+A 101.50 piece sold at 1.5 %: `taxablePaise` 10000, `cgstPaise` 75, `sgstPaise` 75; the bill line has `"gstPercent": 1.5`.
+
+0.25 % (rough stones, e.g.) and 40 %:
+
+```json
+{ "soldBy": "UNIT", "gstPercent": 0.25 }   -> 200 { ..., "gstPercent": 0.25, "hsn": "<unchanged>" }
+{ "soldBy": "UNIT", "gstPercent": 40 }     -> 200 { ..., "gstPercent": 40 }
+```
+
+10025 paise at 0.25 %: taxable 10000, CGST 12, SGST 13. 14000 paise at 40 %: taxable 10000, CGST 2000, SGST 2000.
+
+Offline bill line at 40 % (the catalog says 1.5, so the bill is recorded with 40 and a `GST_CHANGED` exception, `expected` `"1.5"`, `actual` `"40"`):
+
+```json
+{ "productId": "uuid", "qty": 1, "unitPricePaise": 10150, "gstPercent": 40, "discountPaise": 0 }
+```
+
+Rejected: `{ "gstPercent": 18.5 }` -> `400`, `fields.gstPercent` = `must be one of 0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40`.
+
+**Purchases.** `gstPercent` on a purchase line takes the same rates; `freightGstPercent` stays a whole number (one of the whole-number rates above, for example 5 or 18); the response items and the GST-by-rate report (`GET /admin/reports/purchases/input-gst`) show `gstPercent` as above (`"gstPercent": 1.5`). The register filter `?gstRate=1.5` matches numerically.
+
+Checklist: [ ] type `gstPercent` as `num`; [ ] offer the nine rates in the GST dropdown; [ ] leave `gstPercent` and `hsn` out of the product-counter PUT when the field was not touched.

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.pos.domain.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,7 +62,7 @@ class PosFlashSplitTest {
     service.setFlash(flash);
     ProductData riceData = PosTestData.product(rice, "Rice", 5900, true);
     when(catalog.productsById(any())).thenReturn(Map.of(rice, riceData));
-    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006")));
+    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006")));
     when(quotes.quoteLines(any(), anyList(), any(), any(), any())).thenReturn(new Quote(List.of(), 0, null, 0, 0, 0, 0, 0, 0, List.of()));
   }
 

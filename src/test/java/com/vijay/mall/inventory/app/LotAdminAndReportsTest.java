@@ -64,7 +64,7 @@ class LotAdminAndReportsTest {
   }
 
   private LotRow row(String expiry) {
-    return new LotRow(UUID.randomUUID(), p, "Milk", NOW, 10, 4, BigDecimal.ONE, true, null, null, "", LocalDate.parse(expiry), "PURCHASE", null);
+    return new LotRow(UUID.randomUUID(), p, "Milk", NOW, 10, 4, BigDecimal.ONE, true, null, null, "", LocalDate.parse(expiry), "PURCHASE", null, null, null, null);
   }
 
   @Test

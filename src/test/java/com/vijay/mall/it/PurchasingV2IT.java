@@ -3,6 +3,7 @@ package com.vijay.mall.it;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vijay.mall.support.IntegrationTestBase;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -29,7 +30,7 @@ class PurchasingV2IT extends IntegrationTestBase {
   private String supplierName() { return "V2 Supplier " + UUID.randomUUID().toString().substring(0, 8); }
 
   /** A fresh product with no stock, so every test owns its own numbers. */
-  private String product(int gst, String hsn) {
+  private String product(Object gst, String hsn) {
     String category = jdbc.queryForObject("select id::text from category limit 1", String.class);
     var res = post("/api/v1/admin/products", admin(), Map.of("categoryId", category, "nameEn", "V2 Item " + UUID.randomUUID(), "nameGu", "વસ્તુ",
         "mrpPaise", 20000, "pricePaise", 18000, "unit", "pack", "packSize", "1 kg", "qtyOnHand", 0));
@@ -538,5 +539,65 @@ class PurchasingV2IT extends IntegrationTestBase {
       assertThat(get(url, cashier).getStatusCode()).as(url).isEqualTo(HttpStatus.FORBIDDEN);
     }
     assertThat(post(P + "/" + UUID.randomUUID() + "/payments", cashier, Map.of("amountPaise", 1, "mode", "CASH")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+  }
+
+  /*
+   * 10 x 100.00 = 1,00,000 paise taxable. At 1.5% the GST is 1500 (750 + 750), at 0.25% it is 250 (125 + 125), at 40% it is 40000
+   * (20000 + 20000). Rates come back as JSON numbers without needless zeros.
+   */
+  @Test
+  void fractionalGstRatesWorkInEveryGstModeAndShowInTheReports() {
+    String quarter = product(new BigDecimal("0.25"), "1001");
+    String half = product(new BigDecimal("1.5"), "1002");
+    String forty = product(40, "1003");
+    String date = TODAY.minusDays(150).toString();
+
+    assertThat(get(P + "/lookup?productId=" + half, admin()).getBody().get("gstPercent")).isEqualTo(1.5);
+    assertThat(get(P + "/lookup?productId=" + forty, admin()).getBody().get("gstPercent")).isEqualTo(40);
+
+    Map regular = create(body(supplierName(), List.of(item(half, 10, 10000, Map.of()), item(quarter, 10, 10000, Map.of("gstPercent", 0.25)),
+        item(forty, 10, 10000, Map.of("gstPercent", 40.0))), Map.of("invoiceDate", date, "freightPaise", 1000, "freightGstPercent", 5)));
+    List<Map> lines = (List<Map>) regular.get("items");
+    assertThat(lines.stream().map(l -> l.get("gstPercent"))).containsExactlyInAnyOrder(1.5, 0.25, 40);
+    assertThat(lines.stream().map(l -> n(l.get("cgstPaise")))).containsExactlyInAnyOrder(750L, 125L, 20000L);
+    assertThat(lines.stream().map(l -> n(l.get("sgstPaise")))).containsExactlyInAnyOrder(750L, 125L, 20000L);
+    assertThat(regular.get("freightGstPercent")).isEqualTo(5);
+    assertThat(n(regular.get("freightGstPaise"))).isEqualTo(50);
+    assertThat(n(regular.get("totalCostPaise"))).isEqualTo(300000 + 41750 + 1000 + 50);
+    assertThat(lines.stream().map(l -> n(l.get("landedTotalPaise")))).containsExactlyInAnyOrder(100334L, 100333L, 100333L);
+
+    String comp = product(new BigDecimal("1.5"), "");
+    Map composition = create(body(supplierName(), List.of(item(comp, 10, 10000, Map.of())), Map.of("gstMode", "COMPOSITION")));
+    assertThat(n(((List<Map>) composition.get("items")).getFirst().get("landedTotalPaise"))).isEqualTo(101500);
+
+    String none = product(40, "");
+    Map noGst = create(body(supplierName(), List.of(item(none, 10, 10000, Map.of("gstPercent", 40))), Map.of("gstMode", "NONE")));
+    assertThat(n(noGst.get("totalCostPaise"))).isEqualTo(100000);
+    assertThat(n(noGst.get("cgstPaise"))).isZero();
+
+    var shown = get(P + "/" + regular.get("id"), admin()).getBody();
+    assertThat(((List<Map>) shown.get("items")).stream().map(l -> l.get("gstPercent"))).containsExactlyInAnyOrder(1.5, 0.25, 40);
+    assertThat(jdbc.queryForObject("select gst_percent from purchase_item where purchase_id = ?::uuid and product_id = ?::uuid", BigDecimal.class,
+        regular.get("id"), half)).isEqualByComparingTo("1.5");
+
+    String range = "from=" + date + "&to=" + date;
+    var reg = get("/api/v1/admin/reports/purchases/register?" + range + "&productId=" + half + "&gstRate=1.50", admin()).getBody();
+    assertThat((List<Map>) reg.get("items")).singleElement().satisfies(r -> assertThat(r).containsEntry("gstPercent", 1.5));
+    var gst = get("/api/v1/admin/reports/purchases/input-gst?" + range, admin()).getBody();
+    List<Map> rows = (List<Map>) gst.get("lines");
+    assertThat(rows).anySatisfy(r -> assertThat(r).containsEntry("gstMode", "REGULAR").containsEntry("gstPercent", 0.25).containsEntry("cgstPaise", 125));
+    assertThat(rows).anySatisfy(r -> assertThat(r).containsEntry("gstPercent", 40).containsEntry("taxablePaise", 100000));
+    assertThat(rows).anySatisfy(r -> assertThat(r).containsEntry("gstPercent", 1.5).containsEntry("gstMode", "REGULAR"));
+  }
+
+  @Test
+  void ratesOutsideTheAllowedSetAreRefusedWithTheFieldAndTheFixedText() {
+    String it = product(18, "");
+    for (Object bad : new Object[] {18.5, 1, 0.5, 7, 41}) {
+      var res = call(HttpMethod.POST, P, admin(), body("S", List.of(item(it, 1, 1000, Map.of("gstPercent", bad))), Map.of()), key());
+      assertThat(res.getStatusCode()).as(String.valueOf(bad)).isEqualTo(HttpStatus.BAD_REQUEST);
+      assertThat(((Map) ((Map) res.getBody().get("details")).get("fields")).get("gstPercent"))
+          .isEqualTo("must be one of 0, 0.25, 1.5, 3, 5, 12, 18, 28 or 40");
+    }
   }
 }

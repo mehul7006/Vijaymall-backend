@@ -1,5 +1,7 @@
 package com.vijay.mall.pos.domain;
 
+import com.vijay.mall.common.web.GstRateJson;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -13,7 +15,7 @@ public final class BillCalculator {
      * One priced basket line before GST is split: the product, how it is sold, quantity (pieces, or grams for a
      * weighed item), unit price in paise and the GST percent that applies.
      */
-    public record Draft(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, int gstPercent, String hsn) {
+    public record Draft(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, @GstRateJson BigDecimal gstPercent, String hsn) {
         /**
          * The line amount in paise before any discount (price times quantity, or price per 1000 g for weighed items).
          */
@@ -27,7 +29,7 @@ public final class BillCalculator {
      * the customer pays and the GST split of that net amount.
      */
     public record Line(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
-                       long discountPaise, long netPaise, int gstPercent, String hsn, TaxSplit tax) { }
+                       long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, String hsn, TaxSplit tax) { }
 
     /**
      * A finished GST bill: its lines, subtotal before discount, the discount actually applied, the total payable and

@@ -24,17 +24,18 @@ public class MoneyAccountRepository {
    * @param kind BANK, GATEWAY, UPI, CARD_TERMINAL or CASH
    * @param provider free code such as razorpay, paytm or manual
    * @param identifier last four digits, a UPI id or a terminal id
+   * @param ifsc the bank's IFSC code (BANK accounts only, upper case), or null
    * @param settlesToAccountId the bank account a gateway, UPI or card terminal pays out into
    */
-  public record Account(UUID id, String name, String kind, String provider, String identifier, UUID settlesToAccountId, boolean active,
-                        String note, Instant createdAt, Instant updatedAt) {}
+  public record Account(UUID id, String name, String kind, String provider, String identifier, String ifsc, UUID settlesToAccountId,
+                        boolean active, String note, Instant createdAt, Instant updatedAt) {}
 
   /** A hand-entered movement on an account. {@code sourceType} is free for other modules (for example PURCHASE_PAYMENT). */
   @Schema(name = "MoneyAccountEntry")
   public record Entry(UUID id, UUID moneyAccountId, Instant at, String direction, long amountPaise, String sourceType, String sourceId,
                       String note, UUID createdBy) {}
 
-  private static final String COLUMNS = "id, name, kind, provider, identifier, settles_to_account_id, active, note, created_at, updated_at";
+  private static final String COLUMNS = "id, name, kind, provider, identifier, ifsc, settles_to_account_id, active, note, created_at, updated_at";
 
   private final JdbcClient jdbc;
 
@@ -47,7 +48,7 @@ public class MoneyAccountRepository {
 
   private Account row(ResultSet rs, int i) throws SQLException {
     return new Account(rs.getObject("id", UUID.class), rs.getString("name"), rs.getString("kind"), rs.getString("provider"),
-        rs.getString("identifier"), rs.getObject("settles_to_account_id", UUID.class), rs.getBoolean("active"), rs.getString("note"),
+        rs.getString("identifier"), rs.getString("ifsc"), rs.getObject("settles_to_account_id", UUID.class), rs.getBoolean("active"), rs.getString("note"),
         instant(rs, "created_at"), instant(rs, "updated_at"));
   }
 
@@ -94,10 +95,10 @@ public class MoneyAccountRepository {
     return jdbc.sql("select count(*) from money_account where active and kind = :k").param("k", kind).query(Long.class).single();
   }
 
-  /** Accounts, A to Z; every filter is optional ({@code q} matches name, provider or identifier). */
+  /** Accounts, A to Z; every filter is optional ({@code q} matches name, provider, identifier or IFSC). */
   public Page<Account> page(String kind, Boolean active, String q, int page, int size) {
     String where = "money_account where (cast(:k as text) is null or kind = :k) and (cast(:a as boolean) is null or active = :a) "
-        + "and (cast(:q as text) is null or lower(name || ' ' || provider || ' ' || identifier) like :like)";
+        + "and (cast(:q as text) is null or lower(name || ' ' || provider || ' ' || identifier || ' ' || coalesce(ifsc, '')) like :like)";
     String like = q == null ? null : "%" + q.toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
     List<Account> rows = jdbc.sql("select " + COLUMNS + " from " + where + " order by lower(name), id limit :n offset :o")
         .param("k", kind).param("a", active).param("q", q).param("like", like).param("n", size + 1).param("o", (long) page * size)
@@ -115,20 +116,20 @@ public class MoneyAccountRepository {
   /** Inserts a new, active account. */
   @Transactional
   public void insert(Account a) {
-    jdbc.sql("insert into money_account (id, name, kind, provider, identifier, settles_to_account_id, active, note, created_at, updated_at) "
-        + "values (:id, :name, :kind, :provider, :identifier, :settles, :active, :note, :now, :now)")
+    jdbc.sql("insert into money_account (id, name, kind, provider, identifier, ifsc, settles_to_account_id, active, note, created_at, updated_at) "
+        + "values (:id, :name, :kind, :provider, :identifier, :ifsc, :settles, :active, :note, :now, :now)")
         .param("id", a.id()).param("name", a.name()).param("kind", a.kind()).param("provider", a.provider()).param("identifier", a.identifier())
-        .param("settles", a.settlesToAccountId()).param("active", a.active()).param("note", a.note()).param("now", Timestamp.from(a.createdAt()))
+        .param("ifsc", a.ifsc()).param("settles", a.settlesToAccountId()).param("active", a.active()).param("note", a.note()).param("now", Timestamp.from(a.createdAt()))
         .update();
   }
 
   /** Rewrites the editable fields of an account. */
   @Transactional
   public void update(Account a, Instant now) {
-    jdbc.sql("update money_account set name = :name, kind = :kind, provider = :provider, identifier = :identifier, "
+    jdbc.sql("update money_account set name = :name, kind = :kind, provider = :provider, identifier = :identifier, ifsc = :ifsc, "
         + "settles_to_account_id = :settles, note = :note, updated_at = :now where id = :id")
         .param("id", a.id()).param("name", a.name()).param("kind", a.kind()).param("provider", a.provider()).param("identifier", a.identifier())
-        .param("settles", a.settlesToAccountId()).param("note", a.note()).param("now", Timestamp.from(now)).update();
+        .param("ifsc", a.ifsc()).param("settles", a.settlesToAccountId()).param("note", a.note()).param("now", Timestamp.from(now)).update();
   }
 
   /** Switches an account on or off; a card machine that owns the account follows it, so the two always agree. */

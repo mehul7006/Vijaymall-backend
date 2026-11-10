@@ -42,7 +42,7 @@ class PurchaseServiceRaceTest {
     var tx = mock(TransactionTemplate.class);
     var service = new PurchaseService(repo, mock(InventoryService.class), mock(CatalogService.class), mock(AuditService.class), mock(SupplierService.class),
         mock(PosCatalogService.class), mock(ShopService.class), tx, Clock.fixed(NOW, ZoneOffset.UTC), mock(AdminOps.class), mock(RuntimeSettings.class));
-    var item = new PurchaseService.ItemInput(UUID.randomUUID(), 1, 10, null, BigDecimal.ZERO, null, null, null, null, null, null, null, null, null);
+    var item = new PurchaseService.ItemInput(UUID.randomUUID(), 1, BigDecimal.TEN, null, BigDecimal.ZERO, null, null, null, null, null, null, null, null, null);
     var in = new PurchaseService.Input(null, "Agro", null, null, List.of(item), null, null, null, null, null, null, null, null, null, null, null, null,
         null, null, null, null, null, null, null);
     UUID id = UUID.randomUUID();

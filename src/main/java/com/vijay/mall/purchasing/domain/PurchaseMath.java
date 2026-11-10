@@ -20,7 +20,7 @@ public final class PurchaseMath {
   private PurchaseMath() { }
 
   /** One line as typed: quantities, invoice price, the discount (percent wins when above zero) and the tax rates. */
-  public record LineIn(int qty, int freeQty, long unitCostPaise, BigDecimal discountPercent, long discountPaise, int gstPercent,
+  public record LineIn(int qty, int freeQty, BigDecimal unitCostPaise, BigDecimal discountPercent, long discountPaise, BigDecimal gstPercent,
                        BigDecimal cessPercent) {}
 
   /** The document-level inputs. */
@@ -62,7 +62,7 @@ public final class PurchaseMath {
     long[] afterLine = new long[n];
     for (int i = 0; i < n; i++) {
       LineIn l = lines.get(i);
-      gross[i] = Math.multiplyExact((long) l.qty(), l.unitCostPaise());
+      gross[i] = gross(l.qty(), l.unitCostPaise());
       lineDisc[i] = discount(gross[i], l.discountPercent(), l.discountPaise());
       if (lineDisc[i] > gross[i]) throw ApiException.validation("discountPaise", "the discount cannot be more than the line amount");
       afterLine[i] = gross[i] - lineDisc[i];
@@ -82,8 +82,8 @@ public final class PurchaseMath {
     for (int i = 0; i < n; i++) {
       LineIn l = lines.get(i);
       taxable[i] = afterLine[i] - share[i];
-      int rate = doc.mode() == GstMode.NONE ? 0 : l.gstPercent();
-      long gst = percentOf(taxable[i], BigDecimal.valueOf(rate));
+      BigDecimal rate = doc.mode() == GstMode.NONE ? BigDecimal.ZERO : l.gstPercent();
+      long gst = percentOf(taxable[i], rate);
       long[] split = split(gst, doc.interState());
       cgst[i] = split[0];
       sgst[i] = split[1];
@@ -110,6 +110,21 @@ public final class PurchaseMath {
     long roundOff = doc.roundToRupee() ? Math.floorDiv(subtotal + 50, 100L) * 100 - subtotal : 0;
     return new DocOut(out, sum(lineDisc), docDisc, sum(taxable), sum(cgst) + freightSplit[0], sum(sgst) + freightSplit[1],
         sum(igst) + freightSplit[2], sum(cess), doc.freightPaise(), freightGst, roundOff, subtotal + roundOff);
+  }
+
+  /**
+   * The value of a line before discounts: quantity times the unit cost (up to 4 decimals of a paisa), rounded half-up to whole paise.
+   * A whole-number unit cost gives exactly {@code qty * unit}.
+   */
+  public static long gross(int qty, BigDecimal unitCostPaise) {
+    return unitCostPaise.multiply(BigDecimal.valueOf(qty)).setScale(0, RoundingMode.HALF_UP).longValueExact();
+  }
+
+  /** A unit cost as printed in responses: no needless zeros and never an exponent (55, not 55.0000 or 5.5E+1). */
+  public static BigDecimal plain(BigDecimal cost) {
+    if (cost == null) return null;
+    BigDecimal s = cost.stripTrailingZeros();
+    return s.scale() < 0 ? s.setScale(0) : s;
   }
 
   /** Splits GST into {cgst, sgst, igst}: inter-state is all IGST, otherwise halves with the odd paisa to SGST. */

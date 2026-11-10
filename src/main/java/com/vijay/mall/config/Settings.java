@@ -25,7 +25,7 @@ public final class Settings {
   public enum Group {
     PAYMENT("Online payment"), PUSH("Push notifications"), SMS("SMS login codes"), EMAIL("E-mail login codes"),
     PAYTM("Paytm card machine"), LOGGING("Logging"), CACHE("Caching"), DELIVERY("Delivery"), COUNTER("Counter rules"), GST("GST and bills"), INVENTORY("Stock and lots"), SECURITY("Security"),
-    COUPONS("Coupons and returns");
+    COUPONS("Coupons and returns"), BARCODE("Barcodes and labels");
 
     /** The heading shown to the admin. */
     public final String label;
@@ -293,6 +293,21 @@ public final class Settings {
       "When on, the daily job at 03:15 takes lots past their expiry date out of stock (history reason EXPIRY_WRITE_OFF). Off by default: staff decide.",
       "app.inventory.auto-write-off-expired", "false");
 
+  // ---- barcodes and labels
+  /** First digits of the barcodes the shop makes for its own products. */
+  public static final Def BARCODE_STORE_PREFIX = text("barcode.storePrefix", Group.BARCODE, "Prefix of store barcodes",
+      "First digits of the EAN-13 codes the shop generates for its own products: 1 to 4 digits starting with 2 (the in-store range is 20 to 29). "
+          + "Keep it apart from the scale prefix of weighed labels. Codes already made keep working after a change.", "barcode.storePrefix", "29", 4);
+  /** Whether the weighing-scale barcode reader is on. */
+  public static final Def BARCODE_VARIABLE_MEASURE_ENABLED = flag("barcode.variableMeasure.enabled", Group.BARCODE, "Read scale-printer barcodes",
+      "On when the shop has a weighing scale that prints its own price or weight labels.", "barcode.variableMeasure.enabled", "false");
+  /** Two-digit prefix of the scale-printer labels. */
+  public static final Def BARCODE_VARIABLE_MEASURE_PREFIX = text("barcode.variableMeasure.prefix", Group.BARCODE, "Prefix of scale-printer labels",
+      "Two digits from 20 to 29, the prefix your scale prints.", "barcode.variableMeasure.prefix", "22", 2);
+  /** Dots per inch of the label printer. */
+  public static final Def LABEL_DPI = choice("label.dpi", Group.BARCODE, "Label printer resolution (dpi)",
+      "203 is the usual office label printer, 300 and 600 are the finer ones.", "label.dpi", "203", "203", "300", "600");
+
   // ---- security
   /** Name of the proxy header that carries the real client address, used by the rate limiter. */
   public static final Def CLIENT_IP_HEADER = text("security.clientIpHeader", Group.SECURITY, "Real client address header",
@@ -325,7 +340,8 @@ public final class Settings {
       SMS_MESSAGE, OTP_CHANNEL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, OTP_FROM, LOG_LEVEL_APP, LOG_LEVEL_ROOT, LOG_LEVEL_SQL,
       LOG_RETENTION_DAYS, DELIVERY_FEE, DELIVERY_FREE_ABOVE, POS_CASHIER_RETURN_DAYS, POS_CASHIER_DISCOUNT_PERCENT, POS_REQUIRE_OPEN_SHIFT,
       GST_ROUND_OFF, PURCHASE_GST_MODE, INVENTORY_LOT_CROSS_POLICY, INVENTORY_COSTING_METHOD, INVENTORY_EXPIRY_ALERT_DAYS, INVENTORY_AUTO_WRITE_OFF,
-      CLIENT_IP_HEADER, CACHE_ENABLED, COUPON_ALLOW_ON_FLASH, RETURNS_COUPON_POLICY);
+      CLIENT_IP_HEADER, CACHE_ENABLED, COUPON_ALLOW_ON_FLASH, RETURNS_COUPON_POLICY,
+      BARCODE_STORE_PREFIX, BARCODE_VARIABLE_MEASURE_ENABLED, BARCODE_VARIABLE_MEASURE_PREFIX, LABEL_DPI);
 
   /** Every setting: the fixed ones followed by one cache lifetime per cache. */
   public static final List<Def> ALL = Stream.concat(BASE.stream(), CACHE_TTLS.stream()).toList();

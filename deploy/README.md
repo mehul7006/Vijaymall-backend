@@ -45,3 +45,7 @@ only if pending stays above 0 while the database CPU is not busy. JVM memory: co
 Flyway runs the migrations when the backend starts. Some of them (the V24 backfill, plain `CREATE INDEX` statements such as V27's) lock the table while they run.
 That is instant on today's data, but on a big database stop the app first (`docker compose ... stop api`), let the new version start alone, and for
 very large tables create the index by hand with `CREATE INDEX CONCURRENTLY IF NOT EXISTS ...` before deploying so the migration finds it already there.
+
+V124 (decimal GST rates) changes three `gst_percent` columns (`product_pos`, `pos_sale_item`, `purchase_item`) from `int` to `numeric(6,3)`.
+That rewrites those tables and holds an exclusive lock while it runs: measured on the perf database (38 thousand sale lines) the whole migration takes
+about 0.2 s, and a 2 million row table took 1.8 s. Run it with the app stopped, as described above, so no bill is written during the rewrite.

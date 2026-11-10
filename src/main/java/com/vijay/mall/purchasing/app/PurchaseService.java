@@ -1,5 +1,7 @@
 package com.vijay.mall.purchasing.app;
 
+import com.vijay.mall.pos.domain.GstRates;
+import com.vijay.mall.common.web.GstRateJson;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminProduct;
@@ -24,6 +26,8 @@ import com.vijay.mall.purchasing.infra.PurchaseRepository.PriceRow;
 import com.vijay.mall.purchasing.infra.SupplierRepository.Supplier;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -58,15 +62,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class PurchaseService {
   /**
-   * One product received. Only the product, the quantity and the unit cost (before tax, in paise) are required; everything else is optional:
+   * One product received. Only the product, the quantity and the unit cost (before tax, in paise, a decimal of at most 4 places: 5.5 paise per gram is fine) are required; everything else is optional:
    * free units, a line discount (percent wins when above zero), GST and cess rates (GST defaults to the product's), HSN (defaults to the
    * product's), the MRP and selling price printed on the pack, batch and expiry, and whether to apply the MRP and price to the product now.
    */
   @Schema(name = "PurchaseItemInput")
   public record ItemInput(@NotNull UUID productId,
                           @Min(value = 1, message = "must be 1 to 1000000") @Max(value = 1_000_000, message = "must be 1 to 1000000") int qty,
-                          @Min(value = 0, message = "must be at least 0") @Max(value = 100_000_000, message = "must be at most 100000000") long unitCostPaise,
-                          Integer freeQty, BigDecimal discountPercent, Long discountPaise, Integer gstPercent, BigDecimal cessPercent,
+                          @NotNull(message = "is required") @DecimalMin(value = "0", message = "must be at least 0")
+                          @DecimalMax(value = "100000000", message = "must be at most 100000000") BigDecimal unitCostPaise,
+                          Integer freeQty, BigDecimal discountPercent, Long discountPaise, @GstRateJson BigDecimal gstPercent, BigDecimal cessPercent,
                           @Size(max = 20) String hsn, Long mrpPaise, Long sellingPricePaise, @Size(max = 40) String batchNo,
                           LocalDate expiryDate, Boolean applyToVariant) {
   }
@@ -98,8 +103,8 @@ public class PurchaseService {
 
   /** A received line with its computed figures. Unit costs are paise; the landed cost has 4 decimals and a rounded twin. */
   @Schema(name = "PurchaseItemView")
-  public record ItemView(UUID id, UUID productId, String name, int qty, int freeQty, long unitCostPaise, long lineCostPaise,
-                         BigDecimal discountPercent, long lineDiscountPaise, long docDiscountSharePaise, long taxablePaise, int gstPercent,
+  public record ItemView(UUID id, UUID productId, String name, int qty, int freeQty, BigDecimal unitCostPaise, long lineCostPaise,
+                         BigDecimal discountPercent, long lineDiscountPaise, long docDiscountSharePaise, long taxablePaise, @GstRateJson BigDecimal gstPercent,
                          long cgstPaise, long sgstPaise, long igstPaise, BigDecimal cessPercent, long cessPaise, long lineTotalPaise, String hsn,
                          Long mrpPaise, Long sellingPricePaise, String batchNo, LocalDate expiryDate, boolean applyToVariant, int returnedQty,
                          long landedTotalPaise, BigDecimal landedUnitCostPaise, BigDecimal landedUnitCostRoundedPaise) {}
@@ -134,14 +139,14 @@ public class PurchaseService {
 
   /** What the form needs when a product is picked: its tax defaults and prices, and what the last purchase cost. */
   @Schema(name = "PurchaseLookup")
-  public record Lookup(UUID productId, String name, int gstPercent, String hsn, long mrpPaise, long pricePaise, int qtyOnHand,
-                       Long lastPurchaseCostPaise, BigDecimal lastLandedUnitCostPaise, String lastSupplierName, LocalDate lastInvoiceDate,
+  public record Lookup(UUID productId, String name, @GstRateJson BigDecimal gstPercent, String hsn, long mrpPaise, long pricePaise, int qtyOnHand,
+                       BigDecimal lastPurchaseCostPaise, BigDecimal lastLandedUnitCostPaise, String lastSupplierName, LocalDate lastInvoiceDate,
                        UUID lastPurchaseId) {}
 
   /** One earlier purchase of a product. */
   @Schema(name = "PurchasePriceView")
   public record PriceView(UUID purchaseId, UUID supplierId, String supplierName, String invoiceNo, LocalDate invoiceDate, int qty, int freeQty,
-                          long unitCostPaise, BigDecimal landedUnitCostPaise, BigDecimal landedUnitCostRoundedPaise, Long mrpPaise,
+                          BigDecimal unitCostPaise, BigDecimal landedUnitCostPaise, BigDecimal landedUnitCostRoundedPaise, Long mrpPaise,
                           Long sellingPricePaise, Instant createdAt) {}
 
   /** One supplier in the payables summary. */
@@ -161,6 +166,8 @@ public class PurchaseService {
   public static final int MAX_LINES = 200;
   /** Largest quantity of one product in a delivery. */
   public static final int MAX_QTY = 1_000_000;
+  /** Decimals of a paisa allowed on a line's unit cost (a weighed product may cost 5.5 paise a gram). */
+  static final int MAX_COST_DECIMALS = 4;
   /** Rs 10 lakh per unit: anything above is a typing mistake */
   public static final long MAX_UNIT_COST = 1_000_000_00L;
   /** The payment modes. */
@@ -252,10 +259,15 @@ public class PurchaseService {
     return GstMode.parse(settings.get(Settings.PURCHASE_GST_MODE), GstMode.REGULAR);
   }
 
-  private static int rate(Integer given, int fallback, String field) {
-    int r = given == null ? fallback : given;
-    if (!PosCatalogService.GST_RATES.contains(r)) throw ApiException.validation(field, "one of " + PosCatalogService.GST_RATES);
+  /** The freight rate is a whole percent: one of the whole-number rates of {@link GstRates#ALLOWED}. */
+  private static int wholeRate(Integer given, String field) {
+    int r = given == null ? 0 : given;
+    GstRates.require(BigDecimal.valueOf(r), field);
     return r;
+  }
+
+  private static BigDecimal rate(BigDecimal given, BigDecimal fallback, String field) {
+    return GstRates.require(given == null ? fallback : given, field);
   }
 
   private static BigDecimal percent(BigDecimal p, String field) {
@@ -297,7 +309,7 @@ public class PurchaseService {
     long docAmount = money(in.docDiscountPaise(), "docDiscountPaise");
     if (docPercent.signum() > 0 && docAmount > 0) throw ApiException.validation("docDiscountPaise", "give either a percent or an amount");
     long freight = money(in.freightPaise(), "freightPaise");
-    int freightRate = freight == 0 ? 0 : rate(in.freightGstPercent(), 0, "freightGstPercent");
+    int freightRate = freight == 0 ? 0 : wholeRate(in.freightGstPercent(), "freightGstPercent");
 
     Supplier supplier = suppliers.resolve(actor, in.supplierId(), in.supplierName(), in.supplierPhone(), in.supplierGstin(), in.supplierStateCode());
     String supplierState = supplierState(in.supplierStateCode(), supplier);
@@ -336,13 +348,20 @@ public class PurchaseService {
     return s.isEmpty() ? supplier.stateCode() : s;
   }
 
+  private static BigDecimal unitCost(BigDecimal given) {
+    BigDecimal c = given.stripTrailingZeros();
+    if (c.scale() > MAX_COST_DECIMALS) throw ApiException.validation("unitCostPaise", "at most " + MAX_COST_DECIMALS + " decimals");
+    return c;
+  }
+
   private PurchaseMath.LineIn lineIn(ItemInput l, ProductPos product) {
     int free = l.freeQty() == null ? 0 : l.freeQty();
-    if (free < 0 || (long) free + l.qty() > MAX_QTY) throw ApiException.validation("freeQty", "0 to " + (MAX_QTY - l.qty()));
+    if (free < 0 || (long) free + l.qty() > MAX_QTY) throw ApiException.validation("freeQty", free < 0 ? "must be 0 or more"
+        : "paid plus free must be at most " + MAX_QTY);
     BigDecimal discountPercent = percent(l.discountPercent(), "discountPercent");
     long discountPaise = money(l.discountPaise(), "discountPaise");
     if (discountPercent.signum() > 0 && discountPaise > 0) throw ApiException.validation("discountPaise", "give either a percent or an amount");
-    int gst = rate(l.gstPercent(), product.gstPercent(), "gstPercent");
+    BigDecimal gst = rate(l.gstPercent(), product.gstPercent(), "gstPercent");
     if (!text(l.hsn()).isEmpty() && !HSN.matcher(text(l.hsn())).matches()) throw ApiException.validation("hsn", "4 to 8 digits");
     long mrp = l.mrpPaise() == null ? 0 : money(l.mrpPaise(), "mrpPaise");
     long price = l.sellingPricePaise() == null ? 0 : money(l.sellingPricePaise(), "sellingPricePaise");
@@ -350,12 +369,12 @@ public class PurchaseService {
     if (Boolean.TRUE.equals(l.applyToVariant()) && l.mrpPaise() == null && l.sellingPricePaise() == null) {
       throw ApiException.validation("applyToVariant", "give the MRP or the selling price to apply");
     }
-    return new PurchaseMath.LineIn(l.qty(), free, l.unitCostPaise(), discountPercent, discountPaise, gst, percent(l.cessPercent(), "cessPercent"));
+    return new PurchaseMath.LineIn(l.qty(), free, unitCost(l.unitCostPaise()), discountPercent, discountPaise, gst, percent(l.cessPercent(), "cessPercent"));
   }
 
   private static Line line(ItemInput l, PurchaseMath.LineIn in, PurchaseMath.LineOut out, ProductPos product) {
     String hsn = text(l.hsn()).isEmpty() ? product.hsn() : text(l.hsn());
-    return new Line(UUID.randomUUID(), l.productId(), l.qty(), in.freeQty(), l.unitCostPaise(), in.discountPercent().signum() > 0 ? in.discountPercent() : null,
+    return new Line(UUID.randomUUID(), l.productId(), l.qty(), in.freeQty(), in.unitCostPaise(), in.discountPercent().signum() > 0 ? in.discountPercent() : null,
         out.lineDiscountPaise(), out.docDiscountSharePaise(), out.taxablePaise(), in.gstPercent(), out.cgstPaise(), out.sgstPaise(), out.igstPaise(),
         in.cessPercent(), out.cessPaise(), out.lineTotalPaise(), out.landedTotalPaise(), out.landedUnitCost(), hsn, l.mrpPaise(), l.sellingPricePaise(),
         text(l.batchNo()), l.expiryDate(), Boolean.TRUE.equals(l.applyToVariant()), 0);
@@ -493,7 +512,7 @@ public class PurchaseService {
     ProductPos attrs = pos.attributesFor(List.of(productId)).get(productId);
     PriceRow last = repo.priceHistory(productId, 1).stream().findFirst().orElse(null);
     return new Lookup(productId, p.nameEn(), attrs.gstPercent(), attrs.hsn(), p.mrpPaise(), p.pricePaise(),
-        p.qtyOnHand(), last == null ? null : last.unitCostPaise(), last == null ? null : last.landedUnitCost(), last == null ? null : last.supplierName(),
+        p.qtyOnHand(), last == null ? null : PurchaseMath.plain(last.unitCostPaise()), last == null ? null : last.landedUnitCost(), last == null ? null : last.supplierName(),
         last == null ? null : last.invoiceDate(), last == null ? null : last.purchaseId());
   }
 
@@ -501,7 +520,7 @@ public class PurchaseService {
   public List<PriceView> priceHistory(UUID productId, int limit, Rounding rounding) {
     catalog.adminGet(productId);
     return repo.priceHistory(productId, Math.max(1, Math.min(limit, 100))).stream()
-        .map(r -> new PriceView(r.purchaseId(), r.supplierId(), r.supplierName(), r.invoiceNo(), r.invoiceDate(), r.qty(), r.freeQty(), r.unitCostPaise(),
+        .map(r -> new PriceView(r.purchaseId(), r.supplierId(), r.supplierName(), r.invoiceNo(), r.invoiceDate(), r.qty(), r.freeQty(), PurchaseMath.plain(r.unitCostPaise()),
             r.landedUnitCost().setScale(4), rounding.apply(r.landedUnitCost()), r.mrpPaise(), r.sellingPricePaise(), r.createdAt())).toList();
   }
 
@@ -527,7 +546,7 @@ public class PurchaseService {
   }
 
   private static ItemView item(Line l, String name, Rounding rounding) {
-    return new ItemView(l.id(), l.productId(), name, l.qty(), l.freeQty(), l.unitCostPaise(), l.qty() * l.unitCostPaise(), l.discountPercent(),
+    return new ItemView(l.id(), l.productId(), name, l.qty(), l.freeQty(), PurchaseMath.plain(l.unitCostPaise()), PurchaseMath.gross(l.qty(), l.unitCostPaise()), l.discountPercent(),
         l.lineDiscountPaise(), l.docDiscountSharePaise(), l.taxablePaise(), l.gstPercent(), l.cgstPaise(), l.sgstPaise(), l.igstPaise(), l.cessPercent(),
         l.cessPaise(), l.lineTotalPaise(), l.hsn(), l.mrpPaise(), l.sellingPricePaise(), l.batchNo(), l.expiryDate(), l.applyToVariant(), l.returnedQty(),
         l.landedTotalPaise(), l.landedUnitCost().setScale(4), rounding.apply(l.landedUnitCost()));
