@@ -1,5 +1,8 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstSlab;
+import com.vijay.mall.common.tax.GstSlabs;
 import com.vijay.mall.catalog.domain.PricedLine;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.FlashPricing;
@@ -204,9 +207,13 @@ public class PosService implements ReferenceLookup {
 
   private static BillView view(BillCalculator.Bill b, Quote q, long coinsToEarn, int balance, long roundOff, long manual) {
     List<BillLine> lines = b.lines().stream().map(l -> new BillLine(l.productId(), l.name(), l.soldBy(), l.qty(),
-        l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent())).toList();
+        l.unitPricePaise(), l.linePaise(), l.discountPaise(), l.netPaise(), l.gstPercent(), l.tax().taxable(), l.tax().cgst(),
+        l.tax().sgst())).toList();
+    List<GstSlab> slabs = GstSlabs.of(b.lines().stream().map(BillCalculator.Line::gstPercent).toList(),
+        b.lines().stream().map(BillCalculator.Line::tax).toList());
     return new BillView(lines, b.subtotalPaise(), q.couponCode(), q.couponDiscountPaise(), q.coinsUsed(), q.coinDiscountPaise(),
-        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff, manual);
+        b.totalPaise() + roundOff, b.tax().taxable(), b.tax().cgst(), b.tax().sgst(), coinsToEarn, balance, q.warnings(), roundOff, manual,
+        slabs);
   }
 
   private Priced price(List<Item> items) {
@@ -616,9 +623,7 @@ public class PosService implements ReferenceLookup {
     if (l == null || l.productId() == null) throw ApiException.validation("rung.lines", "every line needs a productId");
     if (l.qty() == null || l.qty() <= 0) throw ApiException.validation("qty", "quantity must be positive on every line");
     if (l.unitPricePaise() == null || l.unitPricePaise() < 0) throw ApiException.validation("unitPricePaise", "unitPricePaise must be given and not negative");
-    if (l.gstPercent() == null || !PosCatalogService.GST_RATES.contains(l.gstPercent())) {
-      throw ApiException.validation("gstPercent", "gstPercent must be one of " + PosCatalogService.GST_RATES);
-    }
+    GstRates.require(l.gstPercent(), "gstPercent");
     if (l.discountPaise() != null && l.discountPaise() < 0) throw ApiException.validation("discountPaise", "discountPaise must not be negative");
   }
 
@@ -664,7 +669,7 @@ public class PosService implements ReferenceLookup {
         throw ApiException.validation("qty", "quantity too large for " + p.nameEn());
       }
       String name = l.name() == null || l.name().isBlank() ? p.nameEn() : l.name().strip();
-      BillCalculator.Draft d = new BillCalculator.Draft(l.productId(), name, a.soldBy(), l.qty(), l.unitPricePaise(), l.gstPercent(), a.hsn());
+      BillCalculator.Draft d = new BillCalculator.Draft(l.productId(), name, a.soldBy(), l.qty(), l.unitPricePaise(), GstRates.normalize(l.gstPercent()), a.hsn());
       if (l.linePaise() != null && l.linePaise() != d.linePaise()) {
         throw ApiException.validation("linePaise", "linePaise: line amount " + Money.plain(l.linePaise()) + " is not price x quantity (" + Money.plain(d.linePaise()) + ") for " + name);
       }
@@ -735,9 +740,9 @@ public class PosService implements ReferenceLookup {
       out.add(new OfflineFinding(OfflineExceptionKind.PRICE_CHANGED, name + " was charged Rs " + Money.plain(l.unitPricePaise())
           + " but the catalog price is Rs " + Money.plain(p.pricePaise()), p.id(), String.valueOf(p.pricePaise()), String.valueOf(l.unitPricePaise())));
     }
-    if (l.gstPercent() != a.gstPercent()) {
-      out.add(new OfflineFinding(OfflineExceptionKind.GST_CHANGED, name + " was billed at " + l.gstPercent() + "% GST but the catalog rate is "
-          + a.gstPercent() + "%", p.id(), String.valueOf(a.gstPercent()), String.valueOf(l.gstPercent())));
+    if (l.gstPercent().compareTo(a.gstPercent()) != 0) {
+      out.add(new OfflineFinding(OfflineExceptionKind.GST_CHANGED, name + " was billed at " + GstRates.plain(l.gstPercent()) + "% GST but the catalog rate is "
+          + GstRates.plain(a.gstPercent()) + "%", p.id(), GstRates.plain(a.gstPercent()), GstRates.plain(l.gstPercent())));
     }
     if (discount > 0) {
       out.add(new OfflineFinding(OfflineExceptionKind.DISCOUNT, name + " got a discount of Rs " + Money.plain(discount)

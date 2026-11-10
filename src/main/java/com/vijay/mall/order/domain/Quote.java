@@ -1,7 +1,11 @@
 package com.vijay.mall.order.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.GstSlab;
+import com.vijay.mall.common.tax.GstRates;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,11 +14,24 @@ import java.util.UUID;
  * couponMinOrderPaise (not sent to the app) is the minimum order of the coupon, kept on the order for the return policy.
  * couponByCategory lists, for a cart with a coupon, what the coupon took off each category in the cart (a category the
  * coupon does not cover shows 0), so the app can show the discount per category.
+ * <p>Prices include GST. Each line carries its rate, HSN and the split of what the customer pays for it (after its coupon and coin share);
+ * {@code taxableTotalPaise}, {@code cgstTotalPaise}, {@code sgstTotalPaise}, {@code taxTotalPaise} and {@code gstSlabs} (one per rate,
+ * lowest first) add the lines up. The delivery fee is not part of them, so taxable plus tax equals the total minus the delivery fee.
+ * A counter quote prices its own GST and leaves these empty.
  */
 public record Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                     int coinsUsed, long coinDiscountPaise, long deliveryFeePaise, long totalPaise,
                     long coinsToEarn, List<String> warnings, List<CategoryDiscount> couponByCategory,
-                    @JsonIgnore long couponMinOrderPaise) {
+                    @JsonIgnore long couponMinOrderPaise, long taxableTotalPaise, long cgstTotalPaise, long sgstTotalPaise,
+                    long taxTotalPaise, List<GstSlab> gstSlabs) {
+
+  /** A quote that carries no GST breakdown. */
+  public Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
+               int coinsUsed, long coinDiscountPaise, long deliveryFeePaise, long totalPaise,
+               long coinsToEarn, List<String> warnings, List<CategoryDiscount> couponByCategory, long couponMinOrderPaise) {
+    this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, deliveryFeePaise,
+        totalPaise, coinsToEarn, warnings, couponByCategory, couponMinOrderPaise, 0, 0, 0, 0, List.of());
+  }
 
   /** A quote that does not say what minimum order its coupon had. */
   public Quote(List<Line> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
@@ -39,7 +56,20 @@ public record Quote(List<Line> lines, long subtotalPaise, String couponCode, lon
   @Schema(name = "QuoteLine")
   public record Line(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise,
                      boolean coinRedeemable, boolean earnsCoins, String nameGu, String unitLabel, UUID categoryId,
-                     long couponDiscountPaise, UUID flashSaleId, long listPricePaise, long flashDiscountPaise) {
+                     long couponDiscountPaise, UUID flashSaleId, long listPricePaise, long flashDiscountPaise,
+                     @GstRateJson BigDecimal gstPercent, String hsn, long taxablePaise, long cgstPaise, long sgstPaise,
+                     boolean gstConfigured) {
+    /**
+     * A line with no GST breakdown (0%, no HSN). For a flash sale line, flashSaleId is set, listPricePaise is the normal unit price and
+     * flashDiscountPaise what the sale takes off the whole line; otherwise listPricePaise equals unitPricePaise and the discount is 0.
+     */
+    public Line(UUID productId, String name, int qty, long unitPricePaise, long lineTotalPaise,
+                boolean coinRedeemable, boolean earnsCoins, String nameGu, String unitLabel, UUID categoryId,
+                long couponDiscountPaise, UUID flashSaleId, long listPricePaise, long flashDiscountPaise) {
+      this(productId, name, qty, unitPricePaise, lineTotalPaise, coinRedeemable, earnsCoins, nameGu, unitLabel, categoryId,
+          couponDiscountPaise, flashSaleId, listPricePaise, flashDiscountPaise, GstRates.ZERO, "", 0, 0, 0, false);
+    }
+
     /**
      * A line that is not on a flash sale. For a flash sale line, flashSaleId is set, listPricePaise is the normal unit price and
      * flashDiscountPaise what the sale takes off the whole line; otherwise listPricePaise equals unitPricePaise and the discount is 0.

@@ -11,14 +11,16 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.filter.ShallowEtagHeaderFilter;
 
 /**
- * Conditional GET for the public catalog lists (categories, product groups, units, hot sale): the answer carries an {@code ETag}
+ * Conditional GET for the public catalog lists (categories, product groups, units, hot sale) and the staff GST master reads (HSN list,
+ * one HSN, rate card; never the typing-time suggest): the answer carries an {@code ETag}
  * and {@code Cache-Control: no-cache}, and a repeat request with {@code If-None-Match} gets {@code 304} with no body when nothing
- * changed. Only these four URLs go through the filter, never streams, uploads or anything else.
+ * changed. Only these URLs go through the filter, never streams, uploads or anything else.
  */
 @Configuration
 public class EtagConfig {
   /** The exact paths whose answers get an ETag. */
-  static final String[] PATHS = {"/api/v1/categories", "/api/v1/product-groups", "/api/v1/units", "/api/v1/hot-sale"};
+  static final String[] PATHS = {"/api/v1/categories", "/api/v1/product-groups", "/api/v1/units", "/api/v1/hot-sale",
+      "/api/v1/gst/hsn", "/api/v1/gst/hsn/*", "/api/v1/gst/rates"};
 
   /** The filter, limited to {@link #PATHS}. */
   @Bean

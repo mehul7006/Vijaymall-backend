@@ -3,6 +3,7 @@ package com.vijay.mall.pos.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vijay.mall.common.tax.GstRates;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +12,7 @@ class ReceiptTextDocumentsTest {
   private static CreditNoteData note(long creditAdjusted, String reason, String phone, String gstin) {
     return new CreditNoteData("Vijay Super Mall", "Market Road", phone, gstin, "VSM-CN/2026-27/000003", "VSM/2026-27/000007",
         "27-10-2026 10:30", "Asha", "9000000001", reason,
-        List.of(new CreditNoteData.Line("Soap", SoldBy.UNIT, 2, 12, 4500), new CreditNoteData.Line("Loose Sugar", SoldBy.WEIGHT, 1500, 5, 6750)),
+        List.of(new CreditNoteData.Line("Soap", SoldBy.UNIT, 2, GstRates.of(12), 4500), new CreditNoteData.Line("Loose Sugar", SoldBy.WEIGHT, 1500, GstRates.of(5), 6750)),
         10000, 600, 650, 11250, List.of(new ReceiptData.PaymentLine("UPI", 11250)), creditAdjusted, "Thank you!");
   }
 

@@ -2,16 +2,18 @@ package com.vijay.mall.pos.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.TaxSplit;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class BillCalculatorTest {
   private static BillCalculator.Draft unit(String n, int qty, long price, int gst) {
-    return new BillCalculator.Draft(UUID.randomUUID(), n, SoldBy.UNIT, qty, price, gst, "1006");
+    return new BillCalculator.Draft(UUID.randomUUID(), n, SoldBy.UNIT, qty, price, GstRates.of(gst), "1006");
   }
   private static BillCalculator.Draft kg(String n, int grams, long perKg, int gst) {
-    return new BillCalculator.Draft(UUID.randomUUID(), n, SoldBy.WEIGHT, grams, perKg, gst, "0702");
+    return new BillCalculator.Draft(UUID.randomUUID(), n, SoldBy.WEIGHT, grams, perKg, GstRates.of(gst), "0702");
   }
 
   @Test void noDiscount_totalsAndTax() {

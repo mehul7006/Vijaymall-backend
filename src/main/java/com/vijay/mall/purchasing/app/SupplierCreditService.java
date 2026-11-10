@@ -4,6 +4,7 @@ import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.idem.AdminOps;
+import com.vijay.mall.pos.domain.InvoiceNumbers;
 import com.vijay.mall.purchasing.app.PurchaseService.PurchaseView;
 import com.vijay.mall.purchasing.domain.Rounding;
 import com.vijay.mall.purchasing.infra.PurchaseRepository;
@@ -44,7 +45,7 @@ public class SupplierCreditService {
 
   /** A refund received from a supplier. {@code receivedAt} defaults to now; {@code moneyAccountId} is stored but not validated yet. */
   @Schema(name = "SupplierRefundInput")
-  public record RefundInput(@Min(1) long amountPaise, @NotNull @Size(max = 10) String mode, @Size(max = 80) String reference, Instant receivedAt,
+  public record RefundInput(@Min(1) long amountPaise, @NotNull @Size(max = 20) String mode, @Size(max = 80) String reference, Instant receivedAt,
                             UUID moneyAccountId) {}
 
   /** A stored refund with what the supplier has left in credit and its balance after it. */
@@ -68,6 +69,14 @@ public class SupplierCreditService {
   @Schema(name = "SupplierStatement")
   public record Statement(UUID supplierId, String supplierName, LocalDate from, LocalDate to, long openingBalancePaise, long closingBalancePaise,
                           Page<StatementRow> rows) {}
+
+  /**
+   * A debit note a supplier gave. {@code date} is the India date it was made on. {@code availablePaise} is what it can still pay with the
+   * credit-use API (payment mode CREDIT_NOTE): never more than the credit its purchase still holds.
+   */
+  @Schema(name = "SupplierCreditNoteView")
+  public record CreditNoteView(UUID id, String number, LocalDate date, Instant createdAt, UUID purchaseId, String invoiceNo, long amountPaise,
+                               long usedPaise, long availablePaise) {}
 
   /** Most refunds listed for a supplier. */
   public static final int MAX_REFUNDS = 50;
@@ -111,6 +120,19 @@ public class SupplierCreditService {
     return new Statement(supplierId, s.name(), from, to, totals.openingPaise(), totals.openingPaise() + totals.inRangePaise(), p.withItems(rows));
   }
 
+  /**
+   * A page (size 1 to 50) of the supplier's debit notes, newest first, each with what was used and what is still available as credit.
+   *
+   * @throws ApiException 404 unknown supplier
+   */
+  public Page<CreditNoteView> creditNotes(UUID supplierId, int page, int size) {
+    suppliers.find(supplierId).orElseThrow(() -> ApiException.notFound("Supplier"));
+    Page<SupplierLedgerRepository.NoteRow> p = repo.notes(supplierId, Math.max(0, page), Page.clampSize(size));
+    return p.withItems(p.items().stream().map(n -> new CreditNoteView(n.id(), n.noteNo(), n.createdAt().atZone(InvoiceNumbers.SHOP_ZONE).toLocalDate(),
+        n.createdAt(), n.purchaseId(), n.invoiceNo(), n.totalPaise(), n.creditUsedPaise(),
+        SupplierLedgerRepository.available(n.totalPaise(), n.creditUsedPaise(), n.purchaseDuePaise()))).toList());
+  }
+
   /** The latest refunds of a supplier (at most {@link #MAX_REFUNDS}), newest first. */
   public List<RefundView> refunds(UUID supplierId) {
     suppliers.find(supplierId).orElseThrow(() -> ApiException.notFound("Supplier"));
@@ -142,7 +164,8 @@ public class SupplierCreditService {
 
   private RefundView doRefund(UUID actor, UUID supplierId, RefundInput in) {
     String mode = text(in.mode()).toUpperCase(Locale.ROOT);
-    if (!PurchaseService.MODES.contains(mode)) throw ApiException.validation("mode", "CASH, UPI, CARD, BANK or CHEQUE");
+    if (CREDIT_NOTE.equals(mode)) throw ApiException.validation("mode", "CREDIT_NOTE is not allowed for refunds");
+    if (!PurchaseService.MODES.contains(mode)) throw ApiException.validation("mode", "must be CASH, UPI, CARD, BANK or CHEQUE");
     Instant now = clock.instant();
     if (in.receivedAt() != null && in.receivedAt().isAfter(now.plus(10, ChronoUnit.MINUTES))) throw ApiException.validation("receivedAt", "cannot be in the future");
     if (!repo.lockSupplier(supplierId)) throw ApiException.notFound("Supplier");
@@ -202,7 +225,7 @@ public class SupplierCreditService {
       throw ApiException.unprocessable("PAYMENT_EXCEEDS_DUE", "The payment is more than the amount due",
           Map.of("fields", Map.of("amountPaise", "at most " + due), "duePaise", due));
     }
-    long available = Math.max(0, Math.min(note.totalPaise() - note.creditUsedPaise(), -locked.get(note.purchaseId()).duePaise()));
+    long available = SupplierLedgerRepository.available(note.totalPaise(), note.creditUsedPaise(), locked.get(note.purchaseId()).duePaise());
     if (in.amountPaise() > available) {
       throw ApiException.unprocessable("CREDIT_EXCEEDS_AVAILABLE", "The payment is more than the credit left on this debit note",
           Map.of("fields", Map.of("amountPaise", "at most " + available), "availablePaise", available));

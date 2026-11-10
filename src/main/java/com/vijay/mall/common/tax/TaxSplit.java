@@ -1,4 +1,4 @@
-package com.vijay.mall.pos.domain;
+package com.vijay.mall.common.tax;
 
 /** GST breakup of an inclusive amount. {@code taxable + cgst + sgst == gross}. */
 public record TaxSplit(long gross, long taxable, long cgst, long sgst) {

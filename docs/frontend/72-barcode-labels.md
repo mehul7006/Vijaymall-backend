@@ -41,12 +41,28 @@ Output formats: a **PDF** (A4 sheets or one page per thermal label, for any prin
 ```
 
 - `created: true` the code was just made; `false` the variant already had a store barcode and the same one is returned (calling again is safe).
-- The code is `prefix + running number + check digit` (EAN-13, prefix from the server setting `barcode.storePrefix`, default `29`, always inside the in-store range 20 to 29). It never equals another barcode and never reads as a weighed label of an item code in use.
+- The code is `prefix + running number + check digit` (EAN-13, prefix from the admin setting `barcode.storePrefix`, default `29`, 1 to 4 digits starting with 2, see section 3.6). It never equals another barcode and never reads as a weighed label of an item code in use.
 - 404 for an unknown variant. 400 `VALIDATION_FAILED` (`variantId`) for an item **sold by weight**: those are found by their item code (PLU), not by a barcode.
 
 ### 3.2 Barcode check digits when an admin adds a barcode
 
-`PUT /api/v1/admin/products/{id}/pos` now rejects an **8, 12 or 13 digit** barcode (EAN-8, UPC-A, EAN-13) whose last digit is wrong:
+`PUT /api/v1/admin/products/{id}/pos` saves the counter attributes and **replaces the whole barcode list**. The body is checked field by field:
+
+| field | required | rule |
+|---|---|---|
+| `soldBy` | **yes, always** | `UNIT` or `WEIGHT`. A body without it answers `400 VALIDATION_FAILED`, `details.fields.soldBy` = `is required`. A barcodes-only change must therefore repeat the product's current `soldBy` |
+| `plu` | no | item code of a weighed item; omitted/empty = none |
+| `gstPercent` | no | a GST rate; omitted keeps the stored rate; for a product with no saved attributes yet the rate comes from the GST master (0 if nothing matches). A typed 0 is kept as 0 |
+| `hsn` | no | HSN code, empty (or spaces) or 4, 6 or 8 digits; omitted/empty keeps the stored HSN, or for a product with no saved attributes yet the master's (none if nothing matches) |
+| `barcodes` | no | the new full list (omitted = the product ends with no barcodes, so send the whole list every time) |
+
+A barcodes-only example (read `GET /admin/products/{id}/pos` first and send back its `soldBy`):
+
+```json
+{ "soldBy": "UNIT", "barcodes": ["8901234567890", "LBL-7F3A"] }
+```
+
+The same endpoint rejects an **8, 12 or 13 digit** barcode (EAN-8, UPC-A, EAN-13) whose last digit is wrong:
 
 ```json
 { "code": "VALIDATION_FAILED", "message": "barcode 4006381333932 has a wrong last digit: for these digits it should be 1. Check that the code was typed or scanned correctly",
@@ -54,6 +70,19 @@ Output formats: a **PDF** (A4 sheets or one page per thermal label, for any prin
 ```
 
 Other lengths and text codes (Code 128 such as `LBL-7F3A`) are not checked. Show the message under the barcode field. The Flutter app can check before sending with the same rule (section 7).
+
+### 3.6 Barcode and label settings (admin configuration screen)
+
+These four settings are on `GET/PUT /api/v1/admin/config` in the group `BARCODE` ("Barcodes and labels") and take effect on the next request, with no restart:
+
+| key | type | default | rule |
+|---|---|---|---|
+| `barcode.storePrefix` | text | `29` | 1 to 4 digits, the first is `2` (the in-store range is 20 to 29). Barcodes already made keep working; new ones use the new prefix |
+| `barcode.variableMeasure.enabled` | boolean | `false` | `true` or `false`: reads the shop's weighing-scale labels |
+| `barcode.variableMeasure.prefix` | text | `22` | two digits, 20 to 29: the prefix the scale prints |
+| `label.dpi` | choice | `203` | `203`, `300` or `600` (the printer's dots per inch) |
+
+An invalid value answers `400 VALIDATION_FAILED` with the key in `details.fields` (for example `barcode.storePrefix: Prefix of store barcodes must be 1 to 4 digits starting with 2 ...`). An empty value goes back to the server's own value or the default shown above.
 
 ### 3.3 Label templates (read: ADMIN and CASHIER; write: ADMIN)
 
@@ -171,7 +200,7 @@ One row per variant per print request. `actorName` is `null` when the account ha
 ## 4. Printer notes
 
 - **A4 sheet printer or any printer through the OS:** use PDF. Print at 100 percent, no "fit to page". A partly used sheet: send `startPosition`.
-- **Label printers (TSC, many Chinese brands): TSPL.** **Zebra and compatibles: ZPL.** Send the response bytes to the printer unchanged (USB, network port 9100, or Bluetooth serial). The backend uses `label.dpi` (default 203; 300 for the finer printers, an admin/server setting) to turn millimetres into dots. TSPL gets `SIZE w mm,h mm`, `GAP 2 mm,0 mm`: if the roll has another gap or black marks, adjust `GAP`/`BLINE` in the app before sending (replace the line, the rest stays valid).
+- **Label printers (TSC, many Chinese brands): TSPL.** **Zebra and compatibles: ZPL.** Send the response bytes to the printer unchanged (USB, network port 9100, or Bluetooth serial). The backend uses the admin setting `label.dpi` (default 203; 300 or 600 for the finer printers, section 3.6; read on every print) to turn millimetres into dots. TSPL gets `SIZE w mm,h mm`, `GAP 2 mm,0 mm`: if the roll has another gap or black marks, adjust `GAP`/`BLINE` in the app before sending (replace the line, the rest stays valid).
 - **Receipt-width printers (58 or 80 mm): ESC/POS.** Use a THERMAL template at most as wide as the paper (58 mm paper prints about 48 mm; use the 38 x 25 template or a custom 48 mm one). Each label is cut after printing.
 - **Bluetooth printers driven by the app:** ask for `JSON` and draw the elements with the printer SDK's text, barcode and image commands. Convert millimetres to dots with `dots = mm * dpi / 25.4`.
 - Barcodes are drawn without a quiet zone of their own: the label margin is the quiet zone. Do not make the barcode wider than the template does.
@@ -236,7 +265,7 @@ bool validGtin(String c) {
 
 ## 7. Variable-measure (weighed) barcodes: future
 
-The backend has a reader and writer for the standard weighing-scale EAN-13 (`PP IIIII VVVVV C`: two prefix digits 20 to 29, 5-digit item code, 5-digit weight in grams or price in paise, check digit), **switched off** (`barcode.variableMeasure.enabled=false`) because the shop has no scale printer yet. Nothing changes for the apps. The counter's existing weighed label support (shop setting `weighedPrefix`, item code PLU) keeps working as before. When a scale printer arrives the setting is switched on and `GET /pos/barcode/{code}` will read those labels as well; no new endpoint is needed.
+The backend has a reader and writer for the standard weighing-scale EAN-13 (`PP IIIII VVVVV C`: two prefix digits 20 to 29, 5-digit item code, 5-digit weight in grams or price in paise, check digit), **switched off** (setting `barcode.variableMeasure.enabled=false`, section 3.6) because the shop has no scale printer yet. Nothing changes for the apps. The counter's existing weighed label support (shop setting `weighedPrefix`, item code PLU) keeps working as before. When a scale printer arrives the setting is switched on and `GET /pos/barcode/{code}` will read those labels as well; no new endpoint is needed.
 
 ## 8. Checklist
 

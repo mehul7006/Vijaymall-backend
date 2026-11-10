@@ -1,0 +1,42 @@
+# name<TAB>category<TAB>price<TAB>packed<TAB>expected hsn<TAB>expected condition<TAB>expected rate<TAB>expected choices (conditions, comma separated, - = none)
+# "-" in category/price/packed = not sent; expected hsn "NONE" = best must be null.
+# Used by GstMatcherTest.java AND verify_matcher.py --check (same expectations, so the Python calibration and the Java class cannot drift apart silently).
+basmati rice 5 kg	-	-	-	1006	PACKED_LABELLED	5	LOOSE
+basmati rice	-	-	false	1006	LOOSE	0	PACKED_LABELLED
+basmati rice	-	-	true	1006	PACKED_LABELLED	5	LOOSE
+loose basmati rice	-	-	-	1006	LOOSE	0	PACKED_LABELLED
+basmatti raice	-	-	-	1006	PACKED_LABELLED	5	LOOSE
+chakki atta	-	-	-	1101	PACKED_LABELLED	5	LOOSE
+packed atta	-	-	-	1101	PACKED_LABELLED	5	LOOSE
+toor dal	-	-	-	0713	PACKED_LABELLED	5	LOOSE
+tur daal	-	-	true	0713	PACKED_LABELLED	5	LOOSE
+haldi powder	-	-	-	0910	DRIED	5	-
+dhaniya powder	-	-	-	0909	ANY	5	-
+zeera	-	-	-	0909	ANY	5	-
+cow ghee 1 litre	-	-	-	0405	ANY	5	-
+amul ghee	-	-	-	0405	ANY	5	-
+uht milk	-	-	-	0401	ANY	0	-
+doodh	-	-	-	0401	ANY	0	-
+paneer	-	-	-	0406	PANEER	0	-
+amul butter	-	-	-	0405	ANY	5	-
+parle g biscuits	-	-	-	1905	ANY	5	-
+biskut	-	-	-	1905	ANY	5	-
+dairy milk chocolate	-	-	-	1806	ANY	5	-
+shampoo	-	-	-	3305	ANY	5	-
+shampoo	hair care	-	-	3305	ANY	5	-
+t shirt	-	499	-	6109	PRICE_UPTO_2500	5	PRICE_ABOVE_2500
+t shirt	-	3000	-	6109	PRICE_ABOVE_2500	18	PRICE_UPTO_2500
+t shirt	-	2500	-	6109	PRICE_UPTO_2500	5	PRICE_ABOVE_2500
+t shirt	-	2500.01	-	6109	PRICE_ABOVE_2500	18	PRICE_UPTO_2500
+t shirt	-	-	-	6109	PRICE_UPTO_2500	5	PRICE_ABOVE_2500
+plain salt	-	-	-	2501	ANY	0	-
+loose potato	-	-	-	0701	ANY	0	-
+sugar 1 kg	-	-	-	1701	ANY	5	-
+shakkar	-	-	-	1701	ANY	5	-
+maggie noodles	-	-	-	1902	ANY	5	-
+coca cola	-	-	-	220210	ANY	40	-
+tomato ketchup	-	-	-	2103	ANY	5	-
+sunflower oil	-	-	-	1512	ANY	5	-
+curd	-	-	-	0403	PACKED_LABELLED	5	LOOSE
+xyzzy qwerty	-	-	-	NONE	-	-	-
+500 gm	-	-	-	NONE	-	-	-

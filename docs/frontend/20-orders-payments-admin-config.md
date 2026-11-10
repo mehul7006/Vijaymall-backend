@@ -1294,7 +1294,9 @@ No endpoint, field or behaviour of `POST /admin/refunds/{id}/retry`, `GET /admin
 - **Dev servers only**: the hourly login-code limits (normally 5 per e-mail and 20 per client address) are raised to 1000 and 10000 so testers behind one proxy are not locked out. Production keeps the strict limits.
 
 ## Addendum 3 (shop Gujarati fields)
-`GET /shop-settings` (public), `GET/PUT /admin/shop-settings` and `GET/PUT /admin/shop-profile` gain optional text fields, all strings that are empty when not set (empty means the app falls back to English): `shopNameGu` (80), `addressGu` (300), `promiseGu` (200), `detailsGu` (500) on shop settings and `holidayNoteGu` (200) on the profile, plus `shortName` (20, for tight spaces) on shop settings. On the PUTs a key that is left out keeps the stored text; send `""` to clear it. The public `GET /shop-settings` returns all six next to the English ones. The logo returned by `POST /admin/shop-profile/logo` ends in `_400.png` when the uploaded picture has transparency, otherwise `_400.jpg`. Limits for the English shop texts are in file 10, Addendum 3.
+`GET /shop-settings` (public), `GET/PUT /admin/shop-settings` and `GET/PUT /admin/shop-profile` gain optional text fields, all strings that are empty when not set (empty means the app falls back to English): `shopNameGu` (80), `addressGu` (300), `promiseGu` (200), `detailsGu` (500) on shop settings and `holidayNoteGu` (200) on the profile, plus `shortName` (20, for tight spaces) on shop settings. On the PUTs a key that is left out keeps the stored text; send `""` to clear it.
+
+**`PUT /admin/shop-settings` merge rule (all keys).** The body is merged over the stored settings, so a screen may send only what it changed, for example `{ "shopName": "Vijay Mall", "shopNameGu": "..." }`: everything else stays as it was. Per key: a key that is **left out (or `null`) keeps** the stored value; a text key sent as an **empty string clears it** (`address`, `phone`, `gstin`, `upiId`, `receiptFooter`, `promise`, `details`, `shortName` and the Gujarati texts); `stateCode`, `invoicePrefix` and `weighedPrefix` cannot be empty, so `""` resets them to `24`, `VSM` and `2`; `weighedMode` left out keeps the stored mode. `shopName` is the only required key (missing or blank = `400`, `fields.shopName`). Text is trimmed (GSTIN and invoice prefix are also upper-cased) and validated after the merge, so a kept value that is no longer valid cannot be saved by accident. The response is the full stored settings. The public `GET /shop-settings` returns all six next to the English ones. The logo returned by `POST /admin/shop-profile/logo` ends in `_400.png` when the uploaded picture has transparency, otherwise `_400.jpg`. Limits for the English shop texts are in file 10, Addendum 3.
 
 ## Addendum 4: orders, cart, account and payment-method fixes (third review)
 - **Deleting the account signs the token out at once.** After `DELETE /me` (204) the access token used for the call, and every other token of that account, is refused on the very next request with `401 UNAUTHENTICATED` (it used to work until it expired, up to 15 minutes). Refresh tokens are revoked as before, and the anonymised account can never sign in again (its e-mail is a placeholder and its mobile number is cleared; signing up again with the old e-mail or number makes a new, empty account). Send the customer to the sign-in screen when the delete call succeeds.
@@ -1439,8 +1441,11 @@ The minimum of the coupon is **kept on the order when it is placed**, so editing
 { "orderId": "...", "orderNo": "VM-1024", "couponPolicy": "KEEP", "refundPaise": 31500,
   "couponShareRemovedPaise": 3500, "coinShareRemovedPaise": 0, "couponClawbackPaise": 0, "deliveryFeeRefundedPaise": 0,
   "items": [{ "orderItemId": "...", "productId": "...", "name": "Oil", "qty": 1, "grossPaise": 35000,
-              "couponSharePaise": 3500, "coinSharePaise": 0, "clawbackPaise": 0, "refundPaise": 31500 }] }
+              "couponSharePaise": 3500, "coinSharePaise": 0, "clawbackPaise": 0, "refundPaise": 31500 }],
+  "coinsClawedBack": 12, "coinsClawedBackPaise": 1200, "coinsRestored": 5, "coinsRestoredPaise": 500 }
 ```
+
+The last four fields are what the recorded return will do with the customer's coins, worked out by the same code: `coinsClawedBack` earned coins taken back (never more than the customer still has unspent, so it can be lower than the plain share; it equals the `coinsClawedBack` of the return that follows), `coinsRestored` spent coins given back, and their values in paise (`coins x` the coin value). Show "12 coins (Rs 12) will be taken back from the customer, 5 coins (Rs 5) given back". They are 0 for orders that earned or spent no coins.
 
 Per line `refundPaise = grossPaise - couponSharePaise - coinSharePaise - clawbackPaise` exactly. Under `CLAWBACK_BELOW_MINIMUM` `couponSharePaise` can be lower than the line's share (it already counts what is given back) and `clawbackPaise` shows what is taken. Same errors as recording the return (`409 ORDER_NOT_DELIVERED`, `409 RETURN_EXCEEDS_SOLD`, `400`). The recorded return (`POST .../returns`, `GET .../returns`) now has `couponClawbackPaise` and each item `couponSharePaise`. Always show the preview before the staff confirm.
 
@@ -1462,3 +1467,41 @@ class ReturnPreviewLine {
 - [ ] Handle `reason` `ITEM` and `FLASH_ITEMS` like `CATEGORY` (show `message`).
 - [ ] Return screen: call the preview first, show the per-line breakdown, then record.
 - [ ] Config screen: the two new settings.
+
+## Addendum 10: GST on sales views (online quote and order views)
+
+Prices include GST. The owner wants every sale amount shown with its GST split by slab. The server does the maths; the app only shows what it gets and never recomputes a rate. The numbers follow the same rules as the counter bill (`30-pos-reports-purchasing.md`, Addendum 10).
+
+**Rules.** A line's GST base (its `net`) is its `lineTotalPaise` minus its coupon share (`couponDiscountPaise`) minus its share of the coin discount (the coins are spread over what every line still costs after its coupon share, to the paisa, largest remainder). `taxablePaise = round half up(net x 100 / (100 + rate))`; the tax is `net - taxablePaise`, `cgstPaise` is half of it rounded down and `sgstPaise` the other half (the odd paisa goes to SGST). The bill's tax is the sum of the per-line taxes, never a tax computed on the total. The rate and HSN come from the product's counter details (`PUT /admin/products/{id}/pos`).
+
+**`POST /cart/quote`**: every line of `lines[]` gets `gstPercent` (number: `18`, `0.25`, `1.5`), `hsn` (string, may be empty), `taxablePaise`, `cgstPaise`, `sgstPaise` and `gstConfigured` (boolean). The quote gets `taxableTotalPaise`, `cgstTotalPaise`, `sgstTotalPaise`, `taxTotalPaise` and `gstSlabs[]`: one entry per distinct rate, lowest rate first, each `{ gstPercent, taxablePaise, cgstPaise, sgstPaise, taxPaise }`. A product the shop never gave a rate has `gstPercent: 0`, `hsn: ""`, `gstConfigured: false`: for a customer ignore the flag, in an admin tool show "GST not set" (the real rate is probably not 0).
+
+```json
+{ "lines": [ { "productId": "...", "lineTotalPaise": 11800, "couponDiscountPaise": 0, "gstPercent": 18, "hsn": "1006",
+               "taxablePaise": 10000, "cgstPaise": 900, "sgstPaise": 900, "gstConfigured": true } ],
+  "subtotalPaise": 11800, "deliveryFeePaise": 0, "totalPaise": 11800,
+  "taxableTotalPaise": 10000, "cgstTotalPaise": 900, "sgstTotalPaise": 900, "taxTotalPaise": 1800,
+  "gstSlabs": [ { "gstPercent": 18, "taxablePaise": 10000, "cgstPaise": 900, "sgstPaise": 900, "taxPaise": 1800 } ] }
+```
+
+**Always true (use it as a self-check, do not "fix" the numbers):** `taxableTotalPaise + taxTotalPaise = totalPaise - deliveryFeePaise`; `cgstTotalPaise + sgstTotalPaise = taxTotalPaise`; the slabs add up to the totals and the lines add up to the slabs. The `PRICE_CHANGED` 409 carries the same quote.
+
+**Delivery fee.** The delivery fee is **not** part of any slab or total: it stays its own row `deliveryFeePaise`. Show it below the slabs ("Delivery Rs 40"). Whether GST is charged on delivery is an accountant decision (see Before go-live below); until then no GST is shown on it.
+
+**Order views.** The GST is **stored on the order lines when the order is placed**, so a later change of a product's rate never changes an old order. Each `items[]` row of `GET /orders/{id}` and `GET /admin/orders/{id}` has `gstPercent`, `hsn`, `taxablePaise`, `cgstPaise`, `sgstPaise` (the figures of the quote the customer accepted). The order has `gstRecorded`, `taxableTotalPaise`, `cgstTotalPaise`, `sgstTotalPaise`, `taxTotalPaise` and `gstSlabs[]`. The list rows (`GET /orders`, `GET /admin/orders`) carry the same order-level fields including `gstSlabs`.
+
+**Old orders** (placed before this release) have no GST on their lines: `gstRecorded: false`, the four totals and the line fields are `null` and `gstSlabs` is `[]`. Nothing is guessed or backfilled. Show no GST block for them, never "0". Check `gstRecorded` before reading the totals.
+
+**Returns of online orders** are unchanged: the refund is computed exactly as before (line total less the coupon and coin share, see Addendum 7) and no GST document or GST figure is produced for an online return yet. Do not show a GST split on the return preview.
+
+```dart
+class GstSlab { final num gstPercent; final int taxablePaise, cgstPaise, sgstPaise, taxPaise; }
+// order level, all null when !gstRecorded
+class OrderGst { final bool gstRecorded; final int? taxableTotalPaise, cgstTotalPaise, sgstTotalPaise, taxTotalPaise; final List<GstSlab> gstSlabs; }
+// line level (quote: non-null, gstConfigured present; order: nullable for old orders, no gstConfigured)
+class LineGst { final num? gstPercent; final String? hsn; final int? taxablePaise, cgstPaise, sgstPaise; }
+```
+
+**Before go-live.** (1) GST on the delivery fee: the owner's accountant decides whether it is taxable (and at which rate); today it is outside every slab. (2) Products without a saved rate quote as 0% until the owner sets them (`gstConfigured: false`): fill the rates before online ordering opens.
+
+Checklist: [ ] type rates as `num`; [ ] show a slab table (rate, taxable, CGST, SGST) on the cart summary and the order screen; [ ] read the order totals only when `gstRecorded`; [ ] show `deliveryFeePaise` outside the slabs; [ ] admin: warn on `gstConfigured: false`.

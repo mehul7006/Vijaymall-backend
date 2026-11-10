@@ -11,6 +11,7 @@ import com.vijay.mall.payment.infra.MoneyAccountRepository.Account;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -18,6 +19,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,8 +37,10 @@ public class MoneyAccountService {
   private static final Map<String, Set<String>> KINDS_FOR_MODE = Map.of("CASH", Set.of("CASH"), "UPI", Set.of("UPI", "GATEWAY", "BANK"),
       "CARD", Set.of("CARD_TERMINAL", "GATEWAY", "BANK"));
 
-  /** Fields the admin sends to create or change an account. */
-  public record Input(String name, String kind, String provider, String identifier, UUID settlesToAccountId, String note) {}
+  private static final Pattern IFSC = Pattern.compile("^[A-Z]{4}0[A-Z0-9]{6}$");
+
+  /** Fields the admin sends to create or change an account; {@code ifsc} is for BANK accounts only. */
+  public record Input(String name, String kind, String provider, String identifier, String ifsc, UUID settlesToAccountId, String note) {}
 
   private final MoneyAccountRepository repo;
   private final RuntimeSettings settings;
@@ -142,8 +147,8 @@ public class MoneyAccountService {
   public Account ensureTerminalAccount(UUID actor, String provider, String terminalId, String name, UUID settlesToAccountId, boolean active) {
     Optional<Account> old = repo.findByIdentifier("CARD_TERMINAL", provider, terminalId);
     String unique = repo.nameTaken(name, old.map(Account::id).orElse(null)) ? name + " (" + terminalId + ")" : name;
-    Account saved = old.isPresent() ? update(actor, old.get().id(), new Input(unique, "CARD_TERMINAL", provider, terminalId, settlesToAccountId, old.get().note()))
-        : create(actor, new Input(unique, "CARD_TERMINAL", provider, terminalId, settlesToAccountId, "Card machine"));
+    Account saved = old.isPresent() ? update(actor, old.get().id(), new Input(unique, "CARD_TERMINAL", provider, terminalId, null, settlesToAccountId, old.get().note()))
+        : create(actor, new Input(unique, "CARD_TERMINAL", provider, terminalId, null, settlesToAccountId, "Card machine"));
     if (saved.active() == active) return saved;
     return active ? activate(actor, saved.id()) : deactivate(actor, saved.id());
   }
@@ -173,10 +178,16 @@ public class MoneyAccountService {
   public MoneyAccountRepository.Entry addEntry(UUID actor, UUID accountId, String direction, long amountPaise, Instant at, String note) {
     get(accountId);
     String dir = direction == null ? "" : direction.strip().toUpperCase(Locale.ROOT);
-    if (!dir.equals("IN") && !dir.equals("OUT")) throw ApiException.validation("direction", "IN or OUT");
-    if (amountPaise <= 0 || amountPaise > MAX_ENTRY_PAISE) throw ApiException.validation("amountPaise", "must be between 1 and " + MAX_ENTRY_PAISE);
     String text = note == null ? "" : note.strip();
-    if (text.length() > 200) throw ApiException.validation("note", "at most 200 characters");
+    Map<String, String> problems = new LinkedHashMap<>();
+    if (!dir.equals("IN") && !dir.equals("OUT")) problems.put("direction", "IN or OUT");
+    if (amountPaise <= 0 || amountPaise > MAX_ENTRY_PAISE) problems.put("amountPaise", "must be between 1 and " + MAX_ENTRY_PAISE);
+    if (text.length() > 200) problems.put("note", "at most 200 characters");
+    if (problems.size() == 1) {
+      var only = problems.entrySet().iterator().next();
+      throw ApiException.validation(only.getKey(), only.getValue());
+    }
+    if (!problems.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Please check the highlighted fields", Map.of("fields", problems));
     Instant now = clock.instant();
     var e = new MoneyAccountRepository.Entry(UUID.randomUUID(), accountId, at == null ? now : at, dir, amountPaise, null, null, text, actor);
     repo.insertEntry(e, now);
@@ -196,6 +207,9 @@ public class MoneyAccountService {
     if (provider.length() > 40) throw ApiException.validation("provider", "at most 40 characters");
     String identifier = in.identifier() == null ? "" : in.identifier().strip();
     if (identifier.length() > 60) throw ApiException.validation("identifier", "at most 60 characters");
+    String ifsc = in.ifsc() == null || in.ifsc().isBlank() ? null : in.ifsc().strip().toUpperCase(Locale.ROOT);
+    if (ifsc != null && !"BANK".equals(kind)) throw ApiException.validation("ifsc", "only a BANK account has an IFSC code");
+    if (ifsc != null && !IFSC.matcher(ifsc).matches()) throw ApiException.validation("ifsc", "4 letters, 0, then 6 letters or digits (for example HDFC0001234)");
     String note = in.note() == null ? "" : in.note().strip();
     if (note.length() > 300) throw ApiException.validation("note", "at most 300 characters");
     UUID settles = in.settlesToAccountId();
@@ -204,7 +218,7 @@ public class MoneyAccountService {
       Account bank = repo.find(settles).orElseThrow(() -> ApiException.validation("settlesToAccountId", "no such account"));
       if (!"BANK".equals(bank.kind()) || !bank.active()) throw ApiException.validation("settlesToAccountId", "must be an active BANK account");
     }
-    return new Account(id, name, kind, provider, identifier, settles, active, note, created, created);
+    return new Account(id, name, kind, provider, identifier, ifsc, settles, active, note, created, created);
   }
 
   private static ApiException duplicate() {

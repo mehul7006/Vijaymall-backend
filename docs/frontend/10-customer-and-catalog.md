@@ -210,6 +210,9 @@ Units first (`/admin/units`), categories (`/admin/categories`), then products (`
 
 **AdminProduct** (admin endpoints): all Product fields plus `qtyOnHand` (int, exact stock), `lowThreshold` (int, alert level), `active` (boolean), `hotStart`/`hotEnd` (instant|null). Here `hotSale` is the raw flag (not time-adjusted) and `inStock`/`qtyAvailable` mirror the Product meaning. Full field list: `id, categoryId, nameEn, nameGu, description, mrpPaise, pricePaise, unit, packSize, imageUrl, inStock, qtyAvailable, hotSale, earnsCoins, coinRedeemable, qtyOnHand, lowThreshold, active, hotStart, hotEnd, productGroupId, rating, reviewCount`.
 
+**Admin product rows carry the GST (Addendum 10).** `GET /admin/products` rows and `GET /admin/products/{id}` have, next to every AdminProduct field, `gstPercent` (number, `0`, `0.25`, `1.5` ... as saved in the counter details), `hsn` (string, `""` when none) and `gstConfigured` (boolean). `gstConfigured: false` means nobody saved a rate for that product: it shows `0` and `""`, so show a "GST not set" badge instead of a real 0%. The values are read fresh on every call (not from the list cache), so after `PUT /admin/products/{id}/pos` the next list shows the new rate at once. Create, update and patch answers are unchanged (plain AdminProduct); read `GET /admin/products/{id}` for the rate.
+
+
 **Review**: `{ id: uuid, rating: int 1..5, comment: string (may be ""), reviewer: string (first name only, "Customer" when the user has no name), createdAt: instant, verified: boolean (true when written for a delivered order) }`.
 
 **Category**: `{ id: uuid, nameEn: string, nameGu: string, imageUrl: string|null, sortOrder: int }`.
@@ -466,7 +469,7 @@ Notification `kind` values produced by the server: `ORDER` (customer and staff; 
 ```json
 { "items": [ { "id": "…", "title": "Order placed", "body": "Your order VSM-1001 has been placed.",
                "kind": "ORDER", "ref": "VSM-1001", "read": false, "createdAt": "2026-11-08T10:15:30Z" } ],
-  "page": 0, "size": 20, "total": 37, "unread": 5 }
+  "page": 0, "size": 20, "total": 37, "totalExact": true, "hasMore": true, "unread": 5 }
 ```
 | field | type | null? | meaning |
 |---|---|---|---|
@@ -476,10 +479,13 @@ Notification `kind` values produced by the server: `ORDER` (customer and staff; 
 | items[].ref | string | yes | order number or product id for deep link |
 | items[].read | boolean | no | |
 | items[].createdAt | instant | no | |
+| total | integer | no | how many notifications the user has; exact up to 10,000 |
+| totalExact | boolean | no | `false` only when the inbox is longer than 10,000: then `total` is 10000, show "10,000+" |
+| hasMore | boolean | no | exactly whether another page follows; use it (not `total`) to decide whether to load more |
 | unread | integer | no | unread count across ALL pages |
 
 - **Errors**: none specific.
-- **UI notes**: Use `unread` for the badge. Money inside `body` is pre-formatted text ("Rs 120.50").
+- **UI notes**: Use `unread` for the badge. Page forward while `hasMore` is true. A page past the end answers an empty `items`, `hasMore: false` and the real `total`. Money inside `body` is pre-formatted text ("Rs 120.50").
 
 ### POST /api/v1/me/notifications/{id}/read
 - **Who**: customer (own notifications).
@@ -591,7 +597,7 @@ Concepts: 1 coin = `paisePerCoin` paise. Coins can pay at most `maxRedeemPercent
 ```
 Fields: `id` uuid; `name` string; `spendPaise` integer paise (spend step); `coins` integer; `mode` `PRO_RATA|SLAB`; `minOrderPaise` integer paise; `startAt`/`endAt` instant|null; `active` boolean.
 - **Errors**: 403 for non-admin.
-- **UI notes**: Not paged.
+- **UI notes**: Not paged. **Only one rule can be active.** Creating or saving a rule with `active: true` (and a new rule is active unless it says `active: false`) switches every other rule off in the same step; there is no 409 and nothing to confirm on the server. So after every POST or PUT with `active: true`, **reload this list**: the rule that was active before now shows `active: false`. Tell the admin before saving ("This will switch off the rule 'Festival'"). Saving a rule with `active: false` never changes another rule, and switching the only active rule off leaves no rule active (customers then earn no coins). Two admins activating at the same moment still leave exactly one active rule (the last one saved wins). The customer wallet (`GET /wallet`, `rules`) lists at most that one rule.
 
 ### POST /api/v1/admin/coin-rules
 - **Who**: admin.
@@ -613,7 +619,7 @@ Fields: `id` uuid; `name` string; `spendPaise` integer paise (spend step); `coin
 
 - **Response**: `201 Created` rule (same shape as list item).
 - **Errors**: 400 `VALIDATION_FAILED` (fields as above).
-- **UI notes**: Validate `minOrderPaise >= 0` and `endAt >= startAt` in the UI.
+- **UI notes**: Validate `minOrderPaise >= 0` and `endAt >= startAt` in the UI. `active` defaults to true, so a new rule replaces the active one: send `active: false` to save a draft. The list of other rules changes, see GET above.
 
 ### PUT /api/v1/admin/coin-rules/{id}
 - **Who**: admin.
@@ -621,7 +627,7 @@ Fields: `id` uuid; `name` string; `spendPaise` integer paise (spend step); `coin
 - **Request**: path `id`; body same as POST (full replacement; omitted `active` becomes true, omitted `minOrderPaise` becomes 0, omitted dates become null).
 - **Response**: `200` rule.
 - **Errors**: 400 `VALIDATION_FAILED`; 404 `NOT_FOUND` ("Coin rule not found").
-- **UI notes**: Send all fields every time.
+- **UI notes**: Send all fields every time. With `active: true` every other rule is switched off (reload the list); with `active: false` no other rule is touched.
 
 ### DELETE /api/v1/admin/coin-rules/{id}
 - **Who**: admin.

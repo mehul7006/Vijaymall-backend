@@ -187,6 +187,8 @@ public class SecurityConfig {
             // Label printing and store barcodes are counter work too; templates can be read by staff but only changed by the admin.
             .requestMatchers("/api/v1/admin/labels", "/api/v1/admin/labels/**", "/api/v1/admin/variants/*/barcode/generate").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers(HttpMethod.GET, "/api/v1/admin/label-templates", "/api/v1/admin/label-templates/*").hasAnyRole("ADMIN", "CASHIER")
+            // The GST and HSN master is staff-only (admin and cashier); its edits live under /admin/gst-master and stay admin-only.
+            .requestMatchers(HttpMethod.GET, "/api/v1/gst/**").hasAnyRole("ADMIN", "CASHIER")
             .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
             .requestMatchers("/api/v1/pos/**").hasAnyRole("CASHIER", "ADMIN")
             .anyRequest().authenticated())

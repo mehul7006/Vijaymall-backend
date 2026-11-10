@@ -1,6 +1,9 @@
 package com.vijay.mall.pos.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.GstRates;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -14,10 +17,10 @@ public final class PosRecords {
      * The counter attributes of a product: whether it is sold by piece or by weight, its scale item code (PLU), GST
      * percent and HSN code.
      */
-    public record ProductPos(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn) {
+    public record ProductPos(UUID productId, SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent, String hsn) {
         /** The attributes of a product nobody configured: sold by piece, no item code, 0% GST, no HSN. */
         public static ProductPos defaults(UUID productId) {
-            return new ProductPos(productId, SoldBy.UNIT, null, 0, "");
+            return new ProductPos(productId, SoldBy.UNIT, null, GstRates.ZERO, "");
         }
     }
 
@@ -88,12 +91,12 @@ public final class PosRecords {
      * discount that fell on this line (0 when the coupon did not cover it); it is already inside {@code discountPaise}.
      */
     public record SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
-                                 long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
+                                 long linePaise, long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, String hsn,
                                  long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise,
                                  @JsonIgnore Long costPaise) {
         /** A line with a coupon share but no known stock cost (bills from before stock lots, tests). */
         public SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
-                              long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
+                              long linePaise, long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, String hsn,
                               long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty, long couponSharePaise) {
             this(id, productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, hsn,
                 taxablePaise, cgstPaise, sgstPaise, returnedQty, couponSharePaise, null);
@@ -101,7 +104,7 @@ public final class PosRecords {
 
         /** A line with no coupon share (no coupon, or one that did not cover it) and no known stock cost. */
         public SaleItemRecord(UUID id, UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise,
-                              long linePaise, long discountPaise, long netPaise, int gstPercent, String hsn,
+                              long linePaise, long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, String hsn,
                               long taxablePaise, long cgstPaise, long sgstPaise, int returnedQty) {
             this(id, productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, hsn,
                 taxablePaise, cgstPaise, sgstPaise, returnedQty, 0, null);

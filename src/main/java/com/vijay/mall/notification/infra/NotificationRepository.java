@@ -1,11 +1,12 @@
 package com.vijay.mall.notification.infra;
 
 import com.vijay.mall.common.Page;
+import com.vijay.mall.common.persistence.BoundedCount;
+import com.vijay.mall.common.persistence.Window;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,12 +45,11 @@ public class NotificationRepository {
     jpa.save(e);
   }
 
-  /** Newest first. */
+  /** Newest first. The total is exact up to {@link BoundedCount#CAP} (then {@code totalExact} is false) and {@code hasMore} is always exact. */
   public Page<Row> page(UUID userId, int page, int size) {
-    var result = jpa.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
-    List<Row> rows = result.getContent().stream()
+    List<Row> rows = jpa.findByUserId(userId, Window.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))).stream()
         .map(e -> new Row(e.id, e.title, e.body, e.kind, e.ref, e.readAt != null, e.createdAt)).toList();
-    return new Page<>(rows, page, size, result.getTotalElements());
+    return BoundedCount.assemble(rows, page, size, () -> jpa.countUpTo(userId, BoundedCount.CAP + 1));
   }
 
   /** How many notifications the user has not read yet. */

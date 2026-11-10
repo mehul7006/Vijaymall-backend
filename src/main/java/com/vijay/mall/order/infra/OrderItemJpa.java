@@ -19,4 +19,12 @@ interface OrderItemJpa extends JpaRepository<OrderItemEntity, UUID> {
 
   @Query("select i.orderId, sum(i.qty) from OrderItemEntity i where i.orderId in :ids group by i.orderId")
   List<Object[]> countsFor(@Param("ids") Collection<UUID> orderIds);
+
+  /**
+   * GST of the orders' lines grouped by order and rate: taxable, CGST and SGST sums and the number of lines. A group with a null rate holds
+   * the lines of orders placed before GST was recorded.
+   */
+  @Query("select i.orderId, i.gstPercent, sum(i.taxablePaise), sum(i.cgstPaise), sum(i.sgstPaise), count(i) from OrderItemEntity i "
+      + "where i.orderId in :ids group by i.orderId, i.gstPercent")
+  List<Object[]> gstFor(@Param("ids") Collection<UUID> orderIds);
 }

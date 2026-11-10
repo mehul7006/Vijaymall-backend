@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import java.math.BigDecimal;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -16,7 +17,7 @@ class ProductPosEntity {
   @Id UUID productId;
   String soldBy;
   String plu;
-  int gstPercent;
+  BigDecimal gstPercent;
   String hsn;
   Instant updatedAt;
 

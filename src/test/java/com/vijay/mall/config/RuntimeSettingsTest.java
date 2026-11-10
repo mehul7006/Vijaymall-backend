@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.config.RuntimeSettings.Change;
 import com.vijay.mall.config.RuntimeSettings.Source;
+import com.vijay.mall.config.Settings.Group;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Set;
@@ -205,6 +206,37 @@ class RuntimeSettingsTest {
     assertThat(s.validate(FCM_SERVICE_ACCOUNT, "{\"project_id\":\"p\",\"client_email\":\"e@x\",\"private_key\":\"k\"}")).contains("project_id");
     assertThatThrownBy(() -> s.validate(CLIENT_IP_HEADER, "bad header")).hasMessageContaining("header name");
     assertThat(s.validate(CLIENT_IP_HEADER, "CF-Connecting-IP")).isEqualTo("CF-Connecting-IP");
+  }
+
+  @Test
+  void barcodeAndLabelSettingsAreValidated() {
+    assertThat(s.validate(BARCODE_STORE_PREFIX, " 2345 ")).isEqualTo("2345");
+    assertThat(s.validate(BARCODE_STORE_PREFIX, "2")).isEqualTo("2");
+    assertThatThrownBy(() -> s.validate(BARCODE_STORE_PREFIX, "23456")).hasMessageContaining("too long");
+    for (String bad : List.of("3", "2a", "29 1", "-29")) {
+      assertThatThrownBy(() -> s.validate(BARCODE_STORE_PREFIX, bad)).as(bad).isInstanceOf(ApiException.class).hasMessageContaining("starting with 2");
+    }
+    assertThat(s.validate(BARCODE_VARIABLE_MEASURE_PREFIX, "27")).isEqualTo("27");
+    for (String bad : List.of("2", "30", "2x")) {
+      assertThatThrownBy(() -> s.validate(BARCODE_VARIABLE_MEASURE_PREFIX, bad)).as(bad).hasMessageContaining("20 to 29");
+    }
+    assertThat(s.validate(BARCODE_VARIABLE_MEASURE_ENABLED, "TRUE")).isEqualTo("true");
+    assertThatThrownBy(() -> s.validate(BARCODE_VARIABLE_MEASURE_ENABLED, "yes")).hasMessageContaining("true, false");
+    assertThat(s.validate(LABEL_DPI, "300")).isEqualTo("300");
+    assertThatThrownBy(() -> s.validate(LABEL_DPI, "250")).hasMessageContaining("203, 300, 600");
+    assertThat(Settings.find("label.dpi").group()).isEqualTo(Group.BARCODE);
+    assertThat(Group.BARCODE.label).isEqualTo("Barcodes and labels");
+  }
+
+  @Test
+  void barcodeAndLabelSettingsFallBackToTheShopDefaults() {
+    assertThat(s.get(BARCODE_STORE_PREFIX)).isEqualTo("29");
+    assertThat(s.getBool(BARCODE_VARIABLE_MEASURE_ENABLED)).isFalse();
+    assertThat(s.get(BARCODE_VARIABLE_MEASURE_PREFIX)).isEqualTo("22");
+    assertThat(s.getInt(LABEL_DPI)).isEqualTo(203);
+    s.save(List.of(c(LABEL_DPI, "300"), c(BARCODE_STORE_PREFIX, "28")), admin);
+    assertThat(s.getInt(LABEL_DPI)).isEqualTo(300);
+    assertThat(s.get(BARCODE_STORE_PREFIX)).isEqualTo("28");
   }
 
   // ---------- half finished set-ups ----------

@@ -36,7 +36,7 @@ Conventions used below:
 **Landed cost per unit** = (line taxable value + non-creditable tax on the line + the line's share of freight) / (qty + freeQty). Freight and its GST are shared over lines in proportion to taxable value (by quantity when every taxable value is 0). Under REGULAR the freight GST is creditable (not in cost); under COMPOSITION it is in the cost.
 
 ### 2.2 Order of the maths (all in exact paise)
-1. `gross = qty * unitCostPaise` (free units cost nothing).
+1. `gross = round_half_up(qty * unitCostPaise)` to whole paise, once per line (free units cost nothing). For a whole-number unit cost this is exactly `qty * unitCostPaise`, as before.
 2. Line discount: `discountPercent` (if above 0) or `discountPaise`. `taxable_before_doc = gross - discount`.
 3. Document discount: `docDiscountPercent` (if above 0, of the sum of `taxable_before_doc`) or `docDiscountPaise`. It is spread over the lines in proportion to `taxable_before_doc` (largest remainder, the shares add up exactly): `taxablePaise = taxable_before_doc - share`. So the discount reduces the GST base.
 4. Tax on `taxablePaise`: `gst = round_half_up(taxable * gstPercent / 100)`; same for cess with `cessPercent`. Intra-state: `cgst = floor(gst/2)`, `sgst = gst - cgst` (the odd paisa goes to SGST); inter-state: all `igst`.
@@ -51,7 +51,8 @@ Conventions used below:
 The shop's state is the `stateCode` in shop settings (default `24`). The supplier's state is, in order: `supplierStateCode` sent with the purchase; the supplier's stored state; the first two digits of its GSTIN. If a supplier state is known and differs from the shop's state the purchase is inter-state (`interState: true`, IGST only); otherwise CGST+SGST. If the state is unknown the purchase is treated as intra-state. A `supplierStateCode` that disagrees with the GSTIN's first two digits is `400` on `supplierStateCode`.
 
 ### 2.4 Unit cost precision and rounding
-- `unitCostPaise` (the invoice price) is a whole number of paise.
+- `unitCostPaise` (the invoice price) is a **decimal number** of paise with **at most 4 decimals** (JSON number: `55`, `5.5`, `5.5000` and `0.3333` are all fine; more than 4 decimals is `400` "at most 4 decimals" on `fields.unitCostPaise`; the range and "is required" errors are on `fields["items[0].unitCostPaise"]`; below 0 or above 100,000,000 is `400`; it is required). It is returned **without needless zeros**: `55`, never `55.0000`; `5.5` stays `5.5` (also in the purchase view, the lookup's `lastPurchaseCostPaise`, the price history and the register). Parse it as `double`/`Decimal`, not `int`. The line value `lineCostPaise` and every total stay whole paise: the line's gross is `qty * unitCostPaise` rounded half-up to whole paise, then discounts and tax work as in 2.2.
+- **Weighed products** (sold by weight, stock in grams): enter the quantity in **grams** and the cost **per gram**, which may be fractional. Example: 12 kg bought at Rs 55/kg. Rs 55/kg is 5500 paise per kg = 5.5 paise per gram, so send `"qty": 12000, "unitCostPaise": 5.5`; the line is 12000 g x 5.5 = **66000 paise** (Rs 660). The landed cost per gram (`landedUnitCostPaise`) stays exact to 4 decimals.
 - The landed unit cost is stored with **4 decimals of a paisa** (`numeric(18,4)`), e.g. 10 paid + 2 free units at Rs 100 gives `8333.3333`. Totals stay exact paise: `landedTotalPaise` is the exact total the unit cost came from.
 - Views return both `landedUnitCostPaise` (always exact, 4 decimals, JSON number) and `landedUnitCostRoundedPaise`, rounded by the request parameter `rounding` on the GET views: `EXACT` (4 decimals), `PAISE` (nearest paisa, half up; the default), `RUPEE` (nearest rupee, still in paise, e.g. `8300`). An unknown value is `400` on `rounding`. The answer carries `rounding` so the screen can label it. The same parameter exists on the list, the detail and the product price history.
 - Dart: parse these two fields as `double` (or `Decimal`), never `int`.
@@ -81,6 +82,7 @@ Receiving adds `qty + freeQty` to stock (reason `PURCHASE`, linked to the purcha
 | 4 | `PUT /admin/suppliers/{id}` | Edit a supplier |
 | 5 | `POST /admin/suppliers/{id}/deactivate` | Switch off |
 | 6 | `POST /admin/suppliers/{id}/activate` | Switch on |
+| 6b | `GET /admin/suppliers/{id}/credit-notes` | The supplier's debit notes with the credit still available (A1.2) |
 | 7 | `POST /admin/purchases` | Record a purchase |
 | 8 | `GET /admin/purchases` | List with filters |
 | 9 | `GET /admin/purchases/{id}` | One purchase |
@@ -104,18 +106,18 @@ Receiving adds `qty + freeQty` to stock (reason `PURCHASE`, linked to the purcha
 A supplier is identified by its name compared **trimmed, with runs of spaces as one space, ignoring case** ("Agro  Traders " = "agro traders"). Names are unique.
 
 ### GET /api/v1/admin/suppliers
-Query: `q` (matches name, phone or GSTIN, contains, any case; `%` and `_` are literal), `active` (true/false; omit for both), `page`, `size`. Sorted by name. Response: page of
+Query: `q` (matches name, phone, GSTIN or e-mail, contains, any case; `%` and `_` are literal), `active` (true/false; omit for both), `page`, `size`. Sorted by name. Response: page of
 
 ```json
 { "id": "uuid", "name": "Agro Traders", "phone": "98250 11111", "gstin": "24ABCDE1234F1Z5", "stateCode": "24",
-  "address": "Rajkot", "paymentTermsDays": 30, "active": true, "createdAt": "2026-11-09T05:00:00Z",
+  "address": "Rajkot", "email": "accounts@agro.example.com", "pincode": "360001", "paymentTermsDays": 30, "active": true, "createdAt": "2026-11-09T05:00:00Z",
   "lastInvoiceNo": "INV-77", "lastPurchaseAt": "2026-11-09T05:30:00Z", "purchaseCount": 4, "totalDuePaise": 68000,
   "balancePaise": 68000, "creditPaise": 0 }
 ```
 `lastInvoiceNo` is `""` and `lastPurchaseAt` null for a supplier without purchases. `totalDuePaise` adds up `duePaise` of all its purchases (negative = supplier owes us). The figures are fetched in two queries per page, not per row.
 
 ### POST /api/v1/admin/suppliers
-Header `Idempotency-Key` is optional (a repeat with the key returns the first answer). Body (PUT takes the same body and replaces all fields: an omitted `paymentTermsDays` resets to 0 and an omitted phone, address or GSTIN becomes empty, so always send the whole supplier; `PUT` takes no `Idempotency-Key`):
+Header `Idempotency-Key` is optional (a repeat with the key returns the first answer). Body (PUT takes the same body and replaces all fields: an omitted `paymentTermsDays` resets to 0 and an omitted phone, address, e-mail, pincode or GSTIN becomes empty, so always send the whole supplier; `PUT` takes no `Idempotency-Key`):
 
 | field | rules |
 |---|---|
@@ -124,6 +126,8 @@ Header `Idempotency-Key` is optional (a repeat with the key returns the first an
 | stateCode | optional 2 digits; if a GSTIN is given it must equal its first two digits (otherwise left out it is taken from the GSTIN) |
 | phone | optional, digits, spaces, `+`, `-`, at most 20 |
 | address | optional, at most 300 |
+| email | optional, at most 254, simple `name@host.tld` format (no spaces, one `@`, a dot after it); otherwise `400` on `email`. Searchable with `q`. Returned as `""` when not given |
+| pincode | optional, exactly 6 digits; otherwise `400` on `pincode`. Returned as `""` when not given |
 | paymentTermsDays | optional 0..365 (default 0); used for the due date of new purchases when none is sent |
 
 201 with the supplier view. Errors: 400 `VALIDATION_FAILED` (fields as above), 409 `SUPPLIER_EXISTS` (`details.supplierId` is the existing one, `details.fields.name`).
@@ -183,11 +187,11 @@ Header `Idempotency-Key` mandatory. Only `items` and one of `supplierId` / `supp
 | items | 1..200, a product at most once |
 | items[].qty | 1..1,000,000; `qty + freeQty` at most 1,000,000 |
 | items[].freeQty | default 0; units that cost nothing but are added to stock and shared in the landed cost |
-| items[].unitCostPaise | 0..100,000,000, before tax |
+| items[].unitCostPaise | required, decimal 0..100,000,000 with at most 4 decimals (JSON number, e.g. `5.5`), before tax; see 2.4 |
 | items[].discountPercent / discountPaise | one of them; percent 0..100 (max 2 decimals); amount not above the line amount |
-| items[].gstPercent | one of 0, 3, 5, 12, 18, 28; default **the product's GST percent** (product counter attributes) |
+| items[].gstPercent | one of 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40; when left out: the product's **saved** GST percent, else the rate from the GST master (see 75-gst-master.md section 6), else 0. A typed 0 is used as 0 |
 | items[].cessPercent | 0..100, default 0 |
-| items[].hsn | blank or 4..8 digits; default the product's HSN |
+| items[].hsn | blank or 4..8 digits; when blank: the product's HSN, else the HSN from the GST master. The line keeps what it used and the product is not changed. A fill from a master row marked `VERIFY_PRODUCT` adds a `warnings` entry ("needs your CA's confirmation") |
 | items[].mrpPaise / sellingPricePaise | optional, `sellingPricePaise` not above `mrpPaise` |
 | items[].batchNo | max 40 |
 | items[].applyToVariant | default false; needs `mrpPaise` or `sellingPricePaise` |
@@ -215,7 +219,7 @@ Response 201 (the same object as `GET /admin/purchases/{id}`, plus `warnings`):
   "hasAttachment": false, "attachmentUrl": null,
   "warnings": [] }
 ```
-(The numbers above only illustrate the shape.) `lineCostPaise` is `qty * unitCostPaise` (gross, as before). `docDiscountPercent` is null when an amount was used.
+(The numbers above only illustrate the shape.) `lineCostPaise` is `qty * unitCostPaise` rounded half-up to whole paise (gross, as before). `docDiscountPercent` is null when an amount was used.
 
 Errors: 400 `VALIDATION_FAILED` (every field above, plus `Idempotency-Key` missing, "a product appears twice", "a product does not exist", "this supplier is switched off"), 409 `IDEMPOTENCY_KEY_REUSED`, 422 `TOTAL_MISMATCH`.
 
@@ -241,9 +245,9 @@ For the form, when a product is picked. 404 for an unknown product.
 ```json
 { "productId": "uuid", "name": "Bath Soap", "gstPercent": 18, "hsn": "3401", "mrpPaise": 15000, "pricePaise": 14000, "qtyOnHand": 12,
   "lastPurchaseCostPaise": 10000, "lastLandedUnitCostPaise": 8333.3333, "lastSupplierName": "Agro Traders",
-  "lastInvoiceDate": "2026-11-09", "lastPurchaseId": "uuid" }
+  "lastInvoiceDate": "2026-11-09", "lastPurchaseId": "uuid", "gstSource": "STORED", "gstVerification": null }
 ```
-The `last*` fields are null when the product was never purchased. `lastPurchaseCostPaise` is the invoice price before tax.
+`gstPercent` and `hsn` are the product's saved values; for a product with no saved counter attributes (or a blank HSN) the blank parts come from the GST master, `gstSource` says which (`STORED`, `MASTER`, `DEFAULT`) and `gstVerification` (`VERIFIED`, `VERIFY_PRODUCT`, `null`) is set when the master filled something: show "please confirm this rate with your CA" for `VERIFY_PRODUCT`. The `last*` fields are null when the product was never purchased. `lastPurchaseCostPaise` is the invoice price before tax (a decimal, printed without needless zeros, e.g. `5.5`).
 
 ### GET /api/v1/admin/products/{id}/purchase-prices?limit=20&rounding=
 The last `limit` (1..100) purchases of the product, newest first, so the admin can compare suppliers over time. A plain array:
@@ -352,7 +356,7 @@ enum PayStatus { pending, partial, paid }            // JSON: PENDING, PARTIAL, 
 enum PayMode { cash, upi, card, bank, cheque }       // JSON: CASH, UPI, CARD, BANK, CHEQUE (+ CREDIT_NOTE on the payments endpoint, see Addendum 1)
 
 class Supplier {
-  final String id, name, phone, gstin, stateCode, address, lastInvoiceNo;
+  final String id, name, phone, gstin, stateCode, address, email, pincode, lastInvoiceNo;
   final int paymentTermsDays, purchaseCount, totalDuePaise;
   final bool active;
   final DateTime? lastPurchaseAt;
@@ -360,7 +364,8 @@ class Supplier {
 
 class PurchaseLine {
   final String id, productId, name, hsn, batchNo;
-  final int qty, freeQty, unitCostPaise, gstPercent, taxablePaise, lineTotalPaise, returnedQty;
+  final int qty, freeQty, gstPercent, taxablePaise, lineTotalPaise, returnedQty;
+  final double unitCostPaise;                                     // decimal, up to 4 places (5.5 paise per gram)
   final double landedUnitCostPaise, landedUnitCostRoundedPaise;   // 4 decimals: never int
   final int? mrpPaise, sellingPricePaise;
   final DateTime? expiryDate;
@@ -461,7 +466,7 @@ Answer: `201` and the paid purchase (the payment row has `mode: "CREDIT_NOTE"` a
 { "amountPaise": 25000, "mode": "BANK", "reference": "UTR123", "receivedAt": "2026-04-20T09:30:00Z", "moneyAccountId": "<uuid or null>" }
 ```
 
-`mode` is CASH, UPI, CARD, BANK or CHEQUE; `receivedAt` defaults to now; `moneyAccountId` is stored without validation, like payments. Answer `201`:
+`mode` is CASH, UPI, CARD, BANK or CHEQUE (`CREDIT_NOTE` is a valid string but a refund is money back, so it answers `400` on `mode` with the message "CREDIT_NOTE is not allowed for refunds"; any other unknown mode says "must be CASH, UPI, CARD, BANK or CHEQUE"; at most 20 characters); `receivedAt` defaults to now; `moneyAccountId` is stored without validation, like payments. Answer `201`:
 
 ```json
 { "id": "...", "supplierId": "...", "amountPaise": 25000, "mode": "BANK", "reference": "UTR123", "moneyAccountId": null,
@@ -469,6 +474,15 @@ Answer: `201` and the paid purchase (the payment row has `mode: "CREDIT_NOTE"` a
 ```
 
 `creditPaise` and `balancePaise` are the supplier's figures after the refund. In `GET /admin/purchases/payables` the paid figures are net of refunds (a refund lowers `totalPaidPaise`), so purchased minus paid is still the due amount. Errors: `422 REFUND_EXCEEDS_CREDIT` (`details.creditPaise`, `details.fields.amountPaise`), `400` for a bad mode or a future `receivedAt`, `404` unknown supplier, `409 IDEMPOTENCY_KEY_REUSED`. A repeat with the same key and body returns the first refund and changes nothing. The refund is taken from the supplier's credit purchases, oldest invoice first, so their `duePaise` moves up towards 0. `GET /admin/suppliers/{id}/refunds` lists the latest 50 (same shape, newest first). The statement shows a refund as `SUPPLIER_REFUND` with a plus amount.
+
+**(c) Show the credit notes: `GET /admin/suppliers/{id}/credit-notes?page=0&size=20`** (size 1..50, newest first, paged like every list; 404 for an unknown supplier). One row per debit note:
+
+```json
+{ "items": [ { "id": "uuid", "number": "DN-0001", "date": "2026-11-10", "createdAt": "2026-11-10T05:00:00Z", "purchaseId": "uuid",
+    "invoiceNo": "INV-77", "amountPaise": 40000, "usedPaise": 30000, "availablePaise": 10000 } ], "page": 0, "size": 20, "total": 1, "totalExact": true, "hasMore": false }
+```
+
+`id` is the value to send as `debitNoteId` in (a). `usedPaise` is what was already spent as credit. `availablePaise` is exactly the most the credit-use API (a) allows for that note right now: the part of the note not yet used, but never more than the credit its purchase still holds (credit that was refunded in cash is gone). Use it as the maximum of the amount field; a larger amount is `422 CREDIT_EXCEEDS_AVAILABLE`. `date` is the India date of `createdAt`.
 
 Example: bought 100,000 and paid it; returned goods worth 40,000, so credit 40,000 and balance -40,000. A new purchase of 50,000: balance +10,000, credit still 40,000. Pay it with 30,000 credit: new purchase due 20,000, old purchase due -10,000, balance still +10,000. Or refund 10,000 in cash: old purchase due 0, balance +20,000.
 

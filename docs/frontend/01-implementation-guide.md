@@ -18,7 +18,8 @@ Read this first, then use the numbered guides as the detailed reference. It tell
 | `73-paytm-terminal.md` | The Paytm wireless swipe machine as one vendor of that flow: admin set-up, machines master, till flow, same-day void, Paytm settlements. |
 | `74-stock-lots-and-pricing.md` | Stock lots, lot-aware prices and scanning, FIFO cost, expiry, margin and stock-value reports. |
 | `playbooks/README.md` | Step-by-step implementation playbooks (reading order and index): [P1 orders, coupons, returns, payments](playbooks/P1-orders-coupons-returns-payments.md), [P2 purchases, suppliers, labels](playbooks/P2-purchases-suppliers-labels.md), [P3 counter till and card machine](playbooks/P3-counter-till-and-card-machine.md), [P4 bank, settlements, receipts](playbooks/P4-bank-settlements-receipts.md), [P5 stock lots and pricing](playbooks/P5-stock-lots-pricing.md). Per feature: goal, fields, API sequence, edge cases, Dart, acceptance tests. |
-| `50`, `51`, `52-backend-response-*.md` | The backend's answers to your reviews, item by item, with what to retest. Use them as the change history. |
+| `75-gst-master.md` | GST and HSN master: suggestions, rate card, admin edits, how forms use them, server-side fill of blank GST and HSN |
+| `50` to `53-backend-response-*.md` | The backend's answers to your reviews, item by item, with what to retest. Use them as the change history. |
 
 Each numbered guide ends with its own "Addendum" sections for later changes; where an addendum contradicts older text in the same file, **the addendum wins**.
 

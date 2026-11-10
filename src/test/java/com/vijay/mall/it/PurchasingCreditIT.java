@@ -355,4 +355,43 @@ class PurchasingCreditIT extends IntegrationTestBase {
     var clean = patch(second.get("id"), Map.of("invoiceNo", "UNIQUE-" + UUID.randomUUID()));
     assertThat((List) clean.body().get("warnings")).isEmpty();
   }
+
+  @Test
+  void creditNotesListNewestFirstWithWhatIsUsedAndWhatCreditUseWouldStillAllowAndCreditNoteModeCannotRefund() {
+    String name = "Notes Supplier " + UUID.randomUUID();
+    Map p1 = purchase(name, 10, true);
+    Map first = giveBack(p1, 4);
+    Map second = giveBack(p1, 1);
+    Map p2 = purchase(name, 5, false);
+    assertThat(credit(p2.get("id"), 30000, first.get("id"), key()).status()).isEqualTo(HttpStatus.CREATED);
+    Object id = p1.get("supplierId");
+
+    var res = get(S + "/" + id + "/credit-notes?size=50", admin());
+    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    List<Map> items = (List<Map>) res.getBody().get("items");
+    assertThat(items).extracting(i -> i.get("id")).containsExactly(second.get("id"), first.get("id"));
+    Map a = items.get(1);
+    assertThat(a).containsEntry("number", first.get("noteNo")).containsEntry("purchaseId", p1.get("id")).containsEntry("invoiceNo", p1.get("invoiceNo"));
+    assertThat(a).containsKeys("date", "createdAt");
+    assertThat(n(a.get("amountPaise"))).isEqualTo(40000);
+    assertThat(n(a.get("usedPaise"))).isEqualTo(30000);
+    assertThat(n(a.get("availablePaise"))).as("40000 less the 30000 used").isEqualTo(10000);
+    assertThat(n(items.getFirst().get("availablePaise"))).isEqualTo(10000);
+    assertThat(call(HttpMethod.POST, S + "/" + id + "/refunds", admin(), Map.of("amountPaise", 15000, "mode", "CASH"), key()).getStatusCode())
+        .isEqualTo(HttpStatus.CREATED);
+    List<Map> after = (List<Map>) get(S + "/" + id + "/credit-notes?size=50", admin()).getBody().get("items");
+    assertThat(after).extracting(i -> n(i.get("availablePaise"))).as("the credit the purchase still holds caps both notes").containsExactly(5000L, 5000L);
+    Map p3 = purchase(name, 5, false);
+    assertThat(credit(p3.get("id"), 5001, first.get("id"), key()).code()).isEqualTo("CREDIT_EXCEEDS_AVAILABLE");
+    assertThat(credit(p3.get("id"), 5000, first.get("id"), key()).status()).as("exactly the listed availablePaise is allowed").isEqualTo(HttpStatus.CREATED);
+    assertThat(get(S + "/" + UUID.randomUUID() + "/credit-notes", admin()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(((Map) get(S + "/" + id + "/credit-notes?size=1", admin()).getBody()).get("hasMore")).isEqualTo(true);
+
+    var refund = call(HttpMethod.POST, S + "/" + id + "/refunds", admin(), Map.of("amountPaise", 1, "mode", "CREDIT_NOTE"), key());
+    assertThat(refund.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(refund.getBody()).containsEntry("message", "CREDIT_NOTE is not allowed for refunds");
+    assertThat((Map) ((Map) refund.getBody().get("details")).get("fields")).containsEntry("mode", "CREDIT_NOTE is not allowed for refunds");
+    var tooLong = call(HttpMethod.POST, S + "/" + id + "/refunds", admin(), Map.of("amountPaise", 1, "mode", "X".repeat(21)), key());
+    assertThat(tooLong.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
 }

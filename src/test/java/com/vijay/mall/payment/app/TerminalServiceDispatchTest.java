@@ -112,7 +112,7 @@ class TerminalServiceDispatchTest {
   private final UUID actor = UUID.randomUUID();
 
   private Account account(String provider, String identifier) {
-    return new Account(UUID.randomUUID(), "n", "CARD_TERMINAL", provider, identifier, null, true, "", Instant.EPOCH, Instant.EPOCH);
+    return new Account(UUID.randomUUID(), "n", "CARD_TERMINAL", provider, identifier, null, null, true, "", Instant.EPOCH, Instant.EPOCH);
   }
 
   private Account channel(String provider, String identifier, boolean named) {

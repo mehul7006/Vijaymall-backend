@@ -75,10 +75,11 @@ Columns: Received (`receivedAt`), Source, Qty received / left / sold, Unit cost,
 ```json
 { "id": "…", "productId": "…", "productName": "Basmati Rice", "receivedAt": "…Z", "qtyReceived": 10, "qtyRemaining": 8,
   "unitCost": 12000.0000, "costKnown": true, "mrpPaise": 18000, "pricePaise": 17000, "batchNo": "B12", "expiryDate": "2027-03-01",
-  "source": "PURCHASE", "purchaseItemId": "…" }
+  "source": "PURCHASE", "purchaseItemId": "…", "purchaseId": "…", "invoiceNo": "INV-77", "supplierName": "Agro Traders" }
 ```
+   `purchaseId`, `invoiceNo` and `supplierName` name the purchase that delivered the lot (resolved in the same query, no extra calls); all three are `null` for an opening, adjustment, return or transfer lot (no purchase). The same fields are on the lots of the expiry report.
    Unknown variant id returns an EMPTY page (not 404).
-2. Row actions: "Write off remaining" (only when `qtyRemaining > 0`), section 8; "Open purchase" when `purchaseItemId` is not null.
+2. Row actions: "Write off remaining" (only when `qtyRemaining > 0`), section 8; "Open purchase" (`GET /admin/purchases/{purchaseId}`) when `purchaseId` is not null; show `invoiceNo` and `supplierName` in the Purchase column.
 
 ### 2.5 State / derived
 - `sold` is not sent: show `qtyReceived - qtyRemaining` (display arithmetic only).
@@ -97,7 +98,7 @@ class LotRow {
   final String id, productId, productName, source, batchNo; // batchNo "" when none
   final DateTime receivedAt;
   final int qtyReceived, qtyRemaining; final double unitCost; final bool costKnown; // unitCost in paise
-  final int? mrpPaise, pricePaise; final String? expiryDate /* yyyy-MM-dd */, purchaseItemId;
+  final int? mrpPaise, pricePaise; final String? expiryDate /* yyyy-MM-dd */, purchaseItemId, purchaseId, invoiceNo, supplierName;
 }
 ```
 
@@ -193,7 +194,7 @@ The lot is dated by the delivery's received date (the moment of recording when t
 See `P2` for `PurchaseItemInput`; the lot fields are `mrpPaise`, `sellingPricePaise`, `batchNo`, `expiryDate`, `applyToVariant`.
 
 ### 4.8 Acceptance
-- Given lines 3 units at price 150 and 10 units at price 170 on a lot-priced variant, when recorded, then two lots exist and the variant price is 150.
+- Given two purchases of the same lot-priced variant (one purchase of 3 units at price 150, a later purchase of 10 units at price 170), when both are recorded, then two lots exist and the variant price is 150. (One purchase cannot hold two lines of the same product: the server refuses it with "a product appears twice: add its quantities together". Different prices need separate purchases.)
 - Given price above MRP, then 400 under `sellingPricePaise`.
 - Given `applyToVariant` true with no MRP or price, then 400 under `applyToVariant`.
 
@@ -253,7 +254,7 @@ String splitText(List<BillLine> ls) => ls.map((l) => '${l.qty} x ${rupees(l.unit
 ```
 
 ### 5.8 Acceptance
-- Given 3 units at 150 and 10 at 170, when I scan, then the card shows 150.00 and "After 3 more the price is 170.00".
+- Given a lot of 3 units at 150 (first purchase) and a lot of 10 at 170 (second purchase), when I scan, then the card shows 150.00 and "After 3 more the price is 170.00".
 - Given qty 5, when I quote, then two lines (3 at 150, 2 at 170) and total 790.00.
 - Given the sale completes, then the receipt prints `3 x 150.00 + 2 x 170.00`.
 - Given a return of the 170 line, then the refund is at 170.

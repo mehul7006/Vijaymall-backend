@@ -1,5 +1,7 @@
 package com.vijay.mall.pos.api;
 
+import java.math.BigDecimal;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.common.Limits;
 import com.vijay.mall.common.security.CurrentUser;
 import com.vijay.mall.identity.domain.User;
@@ -34,9 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin")
 public class AdminPosController {
   /**
-   * Request body for saving the shop settings printed on bills. Blank optional fields fall back to defaults (state
-   * code 24, invoice prefix VSM, weighed prefix 2, weighed mode {@code WEIGHT_GRAMS}); a missing {@code promise} or
-   * {@code details} keeps the stored text.
+   * Request body for saving the shop settings printed on bills. A key left out keeps the stored value; an empty string
+   * clears a text field, and for state code (24), invoice prefix (VSM) and weighed prefix (2) it resets the default.
    */
   public record ShopBody(@NotBlank @Size(max = Limits.SHOP_NAME) String shopName, @Size(max = Limits.SHOP_ADDRESS) String address,
                          @Pattern(regexp = Limits.PHONE_REGEX, message = "must be 7 to 15 digits; spaces, + and - are allowed") String phone,
@@ -62,20 +63,19 @@ public class AdminPosController {
           promise, null);
     }
 
-    /** keepPromise is used when the request leaves promise out, so saving the form does not blank it. */
-    ShopSetting toSetting(String keepPromise) { return toSetting(keepPromise, null); }
-
-    /** keepDetails works the same way for the "about the shop" text. */
-    ShopSetting toSetting(String keepPromise, String keepDetails) {
-      return toSetting(new ShopSetting("", "", "", "", "", "", "", "", "", WeighedMode.WEIGHT_GRAMS, keepPromise, keepDetails));
-    }
-
-    /** The stored settings give the texts to keep when the request leaves one out (promise, details, short name, Gujarati texts). */
+    /**
+     * Merges the request over the stored settings. A key left out (null) keeps the stored value; a text key sent as an
+     * empty string clears it (address, phone, GSTIN, UPI id, receipt footer, promise, details and the Gujarati texts).
+     * State code, invoice prefix and weighed prefix cannot be empty, so an empty string resets them to 24, VSM and 2.
+     * The shop name is always required.
+     */
     ShopSetting toSetting(ShopSetting keep) {
-      return new ShopSetting(shopName.strip(), nz(address, ""), nz(phone, ""), nz(gstin, "").strip().toUpperCase(),
-          nz(stateCode, "24"), nz(upiId, "").strip(), nz(invoicePrefix, "VSM").strip().toUpperCase(),
-          nz(receiptFooter, "Thank you! Visit again."), nz(weighedPrefix, "2"),
-          weighedMode == null ? WeighedMode.WEIGHT_GRAMS : weighedMode, promise == null ? keep.promise() : promise.strip(),
+      return new ShopSetting(shopName.strip(), keepOr(address, keep.address()), keepOr(phone, keep.phone()),
+          gstin == null ? keep.gstin() : gstin.strip().toUpperCase(),
+          stateCode == null ? keep.stateCode() : nz(stateCode, "24"), keepOrStrip(upiId, keep.upiId()),
+          invoicePrefix == null ? keep.invoicePrefix() : nz(invoicePrefix, "VSM").strip().toUpperCase(),
+          keepOr(receiptFooter, keep.receiptFooter()), weighedPrefix == null ? keep.weighedPrefix() : nz(weighedPrefix, "2"),
+          weighedMode == null ? keep.weighedMode() : weighedMode, promise == null ? keep.promise() : promise.strip(),
           details == null ? (keep.details() == null ? "" : keep.details()) : details.strip(),
           keepOrStrip(shortName, keep.shortName()), keepOrStrip(shopNameGu, keep.shopNameGu()), keepOrStrip(addressGu, keep.addressGu()),
           keepOrStrip(promiseGu, keep.promiseGu()), keepOrStrip(detailsGu, keep.detailsGu()));
@@ -86,7 +86,8 @@ public class AdminPosController {
    * Request body for a product's counter attributes: how it is sold (piece or weight), item code (PLU), GST percent,
    * HSN code and the barcodes that identify it.
    */
-  public record PosBody(@NotNull SoldBy soldBy, String plu, int gstPercent, String hsn, List<String> barcodes) {}
+  public record PosBody(@NotNull SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent,
+                        @Pattern(regexp = "^\\s*$|\\d{4}|\\d{6}|\\d{8}", message = "must be 4, 6 or 8 digits") String hsn, List<String> barcodes) {}
 
   /**
    * Request body for creating a cashier account; the email is the sign-in identity. {@code name} is 1 to 80 characters,
@@ -105,6 +106,9 @@ public class AdminPosController {
   }
 
   private static String keepOrStrip(String given, String stored) { return given == null ? stored : given.strip(); }
+
+  /** A key left out keeps the stored value; a key sent as an empty string clears it. */
+  private static String keepOr(String given, String stored) { return given == null ? stored : given; }
 
   private static String nz(String s, String d) { return s == null || s.isBlank() ? d : s; }
 

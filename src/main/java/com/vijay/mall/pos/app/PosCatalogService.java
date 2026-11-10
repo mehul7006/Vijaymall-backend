@@ -1,10 +1,15 @@
 package com.vijay.mall.pos.app;
 
+import java.math.BigDecimal;
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.ProductGst;
 import com.vijay.mall.catalog.app.CatalogService;
+import com.vijay.mall.catalog.domain.AdminProduct;
 import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.gst.app.GstService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.domain.Lot;
 import com.vijay.mall.inventory.domain.LotInfo;
@@ -39,9 +44,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** Finds products at the counter (scan or search) and keeps their counter attributes and barcodes. */
 @Service
 public class PosCatalogService {
-  /** The GST percentages the system accepts for a product (also what an offline till may send). */
-  public static final List<Integer> GST_RATES = List.of(0, 3, 5, 12, 18, 28);
-
   private final CatalogService catalog;
   private final PosCatalogRepository repo;
   private final ShopService shop;
@@ -61,6 +63,11 @@ public class PosCatalogService {
   }
 
   private VariableMeasureBarcode variableMeasure;
+  private GstService gst;
+
+  /** Optional (plain unit tests run without it): the GST master, which fills a blank rate or HSN of a product never configured. */
+  @Autowired(required = false)
+  void setGst(GstService gst) { this.gst = gst; }
 
   /** Optional (plain unit tests run without it): the weighing-scale barcode reader, which only reads when its setting is on. */
   @Autowired(required = false)
@@ -189,16 +196,44 @@ public class PosCatalogService {
    */
   public PosAttributes attributes(UUID productId) {
     catalog.adminGet(productId);
-    ProductPos p = repo.find(productId).orElse(ProductPos.defaults(productId));
+    Optional<ProductPos> row = repo.find(productId);
+    ProductPos p = row.orElse(ProductPos.defaults(productId));
     return new PosAttributes(productId, p.soldBy(), p.plu(), p.gstPercent(), p.hsn(), p.soldBy() == SoldBy.WEIGHT,
-        repo.barcodesOf(productId));
+        repo.barcodesOf(productId), row.isPresent() ? "STORED" : "DEFAULT", null);
   }
 
-  /** Saves counter attributes and replaces the barcodes. Weighed items become counter-only. */
+  /** Where a saved rate and HSN came from; see {@link PosAttributes}. */
+  private record Fill(String source, GstService.Defaults master) {}
+
+  /**
+   * Saves counter attributes and replaces the barcodes. Weighed items become counter-only.
+   *
+   * <p>{@code gstPercent} and {@code hsn} are optional and follow one rule: a value the caller sent always wins (a typed 0 is a rate,
+   * not blank). A value that is left out, null (or, for the HSN, blank) keeps what is stored when the product already has a saved
+   * row, so an untouched field of an edit form never wipes a saved rate or HSN. A product with no saved row yet gets the blank parts
+   * from the GST master when it matches the name well enough (see {@link GstService#defaultsFor}); when nothing is found the defaults
+   * 0 and an empty HSN apply. The master is never used to overwrite a stored row. The rate must be one of {@link GstRates#ALLOWED}.
+   */
   @Transactional
-  public PosAttributes save(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, List<String> barcodes,
+  public PosAttributes save(UUID productId, SoldBy soldBy, String plu, BigDecimal gstPercentIn, String hsn, List<String> barcodes,
                             UUID actor) {
-    catalog.adminGet(productId);
+    AdminProduct product = catalog.adminGet(productId);
+    Optional<ProductPos> row = repo.find(productId);
+    ProductPos stored = row.orElse(ProductPos.defaults(productId));
+    boolean rateBlank = gstPercentIn == null;
+    boolean hsnBlank = hsn == null || hsn.isBlank();
+    GstService.Defaults master = row.isEmpty() && (rateBlank || hsnBlank) ? masterDefaults(product) : null;
+    BigDecimal gstPercent = rateBlank ? stored.gstPercent() : GstRates.require(gstPercentIn, "gstPercent");
+    String hsnToSave = hsnBlank ? stored.hsn() : hsn.strip();
+    String source = rateBlank ? (row.isPresent() ? "STORED" : "DEFAULT") : "USER";
+    if (master != null) {
+      if (rateBlank && master.gstPercent() != null) {
+        gstPercent = master.gstPercent();
+        source = "MASTER";
+      }
+      if (hsnBlank) hsnToSave = master.hsn();
+    }
+    boolean filled = master != null && (source.equals("MASTER") || hsnBlank);
     String code = plu == null || plu.isBlank() ? null : plu.trim();
     boolean digits = code != null && code.matches("\\d{1,6}");
     if (soldBy == SoldBy.WEIGHT && (code == null || !digits)) {
@@ -206,7 +241,6 @@ public class PosCatalogService {
     }
     if (code != null && !digits) throw ApiException.validation("plu", "digits only, up to 6");
     if (code != null) code = normalizePlu(code);
-    if (!GST_RATES.contains(gstPercent)) throw ApiException.validation("gstPercent", "0, 3, 5, 12, 18 or 28");
     List<String> codes = barcodes == null ? List.of() : barcodes.stream().map(String::strip).filter(c -> !c.isEmpty()).distinct().toList();
     if (codes.stream().anyMatch(c -> !c.matches("[A-Za-z0-9\\-]{4,32}"))) {
       throw ApiException.validation("barcodes", "4 to 32 letters, digits or dashes");
@@ -219,14 +253,27 @@ public class PosCatalogService {
     }
     Optional<ProductPos> samePlu = code == null ? Optional.empty() : repo.findByPlu(code).filter(x -> !x.productId().equals(productId));
     if (samePlu.isPresent()) throw ApiException.conflict("PLU_TAKEN", "Item code already used by another product", Map.of("plu", code));
-    repo.save(new ProductPos(productId, soldBy, code, gstPercent, hsn == null ? "" : hsn.strip()), clock.instant());
+    repo.save(new ProductPos(productId, soldBy, code, gstPercent, hsnToSave == null ? "" : hsnToSave), clock.instant());
     repo.replaceBarcodes(productId, codes, clock.instant()).ifPresent(taken -> {
       throw ApiException.conflict("BARCODE_TAKEN", "Barcode already belongs to another product", Map.of("barcode", taken));
     });
     catalog.setPosOnly(productId, soldBy == SoldBy.WEIGHT);
-    audit.log(actor, "UPDATE", "product_pos", productId, soldBy + " gst " + gstPercent + " barcodes " + codes.size());
-    return attributes(productId);
+    audit.log(actor, "UPDATE", "product_pos", productId, soldBy + " gst " + GstRates.plain(gstPercent) + " barcodes " + codes.size()
+        + (filled ? " (from master " + master.rowId() + ")" : ""));
+    PosAttributes saved = attributes(productId);
+    return new PosAttributes(saved.productId(), saved.soldBy(), saved.plu(), saved.gstPercent(), saved.hsn(), saved.posOnly(), saved.barcodes(),
+        source, filled ? master.verification() : null);
   }
+
+  /** The master's answer for this product's name, category and price; null when the master is not wired in or has no good match. */
+  private GstService.Defaults masterDefaults(AdminProduct p) {
+    if (gst == null) return null;
+    String category = catalog.categoryName(p.categoryId()).orElse(null);
+    return gst.defaultsFor(p.nameEn(), category, BigDecimal.valueOf(p.pricePaise(), 2)).orElse(null);
+  }
+
+  /** The products among {@code ids} that have saved counter attributes (the others only show defaults). */
+  public Set<UUID> configured(Collection<UUID> ids) { return repo.configured(ids); }
 
   /** Scale labels pad the item code with zeros; the shop types it without them. Both sides are compared without. */
   static String normalizePlu(String digits) { return digits.replaceFirst("^0+(?!$)", ""); }
@@ -236,6 +283,12 @@ public class PosCatalogService {
 
   /** Product lookups by id for pricing. */
   public Map<UUID, ProductPos> attributesFor(Collection<UUID> ids) { return repo.forProducts(ids); }
+
+  /**
+   * The GST rate and HSN of many products in one query (for quotes and admin lists). A product with no saved counter details comes
+   * back as the default 0% / no HSN with {@code configured} false.
+   */
+  public Map<UUID, ProductGst> gstFor(Collection<UUID> ids) { return repo.gstFor(ids); }
 
   Map<UUID, ProductData> productsById(Collection<UUID> ids) {
     return catalog.posProducts(ids).stream().collect(Collectors.toMap(ProductData::id, Function.identity()));

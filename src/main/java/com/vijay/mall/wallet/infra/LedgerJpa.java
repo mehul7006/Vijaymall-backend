@@ -23,6 +23,11 @@ interface LedgerJpa extends JpaRepository<CoinLedgerEntity, UUID> {
       + "order by l.expiresAt asc nulls last, l.createdAt asc")
   List<CoinLedgerEntity> openLotsForUpdate(@Param("u") UUID userId, @Param("now") Instant now);
 
+  /** Coins left in the user's open lots, without locking them (for previews). */
+  @Query("select coalesce(sum(l.remaining), 0) from CoinLedgerEntity l where l.userId = :u and l.remaining > 0 "
+      + "and (l.expiresAt is null or l.expiresAt > :now)")
+  long openCoins(@Param("u") UUID userId, @Param("now") Instant now);
+
   boolean existsByIdemKey(String idemKey);
 
   Optional<CoinLedgerEntity> findByIdemKey(String idemKey);

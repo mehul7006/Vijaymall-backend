@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +14,8 @@ import static org.mockito.Mockito.when;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.pos.domain.Gtin;
 import com.vijay.mall.pos.domain.PosRecords.ProductPos;
 import com.vijay.mall.pos.domain.PosRecords.ShopSetting;
@@ -49,7 +52,7 @@ class BarcodeGenerationServiceTest {
     when(repo.barcodesOf(variant)).thenReturn(List.of());
     when(repo.addBarcode(eq(variant), anyString(), any())).thenReturn(true);
     when(sequences.prefixes()).thenReturn(List.of());
-    service = new BarcodeGenerationService(catalog, repo, sequences, shop, new BarcodeProps("29", new BarcodeProps.VariableMeasure(false, "22")),
+    service = new BarcodeGenerationService(catalog, repo, sequences, shop, settings("29"),
         audit, Clock.fixed(PosTestData.NOW, ZoneOffset.UTC));
   }
 
@@ -94,10 +97,10 @@ class BarcodeGenerationServiceTest {
   }
 
   @Test void generate_skipsACodeThatWouldBeReadAsAWeighedLabelOfAnExistingItemCode() {
-    var scale = new BarcodeGenerationService(catalog, repo, sequences, shop, new BarcodeProps("2", new BarcodeProps.VariableMeasure(false, "22")),
+    var scale = new BarcodeGenerationService(catalog, repo, sequences, shop, settings("2"),
         audit, Clock.fixed(PosTestData.NOW, ZoneOffset.UTC));
     when(sequences.next("2")).thenReturn(1L, 1_000_000L);
-    when(repo.findByPlu("0")).thenReturn(Optional.of(new ProductPos(UUID.randomUUID(), SoldBy.WEIGHT, "0", 5, "")));
+    when(repo.findByPlu("0")).thenReturn(Optional.of(new ProductPos(UUID.randomUUID(), SoldBy.WEIGHT, "0", GstRates.of(5), "")));
     when(repo.findByPlu("10")).thenReturn(Optional.empty());
     var out = scale.generate(variant, null);
     assertThat(out.barcode()).isEqualTo(Gtin.withCheckDigit("200001000000"));
@@ -105,7 +108,7 @@ class BarcodeGenerationServiceTest {
   }
 
   @Test void generate_aScalePrefixCodeWithAFreeItemCodeIsFine() {
-    var scale = new BarcodeGenerationService(catalog, repo, sequences, shop, new BarcodeProps("2", new BarcodeProps.VariableMeasure(false, "22")),
+    var scale = new BarcodeGenerationService(catalog, repo, sequences, shop, settings("2"),
         audit, Clock.fixed(PosTestData.NOW, ZoneOffset.UTC));
     when(sequences.next("2")).thenReturn(1L);
     when(repo.findByPlu(anyString())).thenReturn(Optional.empty());
@@ -119,7 +122,7 @@ class BarcodeGenerationServiceTest {
   }
 
   @Test void generate_weighedItemsAreRefused() {
-    when(repo.find(variant)).thenReturn(Optional.of(new ProductPos(variant, SoldBy.WEIGHT, "101", 5, "")));
+    when(repo.find(variant)).thenReturn(Optional.of(new ProductPos(variant, SoldBy.WEIGHT, "101", GstRates.of(5), "")));
     assertThatThrownBy(() -> service.generate(variant, null)).isInstanceOf(ApiException.class).hasMessageContaining("item code");
   }
 
@@ -136,17 +139,36 @@ class BarcodeGenerationServiceTest {
     assertThatThrownBy(() -> service.generate(variant, null)).isInstanceOf(ApiException.class).extracting("code").isEqualTo("BARCODE_RANGE_FULL");
   }
 
-  @Test void props_storePrefixMustBeInTheTwentiesRange() {
-    assertThat(new BarcodeProps("2", null).storePrefix()).isEqualTo("2");
-    assertThat(new BarcodeProps("2345", null).storePrefix()).isEqualTo("2345");
-    assertThatThrownBy(() -> new BarcodeProps("3", null)).isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> new BarcodeProps("23456", null)).isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> new BarcodeProps(null, null)).isInstanceOf(IllegalArgumentException.class);
+  private static RuntimeSettings settings(String storePrefix) {
+    RuntimeSettings settings = mock(RuntimeSettings.class);
+    when(settings.get(Settings.BARCODE_STORE_PREFIX)).thenReturn(storePrefix);
+    return settings;
   }
 
-  @Test void config_buildsTheVariableMeasureReaderFromTheSetting() {
-    var reader = new BarcodeConfig().variableMeasureBarcode(new BarcodeProps("29", new BarcodeProps.VariableMeasure(true, "23")));
+  @Test void storePrefix_isReadFromTheSettingAndAnInvalidOneFallsBackToTheDefault() {
+    RuntimeSettings settings = mock(RuntimeSettings.class);
+    var live = new BarcodeGenerationService(catalog, repo, sequences, shop, settings, audit, Clock.fixed(PosTestData.NOW, ZoneOffset.UTC));
+    when(settings.get(Settings.BARCODE_STORE_PREFIX)).thenReturn("2345");
+    when(sequences.next("2345")).thenReturn(1L);
+    assertThat(live.generate(variant, null).barcode()).startsWith("2345");
+    when(settings.get(Settings.BARCODE_STORE_PREFIX)).thenReturn("3");
+    when(sequences.next("29")).thenReturn(1L);
+    assertThat(live.generate(variant, null).barcode()).startsWith("29");
+  }
+
+  @Test void variableMeasure_followsTheSettingsWithoutARestart() {
+    RuntimeSettings settings = mock(RuntimeSettings.class);
+    var reader = new BarcodeConfig().variableMeasureBarcode(settings);
+    when(settings.getBool(Settings.BARCODE_VARIABLE_MEASURE_ENABLED)).thenReturn(false);
+    when(settings.get(Settings.BARCODE_VARIABLE_MEASURE_PREFIX)).thenReturn("23");
+    assertThat(reader.enabled()).isFalse();
+    assertThat(reader.parse("2300101025000")).isEmpty();
+    when(settings.getBool(Settings.BARCODE_VARIABLE_MEASURE_ENABLED)).thenReturn(true);
     assertThat(reader.enabled()).isTrue();
-    assertThat(reader.generate("1", 1)).startsWith("23");
+    String code = reader.generate("1", 1);
+    assertThat(code).startsWith("23");
+    assertThat(reader.parse(code)).isPresent();
+    when(settings.get(Settings.BARCODE_VARIABLE_MEASURE_PREFIX)).thenReturn("garbage");
+    assertThat(reader.generate("1", 1)).startsWith("22");
   }
 }

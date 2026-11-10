@@ -393,6 +393,10 @@ public class RuntimeSettings implements MeterBinder {
       throw bad(d, "must be exactly 16 characters");
     } else if ((d == Settings.PAYTM_MID || d == Settings.PAYTM_CHANNEL_ID) && !v.matches("[A-Za-z0-9_-]+")) {
       throw bad(d, "may contain only letters, digits, - and _");
+    } else if (d == Settings.BARCODE_STORE_PREFIX && !v.matches("2\\d{0,3}")) {
+      throw bad(d, "must be 1 to 4 digits starting with 2 (the in-store range is 20 to 29)");
+    } else if (d == Settings.BARCODE_VARIABLE_MEASURE_PREFIX && !v.matches("2\\d")) {
+      throw bad(d, "must be two digits from 20 to 29");
     } else if (d == Settings.CLIENT_IP_HEADER && !v.matches("[A-Za-z0-9-]+")) {
       throw bad(d, "must be a header name like CF-Connecting-IP");
     }

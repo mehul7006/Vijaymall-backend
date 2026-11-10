@@ -1,5 +1,9 @@
 package com.vijay.mall.pos.domain;
 
+import com.vijay.mall.common.tax.GstCalculator;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.TaxSplit;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -13,7 +17,7 @@ public final class BillCalculator {
      * One priced basket line before GST is split: the product, how it is sold, quantity (pieces, or grams for a
      * weighed item), unit price in paise and the GST percent that applies.
      */
-    public record Draft(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, int gstPercent, String hsn) {
+    public record Draft(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, @GstRateJson BigDecimal gstPercent, String hsn) {
         /**
          * The line amount in paise before any discount (price times quantity, or price per 1000 g for weighed items).
          */
@@ -27,7 +31,7 @@ public final class BillCalculator {
      * the customer pays and the GST split of that net amount.
      */
     public record Line(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
-                       long discountPaise, long netPaise, int gstPercent, String hsn, TaxSplit tax) { }
+                       long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, String hsn, TaxSplit tax) { }
 
     /**
      * A finished GST bill: its lines, subtotal before discount, the discount actually applied, the total payable and
@@ -61,11 +65,7 @@ public final class BillCalculator {
         }
         long[] gross = drafts.stream().mapToLong(Draft::linePaise).toArray();
         long subtotal = Arrays.stream(gross).sum();
-        long[] afterCoupon = IntStream.range(0, gross.length)
-                .mapToLong(i -> gross[i] - Math.min(Math.max(0, couponByLine[i]), gross[i])).toArray();
-        long remaining = Arrays.stream(afterCoupon).sum();
-        long other = Math.max(0, Math.min(otherDiscount, remaining));
-        long[] net = GstCalculator.netAfterDiscount(afterCoupon, other);
+        long[] net = GstCalculator.netPerLine(gross, couponByLine, Arrays.stream(couponByLine).sum(), otherDiscount);
         long applied = subtotal - Arrays.stream(net).sum();
         List<Line> lines = IntStream.range(0, drafts.size()).mapToObj(i -> {
             Draft d = drafts.get(i);

@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -70,7 +71,7 @@ class PosReturnServiceTest {
         new TransactionTemplate(mock(PlatformTransactionManager.class)), Clock.fixed(NOW, ZoneOffset.UTC), credit);
     // 4 pieces at 2500 = 10000 gross, 9000 net after a 1000 discount; 12% GST; 20 coins earned, 10 coins used
     var item = new PosRecords.SaleItemRecord(itemId, productId, "Soap", SoldBy.UNIT,
-        4, 2500, 10000, 1000, 9000, 12, "3401", 8036, 482, 482, 0);
+        4, 2500, 10000, 1000, 9000, GstRates.of(12), "3401", 8036, 482, 482, 0);
     sale = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, customer, "9000000001", 10000, null, 0, 10, 1000, 9000, 8036, 482,
         482, 20, null, 0, NOW, List.of(item), List.of());
     when(sales.findReturnByIdem(anyString())).thenReturn(Optional.empty());
@@ -134,7 +135,7 @@ class PosReturnServiceTest {
 
   @Test void secondReturn_onlyMovesItsOwnShare() {
     var item2 = new PosRecords.SaleItemRecord(itemId, productId, "Soap", SoldBy.UNIT,
-        4, 2500, 10000, 1000, 9000, 12, "3401", 8036, 482, 482, 1);
+        4, 2500, 10000, 1000, 9000, GstRates.of(12), "3401", 8036, 482, 482, 1);
     sale = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, customer, "9000000001", 10000, null, 0, 10, 1000, 9000, 8036, 482,
         482, 20, null, 0, NOW, List.of(item2), List.of());
     when(sales.lockAndFind(saleId)).thenReturn(Optional.of(sale));
@@ -254,5 +255,27 @@ class PosReturnServiceTest {
     verify(credit, Mockito.never()).returnAdjustment(any(), any(), ArgumentMatchers.anyLong(),
         ArgumentMatchers.anyLong(), any());
     assertThat(insertedReturn().creditAdjustedPaise()).isZero();
+  }
+
+  /* 1 of 4 pieces at 40%: refund 2500 -> taxable 2500 * 100 / 140 = 1785.7 -> 1786, tax 714 -> CGST 357, SGST 357. */
+  @Test void returnReversesGstAtAFractionalRateOnTheCreditNote() {
+    for (String rate : new String[] {"40", "1.5", "0.25"}) {
+      var item = new PosRecords.SaleItemRecord(itemId, productId, "Soap", SoldBy.UNIT, 4, 2500, 10000, 0, 10000,
+          GstRates.of(rate), "3401", 0, 0, 0, 0);
+      var s = new SaleRecord(saleId, "VSM/2026-27/000007", cashier, customer, "9000000001", 10000, null, 0, 0, 0, 10000, 0, 0,
+          0, 0, null, 0, NOW, List.of(item), List.of());
+      Mockito.clearInvocations(sales);
+      when(sales.lockAndFind(saleId)).thenReturn(Optional.of(s));
+      ReturnRecord r = service.refund(cashier, saleId, "f-" + rate, new ReturnInput(List.of(new ReturnLine(itemId, 1)), null, null));
+      var expected = com.vijay.mall.common.tax.GstCalculator.split(2500, GstRates.of(rate));
+      assertThat(r.refundPaise()).isEqualTo(2500);
+      assertThat(r.taxablePaise()).isEqualTo(expected.taxable());
+      assertThat(r.cgstPaise()).isEqualTo(expected.cgst());
+      assertThat(r.sgstPaise()).isEqualTo(expected.sgst());
+      if (rate.equals("40")) {
+        assertThat(r.taxablePaise()).isEqualTo(1786);
+        assertThat(r.cgstPaise()).isEqualTo(357);
+      }
+    }
   }
 }

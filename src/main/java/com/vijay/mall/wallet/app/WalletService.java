@@ -23,6 +23,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Public interface of the wallet module: balance, rules, redeem, credit, undo, expire. */
@@ -165,7 +167,7 @@ public class WalletService {
     Instant now = clock.instant();
     repo.lockBalance(userId);
     List<LotAllocator.Lot> lots = repo.openLotsForUpdate(userId, now);
-    int take = Math.min(coins, lots.stream().mapToInt(LotAllocator.Lot::remaining).sum());
+    int take = clawable(coins, lots.stream().mapToInt(LotAllocator.Lot::remaining).sum());
     if (take <= 0) return 0;
     UUID ledgerId = UUID.randomUUID();
     if (!repo.insertLedger(ledgerId, userId, "ADJUST", -take, null, null, returnId, null, "clawback:" + returnId, now)) return 0;
@@ -178,6 +180,21 @@ public class WalletService {
     changed(userId, "CLAWBACK", -take);
     return take;
   }
+
+  /** A clawback takes at most what is still unspent in the open lots; the one place that rule lives, for the return and its preview. */
+  static int clawable(int coins, long openCoins) { return (int) Math.min(coins, openCoins); }
+
+  /**
+   * How many of {@code coins} a return would really take back from the customer right now (at most what is still unspent in open
+   * lots), without taking anything. {@link #clawback} takes exactly this amount.
+   */
+  public int previewClawback(UUID userId, int coins) {
+    if (coins <= 0) return 0;
+    return Math.max(0, clawable(coins, repo.openCoins(userId, clock.instant())));
+  }
+
+  /** What the given number of coins is worth in paise at the current coin value. */
+  public long coinValuePaise(long coins) { return coins * settings().paisePerCoin(); }
 
   /** Gives back coins spent on goods that came back, as a fresh lot valid for 30 days. Idempotent per return. */
   @Transactional
@@ -274,9 +291,10 @@ public class WalletService {
   @Transactional
   public StoredRule createRule(StoredRule in, UUID actor) {
     requireWindow(in);
+    if (in.active()) repo.deactivateAllRules();
     UUID id = repo.insertRule(in);
     audit.log(actor, "CREATE", "coin_rule", id, in.rule().name());
-    forget(AppCaches.Name.COIN_RULES);
+    forgetRules();
     return repo.rule(id).orElseThrow();
   }
 
@@ -288,10 +306,21 @@ public class WalletService {
   public StoredRule updateRule(UUID id, StoredRule in, UUID actor) {
     requireWindow(in);
     repo.rule(id).orElseThrow(() -> ApiException.notFound("Coin rule"));
+    if (in.active()) repo.deactivateOtherRules(id);
     repo.updateRule(id, in);
     audit.log(actor, "UPDATE", "coin_rule", id, in.rule().name());
-    forget(AppCaches.Name.COIN_RULES);
+    forgetRules();
     return repo.rule(id).orElseThrow();
+  }
+
+  /** Empties the rule cache now and again once the change is committed, so a reader cannot cache the old rules in between. */
+  private void forgetRules() {
+    forget(AppCaches.Name.COIN_RULES);
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override public void afterCommit() { forget(AppCaches.Name.COIN_RULES); }
+      });
+    }
   }
 
   private static void requireWindow(StoredRule in) {
@@ -305,7 +334,7 @@ public class WalletService {
   public void deleteRule(UUID id, UUID actor) {
     repo.deleteRule(id);
     audit.log(actor, "DELETE", "coin_rule", id, null);
-    forget(AppCaches.Name.COIN_RULES);
+    forgetRules();
   }
 
   /**

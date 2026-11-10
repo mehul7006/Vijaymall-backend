@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -133,7 +134,7 @@ class PosSyncServiceTest {
 
   private static PosSyncService.OfflineSale rungBill(String key, Cart cart) {
     return new PosSyncService.OfflineSale(key, NOW.minusSeconds(600), cart, List.of(), null, null,
-        new PosViews.Rung(List.of(new PosViews.RungLine(UUID.randomUUID(), 1, 100L, 5, null, null, null))));
+        new PosViews.Rung(List.of(new PosViews.RungLine(UUID.randomUUID(), 1, 100L, GstRates.of(5), null, null, null))));
   }
 
   @Test

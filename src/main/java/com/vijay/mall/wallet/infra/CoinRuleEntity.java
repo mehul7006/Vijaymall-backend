@@ -2,6 +2,8 @@ package com.vijay.mall.wallet.infra;
 
 import com.vijay.mall.common.persistence.BaseEntity;
 import jakarta.persistence.Entity;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -18,7 +20,13 @@ class CoinRuleEntity extends BaseEntity {
   Instant startAt;
   Instant endAt;
   boolean active;
+  Instant updatedAt;
 
   /** Required by JPA; not for application code. */
   protected CoinRuleEntity() {}
+
+  /** Stamps the time of every save, so a repair can tell which of several active rules was switched on last. */
+  @PrePersist
+  @PreUpdate
+  void touch() { updatedAt = Instant.now(); }
 }

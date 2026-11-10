@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -79,7 +80,7 @@ class PosServiceCounterGapsTest {
         new TransactionTemplate(mock(PlatformTransactionManager.class)), Clock.fixed(NOW, ZoneOffset.UTC), mock(CreditService.class));
     when(shop.get()).thenReturn(PosTestData.shop());
     when(catalog.productsById(any())).thenReturn(Map.of(rice, PosTestData.product(rice, "Rice", 5900, true)));
-    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006")));
+    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006")));
     when(counters.next("INVOICE", "2026-27")).thenReturn(42L);
     when(sales.findByIdem(anyString())).thenReturn(Optional.empty());
     when(sales.find(any())).thenReturn(Optional.of(mock(SaleRecord.class)));
@@ -159,7 +160,7 @@ class PosServiceCounterGapsTest {
 
   @Test void offlineRungBillNormalisesModesToo() {
     service.setOfflineExceptions(mock(OfflineExceptionService.class));
-    var rung = new Rung(List.of(new RungLine(rice, 2, 5900L, 5, null, null, null)));
+    var rung = new Rung(List.of(new RungLine(rice, 2, 5900L, GstRates.of(5), null, null, null)));
     service.sale(cashier, false, "k-rung", new SaleInput(new Cart(null, null, null, null, null), List.of(new Pay("card ", 11800, null)),
         null, null, null, true, rung));
     var c = org.mockito.ArgumentCaptor.forClass(SaleRecord.class);
@@ -176,7 +177,7 @@ class PosServiceCounterGapsTest {
   private final UUID returnId = UUID.randomUUID();
 
   private void billWithReturn(String mobile, String reason) {
-    var item = new SaleItemRecord(itemId, rice, "Rice", SoldBy.UNIT, 2, 5900, 11800, 0, 11800, 5, "1006", 11238, 281, 281, 0);
+    var item = new SaleItemRecord(itemId, rice, "Rice", SoldBy.UNIT, 2, 5900, 11800, 0, 11800, GstRates.of(5), "1006", 11238, 281, 281, 0);
     var s = new SaleRecord(saleId, "VSM/2026-27/000009", cashier, null, mobile, 11800, null, 0, 0, 0, 11800, 11238, 281, 281, 0, null, 0, NOW,
         List.of(item), List.of(new PaymentRecord("UPI", 11800, null)));
     when(sales.find(saleId)).thenReturn(Optional.of(s));

@@ -145,7 +145,7 @@ class ShiftView { String id, cashierId; DateTime openedAt; int openingFloatPaise
 7. **Dart.**
 ```dart
 class PosProduct { String productId, name, nameGu, hsn, plu, imageUrl, packSize, unit, variantName, displayName;
-  int pricePaise, mrpPaise, gstPercent, qtyOnHand; String soldBy; /* UNIT | WEIGHT */
+  int pricePaise, mrpPaise, qtyOnHand; num gstPercent; String soldBy; /* UNIT | WEIGHT */
   bool posOnly, coinRedeemable, earnsCoins; List<String> barcodes; }
 class Scan { PosProduct product; int qty; int linePaise; }
 class PageOf<T> { List<T> items; int page, size, total; bool totalExact, hasMore; }
@@ -212,10 +212,10 @@ class PageOf<T> { List<T> items; int page, size, total; bool totalExact, hasMore
 class Item { String productId; int qty; }
 class Cart { List<Item> items; String? customerMobile, couponCode; String? coinMode; int? percent; }
 class ManualDiscount { int amountPaise; String? reason, approverPin; }
-class BillLine { String productId, name, soldBy; int qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent; }
+class BillLine { String productId, name, soldBy; int qty, unitPricePaise, linePaise, discountPaise, netPaise, taxablePaise, cgstPaise, sgstPaise; num gstPercent; }
 class BillView { List<BillLine> lines; int subtotalPaise, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise,
   taxablePaise, cgstPaise, sgstPaise, coinsToEarn, customerCoinBalance, roundOffPaise, manualDiscountPaise;
-  String? couponCode; List<String> warnings; }
+  String? couponCode; List<String> warnings; List<GstSlab> gstSlabs; /* one per rate, lowest first: gstPercent, taxablePaise, cgstPaise, sgstPaise, taxPaise */ }
 ```
 8. **Acceptance.**
    - Given 2 rice at Rs 125 (5% GST), when quoted, then total 25000, taxable 23810, CGST 595, SGST 595.
@@ -309,7 +309,7 @@ class SaleRecord { String id, invoiceNo, cashierId, paymentType, manualDiscountR
 4. **API sequence.**
    1. Cashier chooses "Credit" and must enter the customer's full mobile (the CREDIT line needs `cart.customerMobile`; without it 400 `customerMobile` "customer mobile is needed to sell on credit").
    2. `GET /pos/credit/account?mobile=9876543210` -> `{ customerId, name, mobile, balancePaise, limitPaise, availablePaise, blocked }`. 404 `NOT_FOUND` "Customer" when the shop has never seen this number (then credit cannot be given: the admin must first approve a limit). Show: limit, owed, available. Disable CREDIT when `limitPaise == 0` ("Credit not enabled"), `blocked` ("Customer blocked") or `availablePaise < wanted`.
-   3. Optional picker: `GET /pos/credit/customers?q=sha&all=false&page=0&size=20` -> Page of `{ customerId, name, maskedMobile ("98XXXXXX10"), limitPaise, balancePaise, availablePaise, blocked }`. By default only customers with a limit above 0. The row has only a MASKED number; the cashier must still type the full mobile (the account lookup takes a mobile, not an id). Use the picker to see who has credit and their available amount.
+   3. Optional picker: `GET /pos/credit/customers?q=sha&all=false&page=0&size=20` -> Page of `{ customerId, name, maskedMobile ("98XXXXXX10"), limitPaise, balancePaise, availablePaise, blocked }`. By default only customers with a limit above 0. The row has only a MASKED number; the cashier must still type the full mobile (the account lookup takes a mobile, not an id). Use the picker to see who has credit and their available amount. `name` is never null: a customer who has no name yet (counter customers made from a mobile number) shows the masked mobile (`98XXXXXX10`) as the name.
    4. Add payment line `{ "mode": "CREDIT", "amountPaise": 10000 }` (at most one per bill; may be combined with CASH/UPI/CARD: `paymentType` becomes `HYBRID`, all credit = `CREDIT`). Amounts must still sum to the total.
    5. `POST /pos/sales` as in F4. Errors (all 422, nothing stored, stock untouched):
       - `CREDIT_NOT_ALLOWED` ("Credit is not enabled for this customer", limit 0 or never approved): checked first.
@@ -496,9 +496,11 @@ class TerminalSession {
   "taxablePaise": 11905, "cgstPaise": 298, "sgstPaise": 297,
   "lines": [ { "saleItemId": "...", "productId": "...", "name": "Basmati Rice", "qty": 1, "grossPaise": 12500,
                "couponSharePaise": 0, "otherSharePaise": 0, "clawbackPaise": 0, "refundPaise": 12500,
-               "taxablePaise": 11905, "cgstPaise": 298, "sgstPaise": 297 } ] }
+               "taxablePaise": 11905, "cgstPaise": 298, "sgstPaise": 297 } ],
+  "coinsClawedBack": 0, "coinsClawedBackPaise": 0, "coinsRestored": 0, "coinsRestoredPaise": 0,
+  "creditAdjustmentPaise": 0, "payOutPaise": 12500 }
 ```
-      Per line: refund = gross price of returned units - coupon share - other share (coins and counter discount) - clawback. The coupon share leaves with the units (customer does not get it back as cash). With `CLAWBACK_BELOW_MINIMUM`, if what is left of the coupon-covered items falls below the coupon's minimum order, the coupon discount on the kept items is taken back out of this refund (`couponClawbackPaise`, never below zero). Show these lines to the cashier. The preview does not show the credit adjustment (below).
+      The last six fields are exactly what the recorded return will do (same server code, no separate maths): `coinsClawedBack` earned coins taken back (capped at what the customer still has unspent; equals the return's `coinsClawedBack`), `coinsRestored` spent coins given back, both also in paise, `creditAdjustmentPaise` how much of the refund lowers what the customer owes on a credit bill (equals the return's `creditAdjustedPaise`) and `payOutPaise = refundPaise - creditAdjustmentPaise`, the money to hand over. Bills without a customer, or without a credit part, show 0 for them. Per line: refund = gross price of returned units - coupon share - other share (coins and counter discount) - clawback. The coupon share leaves with the units (customer does not get it back as cash). With `CLAWBACK_BELOW_MINIMUM`, if what is left of the coupon-covered items falls below the coupon's minimum order, the coupon discount on the kept items is taken back out of this refund (`couponClawbackPaise`, never below zero). Show these lines to the cashier, then the coins and the credit adjustment ("Rs X lowers the customer's credit, pay out Rs Y"). Preview and recorded return agree on every one of these figures.
    4. **Confirm:** `POST /pos/sales/{id}/returns` + `Idempotency-Key`:
 ```json
 { "items": [ { "saleItemId": "<line>", "qty": 1 } ], "reason": "wrong pack", "refundMode": "CASH" }
@@ -584,7 +586,7 @@ class PreviewLine { String saleItemId, productId, name; int qty, grossPaise, cou
 | rung.lines[].productId | uuid | yes | must exist (inactive allowed, flagged) |
 | .qty | int | yes | > 0; <= 9999 pieces / 100000 grams |
 | .unitPricePaise | long | yes | >= 0; per piece, or per 1000 g for weighed items |
-| .gstPercent | int | yes | one of 0, 3, 5, 12, 18, 28 |
+| .gstPercent | number | yes | one of 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40 (decimal; 18 and 18.0 are the same; see Addendum 8 of file 30) |
 | .discountPaise | long | no | >= 0 and <= the line amount |
 | .name | string | no | printed name; catalog name if blank |
 | .linePaise | long | no | if given must equal price x qty (weighed: round-half-up(price x grams / 1000)) |
@@ -615,7 +617,7 @@ class PreviewLine { String saleItemId, productId, name; int qty, grossPaise, cou
 7. **Edge cases.** Upload twice / batch half-arrived: safe, DUPLICATE. Unsynced bills when the shift closes: upload before closing. Clock wrong on the till: compare `serverTime`; refuse to ring offline bills if the clock is off by more than a few minutes. Legacy path: a bill without `rung` is re-priced by the server at today's prices and is REJECTED if payments no longer fit (and may take coupons/credit): do not use it in the new till. Offline bills are tied to the idempotency key space of online sales: never reuse a sale key.
 8. **Dart.**
 ```dart
-class RungLine { String productId; int qty, unitPricePaise, gstPercent; int? discountPaise, linePaise; String? name; }
+class RungLine { String productId; int qty, unitPricePaise; num gstPercent; int? discountPaise, linePaise; String? name; }
 class OfflineSale { String idempotencyKey; DateTime soldAt; List<RungLine> rungLines; List<Pay> payments;
   int? cashTenderedPaise; ManualDiscount? manualDiscount; String? customerMobile; }
 class SyncResult { String idempotencyKey, status; String? saleId, invoiceNo, errorCode, message; List<ExceptionView> exceptions; }

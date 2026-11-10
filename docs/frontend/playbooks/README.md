@@ -14,6 +14,8 @@ Start with `../01-implementation-guide.md` (what to build, what to configure) an
 | [P4-bank-settlements-receipts.md](P4-bank-settlements-receipts.md) | Money accounts, defaults and gateway settings, account book, till channels, the shared terminal session, payer detail, receipts and summary, settlements, statement import (incl. Paytm Settlement Report), exceptions, unsettled and fee reports | Admin app developers (money screens) and the till developer for the channel/terminal parts |
 | [P5-stock-lots-pricing.md](P5-stock-lots-pricing.md) | Stock lots per variant, the `lotPriced` / `trackExpiry` switches (`GET`/`PUT lot-settings`), purchase receiving into lots, lot-aware scan and quote at the till, online CAP policy, flash precedence, expiring list and write-off, valuation, margin, lot check, settings, offline `lot` field | Admin, till and shop app developers |
 
+The GST and HSN master (suggest the rate and HSN while the user types a product or purchase line) has a guide only, no playbook yet: `../75-gst-master.md`.
+
 ## Reading order
 
 1. `../01-implementation-guide.md`, then `../00-overview.md` (once).

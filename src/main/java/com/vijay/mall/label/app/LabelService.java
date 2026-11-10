@@ -5,6 +5,8 @@ import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.infra.InventoryRepository;
 import com.vijay.mall.label.domain.LabelData;
@@ -106,7 +108,7 @@ public class LabelService {
   private final ShopService shop;
   private final LabelLotSource lots;
   private final LabelHistoryRepository history;
-  private final LabelProps props;
+  private final RuntimeSettings settings;
   private final GujaratiRenderer gujarati;
   private final PdfLabelRenderer pdf;
   private final TsplRenderer tspl;
@@ -117,7 +119,7 @@ public class LabelService {
 
   /** Creates the service. */
   public LabelService(LabelTemplateService templates, CatalogService catalog, PosCatalogService posCatalog, BarcodeGenerationService generation,
-                      InventoryService inventory, ShopService shop, LabelLotSource lots, LabelHistoryRepository history, LabelProps props,
+                      InventoryService inventory, ShopService shop, LabelLotSource lots, LabelHistoryRepository history, RuntimeSettings settings,
                       GujaratiRenderer gujarati, PdfLabelRenderer pdf, TsplRenderer tspl, ZplRenderer zpl, EscPosRenderer escPos,
                       AuditService audit, Clock clock) {
     this.templates = templates;
@@ -128,7 +130,7 @@ public class LabelService {
     this.shop = shop;
     this.lots = lots;
     this.history = history;
-    this.props = props;
+    this.settings = settings;
     this.gujarati = gujarati;
     this.pdf = pdf;
     this.tspl = tspl;
@@ -171,7 +173,7 @@ public class LabelService {
     List<Integer> copies = copies(items, ids);
     int total = copies.stream().mapToInt(Integer::intValue).sum();
     if (total > MAX_LABELS) throw ApiException.validation("items", "at most " + MAX_LABELS + " labels per print, this asks for " + total);
-    PrintJob job = new PrintJob(t, props.dpi(), start, entries(t, req, items, products, copies, actor));
+    PrintJob job = new PrintJob(t, settings.getInt(Settings.LABEL_DPI), start, entries(t, req, items, products, copies, actor));
     guardGujarati(job, req.mode());
     Printed printed = render(job, req.mode());
     record(job, req.mode(), actor);

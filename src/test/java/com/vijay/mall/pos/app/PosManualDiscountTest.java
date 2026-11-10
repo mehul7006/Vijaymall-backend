@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static com.vijay.mall.pos.app.PosTestData.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -80,7 +81,7 @@ class PosManualDiscountTest {
     when(shop.get()).thenReturn(PosTestData.shop());
     ProductData riceData = PosTestData.product(rice, "Rice", 5900, true);
     when(catalog.productsById(any())).thenReturn(Map.of(rice, riceData));
-    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, "1006")));
+    when(catalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), "1006")));
     when(counters.next("INVOICE", "2026-27")).thenReturn(42L);
     when(sales.findByIdem(anyString())).thenReturn(Optional.empty());
     when(sales.find(any())).thenReturn(Optional.of(mock(SaleRecord.class)));
@@ -171,7 +172,7 @@ class PosManualDiscountTest {
 
   @Test void theReceiptShowsTheDiscountLine() {
     var item = new PosRecords.SaleItemRecord(UUID.randomUUID(), rice, "Rice", SoldBy.UNIT, 2, 5900, 11800, 1000,
-        10800, 5, "1006", 10286, 257, 257, 0);
+        10800, GstRates.of(5), "1006", 10286, 257, 257, 0);
     var rec = new SaleRecord(UUID.randomUUID(), "VSM/2026-27/000042", cashier, null, null, 11800, null, 0, 0, 0, 10800, 10286, 257, 257, 0,
         null, 0, NOW, List.of(item), List.of(new PosRecords.PaymentRecord("CASH", 10800, null)), "CASH", 1000,
         "damaged pack", manager);

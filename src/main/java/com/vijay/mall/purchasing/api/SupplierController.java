@@ -38,10 +38,11 @@ public class SupplierController {
   @Autowired
   void setOps(AdminOps ops) { this.ops = ops; }
 
-  /** Request body for adding or changing a supplier: name (required), optional GSTIN, 2-digit state code, phone, address and payment terms in days. */
+  /** Request body for adding or changing a supplier: name (required), optional GSTIN, 2-digit state code, phone, address, e-mail, 6-digit pincode and payment terms in days. */
   public record SupplierBody(@NotBlank @Size(max = 120) String name, @Size(max = 15) String gstin, @Size(max = 2) String stateCode,
-                             @Size(max = 20) String phone, @Size(max = 300) String address, @Min(0) @Max(365) Integer paymentTermsDays) {
-    SupplierService.Input toInput() { return new SupplierService.Input(name, gstin, stateCode, phone, address, paymentTermsDays); }
+                             @Size(max = 20) String phone, @Size(max = 300) String address, @Size(max = 254) String email,
+                             @Size(max = 6) String pincode, @Min(0) @Max(365) Integer paymentTermsDays) {
+    SupplierService.Input toInput() { return new SupplierService.Input(name, gstin, stateCode, phone, address, email, pincode, paymentTermsDays); }
   }
 
   private final SupplierService suppliers;
@@ -73,11 +74,18 @@ public class SupplierController {
     return credit.refund(CurrentUser.id(), key, id, b);
   }
 
+  /** The supplier's debit notes (credit notes), newest first, paged (size 1 to 50), with the amount used and still available as credit. */
+  @GetMapping("/{id}/credit-notes")
+  public Page<SupplierCreditService.CreditNoteView> creditNotes(@PathVariable UUID id, @RequestParam(defaultValue = "0") int page,
+                                                                @RequestParam(defaultValue = "20") int size) {
+    return credit.creditNotes(id, page, size);
+  }
+
   /** The latest refunds of a supplier (at most 50), newest first. */
   @GetMapping("/{id}/refunds")
   public List<SupplierCreditService.RefundView> refunds(@PathVariable UUID id) { return credit.refunds(id); }
 
-  /** Suppliers by name; q searches name, phone and GSTIN; active filters on/off suppliers. */
+  /** Suppliers by name; q searches name, phone, GSTIN and e-mail; active filters on/off suppliers. */
   @GetMapping
   public Page<View> list(@RequestParam(required = false) String q, @RequestParam(required = false) Boolean active,
                          @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {

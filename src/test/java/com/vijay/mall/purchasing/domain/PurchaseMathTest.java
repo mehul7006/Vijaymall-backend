@@ -1,5 +1,6 @@
 package com.vijay.mall.purchasing.domain;
 
+import com.vijay.mall.common.tax.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -10,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class PurchaseMathTest {
   private static PurchaseMath.LineIn line(int qty, int free, long unit, int gst) {
-    return new PurchaseMath.LineIn(qty, free, unit, null, 0, gst, null);
+    return new PurchaseMath.LineIn(qty, free, BigDecimal.valueOf(unit), null, 0, GstRates.of(gst), null);
   }
 
   private static PurchaseMath.DocIn doc(GstMode mode) { return new PurchaseMath.DocIn(mode, false, null, 0, 0, 0, false); }
@@ -30,7 +31,7 @@ class PurchaseMathTest {
 
   @Test
   void aCompositionDealerPutsAllTheGstInTheCost() {
-    var out = PurchaseMath.compute(List.of(new PurchaseMath.LineIn(10, 0, 10_000, null, 0, 18, BigDecimal.valueOf(12))), doc(GstMode.COMPOSITION));
+    var out = PurchaseMath.compute(List.of(new PurchaseMath.LineIn(10, 0, BigDecimal.valueOf(10_000), null, 0, GstRates.of(18), BigDecimal.valueOf(12))), doc(GstMode.COMPOSITION));
     var l = out.lines().getFirst();
     assertThat(l.cessPaise()).isEqualTo(12_000);
     assertThat(l.landedTotalPaise()).isEqualTo(100_000 + 18_000 + 12_000);
@@ -39,7 +40,7 @@ class PurchaseMathTest {
 
   @Test
   void noGstModeIgnoresTheRatesAndTheCess() {
-    var out = PurchaseMath.compute(List.of(new PurchaseMath.LineIn(2, 0, 5_000, null, 0, 28, BigDecimal.TEN)),
+    var out = PurchaseMath.compute(List.of(new PurchaseMath.LineIn(2, 0, BigDecimal.valueOf(5_000), null, 0, GstRates.of(28), BigDecimal.TEN)),
         new PurchaseMath.DocIn(GstMode.NONE, false, null, 0, 1_000, 18, false));
     assertThat(out.lines().getFirst().lineTotalPaise()).isEqualTo(10_000);
     assertThat(out.freightGstPaise()).isZero();
@@ -56,9 +57,9 @@ class PurchaseMathTest {
 
   @Test
   void percentAndAmountDiscountsComeOffBeforeTax() {
-    var pct = new PurchaseMath.LineIn(1, 0, 1_000, new BigDecimal("12.5"), 0, 0, null);
+    var pct = new PurchaseMath.LineIn(1, 0, BigDecimal.valueOf(1_000), new BigDecimal("12.5"), 0, GstRates.of(0), null);
     assertThat(PurchaseMath.compute(List.of(pct), doc(GstMode.NONE)).lines().getFirst().lineDiscountPaise()).isEqualTo(125);
-    var amount = new PurchaseMath.LineIn(10, 0, 10_000, null, 10_000, 18, null);
+    var amount = new PurchaseMath.LineIn(10, 0, BigDecimal.valueOf(10_000), null, 10_000, GstRates.of(18), null);
     var out = PurchaseMath.compute(List.of(amount), doc(GstMode.REGULAR));
     assertThat(out.lines().getFirst().taxablePaise()).isEqualTo(90_000);
     assertThat(out.lines().getFirst().lineTotalPaise()).isEqualTo(90_000 + 16_200);
@@ -120,7 +121,7 @@ class PurchaseMathTest {
 
   @Test
   void discountsLargerThanTheirBaseAreRefused() {
-    var big = new PurchaseMath.LineIn(1, 0, 1_000, null, 1_001, 0, null);
+    var big = new PurchaseMath.LineIn(1, 0, BigDecimal.valueOf(1_000), null, 1_001, GstRates.of(0), null);
     assertThatThrownBy(() -> PurchaseMath.compute(List.of(big), doc(GstMode.NONE))).isInstanceOf(ApiException.class).hasMessageContaining("line amount");
     assertThatThrownBy(() -> PurchaseMath.compute(List.of(line(1, 0, 1_000, 0)), new PurchaseMath.DocIn(GstMode.NONE, false, null, 1_001, 0, 0, false)))
         .isInstanceOf(ApiException.class).hasMessageContaining("goods value");
@@ -150,5 +151,100 @@ class PurchaseMathTest {
     assertThat(GstMode.REGULAR.creditable()).isTrue();
     assertThat(GstMode.COMPOSITION.creditable()).isFalse();
     assertThatThrownBy(() -> GstMode.parse("x", GstMode.NONE)).isInstanceOf(ApiException.class);
+  }
+
+  @Test
+  void aWeighedLineAtFiftyFiveRupeesAKiloIsTwelveThousandGramsTimesFivePointFivePaise() {
+    var l = new PurchaseMath.LineIn(12_000, 0, new BigDecimal("5.5"), null, 0, GstRates.of(0), null);
+    var out = PurchaseMath.compute(List.of(l), doc(GstMode.NONE));
+    assertThat(out.lines().getFirst().grossPaise()).isEqualTo(66_000);
+    assertThat(out.lines().getFirst().taxablePaise()).isEqualTo(66_000);
+    assertThat(out.lines().getFirst().landedUnitCost()).isEqualByComparingTo("5.5");
+    assertThat(out.totalPaise()).isEqualTo(66_000);
+  }
+
+  @Test
+  void aFractionalLineIsRoundedHalfUpToWholePaiseOncePerLineBeforeDiscountsAndTax() {
+    assertThat(PurchaseMath.gross(1, new BigDecimal("2.5"))).isEqualTo(3);
+    assertThat(PurchaseMath.gross(3, new BigDecimal("0.1666"))).isEqualTo(0);
+    assertThat(PurchaseMath.gross(3, new BigDecimal("0.1667"))).isEqualTo(1);
+    var l = new PurchaseMath.LineIn(3, 0, new BigDecimal("33.3333"), new BigDecimal("10"), 0, GstRates.of(18), null);
+    var out = PurchaseMath.compute(List.of(l), doc(GstMode.REGULAR)).lines().getFirst();
+    assertThat(out.grossPaise()).isEqualTo(100);
+    assertThat(out.lineDiscountPaise()).isEqualTo(10);
+    assertThat(out.taxablePaise()).isEqualTo(90);
+  }
+
+  @Test
+  void wholeNumberUnitCostsGiveExactlyQuantityTimesCostAsBefore() {
+    for (int qty : new int[] {1, 7, 1000, 999_999}) {
+      for (long unit : new long[] {0, 1, 99, 10_000, 100_000_000}) {
+        long expected = qty * unit;
+        assertThat(PurchaseMath.gross(qty, BigDecimal.valueOf(unit))).isEqualTo(expected);
+        assertThat(PurchaseMath.gross(qty, new BigDecimal(unit + ".0000"))).isEqualTo(expected);
+        assertThat(PurchaseMath.gross(qty, BigDecimal.valueOf(unit).stripTrailingZeros())).isEqualTo(expected);
+        var out = PurchaseMath.compute(List.of(line(qty, 0, unit, 12)), doc(GstMode.REGULAR)).lines().getFirst();
+        assertThat(out.grossPaise()).isEqualTo(expected);
+        assertThat(out.taxablePaise()).isEqualTo(expected);
+      }
+    }
+  }
+
+  @Test
+  void plainPrintsACostWithoutNeedlessZerosOrAnExponent() {
+    assertThat(PurchaseMath.plain(new BigDecimal("55.0000")).toString()).isEqualTo("55");
+    assertThat(PurchaseMath.plain(new BigDecimal("5.5000")).toString()).isEqualTo("5.5");
+    assertThat(PurchaseMath.plain(new BigDecimal("100")).toString()).isEqualTo("100");
+    assertThat(PurchaseMath.plain(new BigDecimal("0.0000")).toString()).isEqualTo("0");
+    assertThat(PurchaseMath.plain(null)).isNull();
+  }
+
+  /*
+   * Three lines of 10 x 100.00 (taxable 1,00,000 paise each) at 1.5%, 0.25% and 40%: GST 1500, 250 and 40000 paise, halves 750/750,
+   * 125/125 and 20000/20000. Freight 1000 paise at 5% is 50 paise (CGST 25, SGST 25). The total is
+   * 300000 + 41750 + 1000 + 50 = 342800.
+   */
+  private static List<PurchaseMath.LineIn> fractionalLines() {
+    return List.of(new PurchaseMath.LineIn(10, 0, BigDecimal.valueOf(10_000), null, 0, GstRates.of("1.5"), null),
+        new PurchaseMath.LineIn(10, 0, BigDecimal.valueOf(10_000), null, 0, GstRates.of("0.25"), null),
+        new PurchaseMath.LineIn(10, 0, BigDecimal.valueOf(10_000), null, 0, GstRates.of("40"), null));
+  }
+
+  private static PurchaseMath.DocIn fractionalDoc(GstMode mode, boolean interState) {
+    return new PurchaseMath.DocIn(mode, interState, null, 0, 1_000, 5, false);
+  }
+
+  @Test
+  void regularModeCreditsFractionalRatesAndKeepsTheTaxOutOfTheCost() {
+    var out = PurchaseMath.compute(fractionalLines(), fractionalDoc(GstMode.REGULAR, false));
+    assertThat(out.lines().stream().map(PurchaseMath.LineOut::cgstPaise)).containsExactly(750L, 125L, 20_000L);
+    assertThat(out.lines().stream().map(PurchaseMath.LineOut::sgstPaise)).containsExactly(750L, 125L, 20_000L);
+    assertThat(out.freightGstPaise()).isEqualTo(50);
+    assertThat(out.cgstPaise()).isEqualTo(20_875 + 25);
+    assertThat(out.sgstPaise()).isEqualTo(20_875 + 25);
+    assertThat(out.totalPaise()).isEqualTo(342_800);
+    assertThat(out.lines().stream().map(PurchaseMath.LineOut::landedTotalPaise)).containsExactly(100_334L, 100_333L, 100_333L);
+  }
+
+  @Test
+  void compositionModePutsTheFractionalTaxIntoTheCost() {
+    var out = PurchaseMath.compute(fractionalLines(), fractionalDoc(GstMode.COMPOSITION, false));
+    assertThat(out.lines().stream().map(PurchaseMath.LineOut::landedTotalPaise)).containsExactly(101_850L, 100_250L + 350, 140_350L);
+  }
+
+  @Test
+  void noGstModeIgnoresFractionalRates() {
+    var out = PurchaseMath.compute(fractionalLines(), fractionalDoc(GstMode.NONE, false));
+    assertThat(out.cgstPaise()).isZero();
+    assertThat(out.freightGstPaise()).isZero();
+    assertThat(out.totalPaise()).isEqualTo(301_000);
+  }
+
+  @Test
+  void interStatePurchasesCarryFractionalRatesAsIgst() {
+    var out = PurchaseMath.compute(fractionalLines(), fractionalDoc(GstMode.REGULAR, true));
+    assertThat(out.lines().stream().map(PurchaseMath.LineOut::igstPaise)).containsExactly(1_500L, 250L, 40_000L);
+    assertThat(out.igstPaise()).isEqualTo(41_800);
+    assertThat(out.cgstPaise()).isZero();
   }
 }

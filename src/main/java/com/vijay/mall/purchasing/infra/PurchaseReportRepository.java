@@ -1,5 +1,7 @@
 package com.vijay.mall.purchasing.infra;
 
+import com.vijay.mall.common.tax.GstRates;
+import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.persistence.BoundedCount;
 import java.math.BigDecimal;
@@ -18,11 +20,11 @@ import org.springframework.stereotype.Repository;
 public class PurchaseReportRepository {
   /** One purchase line in the register. */
   public record RegisterRow(UUID purchaseId, String invoiceNo, LocalDate invoiceDate, UUID supplierId, String supplierName, String gstMode,
-                            UUID productId, int qty, int freeQty, long unitCostPaise, long discountPaise, long taxablePaise, int gstPercent,
+                            UUID productId, int qty, int freeQty, BigDecimal unitCostPaise, long discountPaise, long taxablePaise, @GstRateJson BigDecimal gstPercent,
                             long cgstPaise, long sgstPaise, long igstPaise, long cessPaise, long lineTotalPaise, BigDecimal landedUnitCost) {}
 
   /** Input tax of one GST mode and rate, net of returns. */
-  public record GstRow(String gstMode, int gstPercent, long taxablePaise, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise) {}
+  public record GstRow(String gstMode, @GstRateJson BigDecimal gstPercent, long taxablePaise, long cgstPaise, long sgstPaise, long igstPaise, long cessPaise) {}
 
   /** What one supplier gave in discounts. */
   public record DiscountRow(UUID supplierId, String supplierName, long purchaseCount, long grossPaise, long lineDiscountPaise, long docDiscountPaise) {}
@@ -36,7 +38,7 @@ public class PurchaseReportRepository {
   PurchaseReportRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
   /** The purchase lines in a date range (by invoice date), newest first, with a bounded total. */
-  public Page<RegisterRow> register(LocalDate from, LocalDate to, UUID supplierId, UUID productId, Integer gstRate, int page, int size) {
+  public Page<RegisterRow> register(LocalDate from, LocalDate to, UUID supplierId, UUID productId, BigDecimal gstRate, int page, int size) {
     List<String> c = new ArrayList<>(List.of("p.invoice_date >= :from", "p.invoice_date <= :to"));
     Map<String, Object> params = new LinkedHashMap<>();
     params.put("from", from);
@@ -62,8 +64,8 @@ public class PurchaseReportRepository {
     params.forEach(q::param);
     List<RegisterRow> fetched = q.query((r, n) -> new RegisterRow(r.getObject("purchase_id", UUID.class), r.getString("invoice_no"),
         r.getObject("invoice_date", LocalDate.class), r.getObject("supplier_id", UUID.class), r.getString("supplier_name"), r.getString("gst_mode"),
-        r.getObject("product_id", UUID.class), r.getInt("qty"), r.getInt("free_qty"), r.getLong("unit_cost_paise"), r.getLong("discount_paise"),
-        r.getLong("taxable_paise"), r.getInt("gst_percent"), r.getLong("cgst_paise"), r.getLong("sgst_paise"), r.getLong("igst_paise"),
+        r.getObject("product_id", UUID.class), r.getInt("qty"), r.getInt("free_qty"), r.getBigDecimal("unit_cost_paise"), r.getLong("discount_paise"),
+        r.getLong("taxable_paise"), GstRates.normalize(r.getBigDecimal("gst_percent")), r.getLong("cgst_paise"), r.getLong("sgst_paise"), r.getLong("igst_paise"),
         r.getLong("cess_paise"), r.getLong("line_total_paise"), r.getBigDecimal("landed_unit_cost"))).list();
     return BoundedCount.assemble(fetched, page, size, () -> Sql.boundedCount(jdbc, fromWhere, params));
   }
@@ -91,7 +93,7 @@ public class PurchaseReportRepository {
           where r.created_at >= :fromAt and r.created_at < :toAt
         ) t group by gst_mode, gst_percent order by gst_mode, gst_percent""")
         .param("from", from).param("to", to).param("fromAt", Sql.ts(fromAt)).param("toAt", Sql.ts(toExclusive))
-        .query((r, n) -> new GstRow(r.getString("gst_mode"), r.getInt("gst_percent"), r.getLong("taxable"), r.getLong("cgst"), r.getLong("sgst"),
+        .query((r, n) -> new GstRow(r.getString("gst_mode"), GstRates.normalize(r.getBigDecimal("gst_percent")), r.getLong("taxable"), r.getLong("cgst"), r.getLong("sgst"),
             r.getLong("igst"), r.getLong("cess"))).list();
   }
 

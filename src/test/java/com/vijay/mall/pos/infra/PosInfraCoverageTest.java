@@ -1,5 +1,6 @@
 package com.vijay.mall.pos.infra;
 
+import com.vijay.mall.common.tax.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -113,7 +114,7 @@ class PosInfraCoverageTest {
     PosBarcodeJpa barcodes = mock(PosBarcodeJpa.class);
     UUID p = UUID.randomUUID();
     when(pos.findById(p)).thenReturn(Optional.empty());
-    new PosCatalogRepository(pos, barcodes).save(new ProductPos(p, SoldBy.UNIT, null, 5, null), NOW);
+    new PosCatalogRepository(pos, barcodes).save(new ProductPos(p, SoldBy.UNIT, null, GstRates.of(5), null), NOW);
     ArgumentCaptor<ProductPosEntity> c = ArgumentCaptor.forClass(ProductPosEntity.class);
     verify(pos).saveAndFlush(c.capture());
     assertThat(c.getValue().hsn).isEmpty();

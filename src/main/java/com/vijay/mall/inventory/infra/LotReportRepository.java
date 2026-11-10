@@ -15,9 +15,13 @@ import org.springframework.stereotype.Repository;
 /** Read-only reports over stock lots, allocations and sales: lot lists, expiry, valuation, margin and the drift check. */
 @Repository
 public class LotReportRepository {
-  /** A lot with its product name. {@code sold} is received minus remaining. */
+  /**
+   * A lot with its product name. {@code sold} is received minus remaining. {@code purchaseId}, {@code invoiceNo} and {@code supplierName}
+   * say which purchase delivered the lot (all null for an opening or adjustment lot).
+   */
   public record LotRow(UUID id, UUID productId, String productName, Instant receivedAt, int qtyReceived, int qtyRemaining, BigDecimal unitCost,
-                       boolean costKnown, Long mrpPaise, Long pricePaise, String batchNo, LocalDate expiryDate, String source, UUID purchaseItemId) {
+                       boolean costKnown, Long mrpPaise, Long pricePaise, String batchNo, LocalDate expiryDate, String source, UUID purchaseItemId,
+                       UUID purchaseId, String invoiceNo, String supplierName) {
     /** Units already used from the lot. */
     public int sold() { return qtyReceived - qtyRemaining; }
   }
@@ -38,12 +42,14 @@ public class LotReportRepository {
 
   LotReportRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
-  private static final String LOT_SELECT = "select l.*, p.name_en from stock_lot l join product p on p.id = l.product_id ";
+  private static final String LOT_SELECT = "select l.*, p.name_en, pu.id as purchase_id, pu.invoice_no, pu.supplier_name from stock_lot l join product p on p.id = l.product_id "
+      + "left join purchase_item pi on pi.id = l.purchase_item_id left join purchase pu on pu.id = pi.purchase_id ";
 
   private static LotRow row(ResultSet r) throws SQLException {
     var l = LotRepository.lot(r);
     return new LotRow(l.id(), l.productId(), r.getString("name_en"), l.receivedAt(), l.qtyReceived(), l.qtyRemaining(), l.unitCost(), l.costKnown(),
-        l.mrpPaise(), l.pricePaise(), l.batchNo(), l.expiryDate(), l.source(), r.getObject("purchase_item_id", UUID.class));
+        l.mrpPaise(), l.pricePaise(), l.batchNo(), l.expiryDate(), l.source(), r.getObject("purchase_item_id", UUID.class),
+        r.getObject("purchase_id", UUID.class), r.getString("invoice_no"), r.getString("supplier_name"));
   }
 
   /** The lots of a product, newest first; {@code onlyOpen} keeps those with stock. */

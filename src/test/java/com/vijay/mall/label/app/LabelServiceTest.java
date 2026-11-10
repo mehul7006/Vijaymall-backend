@@ -1,5 +1,6 @@
 package com.vijay.mall.label.app;
 
+import com.vijay.mall.common.tax.GstRates;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,6 +15,8 @@ import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
+import com.vijay.mall.config.RuntimeSettings;
+import com.vijay.mall.config.Settings;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.inventory.infra.InventoryRepository;
 import com.vijay.mall.label.LabelTestData;
@@ -67,6 +70,7 @@ class LabelServiceTest {
   private AuditService audit;
   private GujaratiRenderer gujarati;
   private LabelService service;
+  private final RuntimeSettings settings = mock(RuntimeSettings.class);
   private final List<LabelHistoryRepository.Row> saved = new ArrayList<>();
 
   private static ProductData product(UUID id, String name, String nameGu, String pack, long mrp, long price) {
@@ -74,7 +78,7 @@ class LabelServiceTest {
   }
 
   private LabelService build(GujaratiRenderer g) {
-    return new LabelService(templates, catalog, posCatalog, generation, inventory, shopService(), lots, history, new LabelProps(203), g,
+    return new LabelService(templates, catalog, posCatalog, generation, inventory, shopService(), lots, history, settings, g,
         new PdfLabelRenderer(g), new TsplRenderer(g), new ZplRenderer(g), new EscPosRenderer(g), audit, Clock.fixed(Instant.parse("2026-11-09T10:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -86,6 +90,7 @@ class LabelServiceTest {
 
   @BeforeEach
   void setUp() {
+    when(settings.getInt(Settings.LABEL_DPI)).thenReturn(203);
     templates = mock(LabelTemplateService.class);
     catalog = mock(CatalogService.class);
     posCatalog = mock(PosCatalogService.class);
@@ -103,7 +108,7 @@ class LabelServiceTest {
       return List.of(riceData, sugarData).stream().filter(p -> ids.contains(p.id())).toList();
     });
     when(catalog.posVariantNames(any())).thenReturn(Map.of(rice, "Premium"));
-    when(posCatalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, 5, ""), sugar, new ProductPos(sugar, SoldBy.UNIT, null, 5, "")));
+    when(posCatalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.UNIT, null, GstRates.of(5), ""), sugar, new ProductPos(sugar, SoldBy.UNIT, null, GstRates.of(5), "")));
     when(posCatalog.barcodesOf(rice)).thenReturn(List.of("8901234567890"));
     when(posCatalog.barcodesOf(sugar)).thenReturn(List.of());
     when(generation.generate(eq(sugar), any())).thenReturn(new BarcodeGenerationService.Generated(sugar, "2900000000018", true, List.of("2900000000018")));
@@ -243,7 +248,7 @@ class LabelServiceTest {
   }
 
   @Test void weighedItems_areRefused() {
-    when(posCatalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.WEIGHT, "101", 5, "")));
+    when(posCatalog.attributesFor(any())).thenReturn(Map.of(rice, new ProductPos(rice, SoldBy.WEIGHT, "101", GstRates.of(5), "")));
     assertInvalid(req(Mode.PDF, 1, rice), "items[0].variantId");
   }
 
@@ -301,9 +306,10 @@ class LabelServiceTest {
     assertThat(new NoLabelLots().lotFor(rice)).isEmpty();
   }
 
-  @Test void labelProps_dpiRange() {
-    assertThat(new LabelProps(300).dpi()).isEqualTo(300);
-    assertThatThrownBy(() -> new LabelProps(100)).isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> new LabelProps(700)).isInstanceOf(IllegalArgumentException.class);
+  @Test void dpi_isReadFromTheSettingOnEveryPrint() {
+    String at203 = new String(service.print(req(Mode.ZPL, 1, rice), actor).bytes(), StandardCharsets.US_ASCII);
+    when(settings.getInt(Settings.LABEL_DPI)).thenReturn(300);
+    String at300 = new String(service.print(req(Mode.ZPL, 1, rice), actor).bytes(), StandardCharsets.US_ASCII);
+    assertThat(at300).isNotEqualTo(at203);
   }
 }

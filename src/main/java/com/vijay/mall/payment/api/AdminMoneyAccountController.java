@@ -46,14 +46,14 @@ public class AdminMoneyAccountController {
 
   /** Request body of a create or an update. */
   @Schema(name = "MoneyAccountBody")
-  public record Body(String name, String kind, String provider, String identifier, UUID settlesToAccountId, String note) {
-    MoneyAccountService.Input input() { return new MoneyAccountService.Input(name, kind, provider, identifier, settlesToAccountId, note); }
+  public record Body(String name, String kind, String provider, String identifier, String ifsc, UUID settlesToAccountId, String note) {
+    MoneyAccountService.Input input() { return new MoneyAccountService.Input(name, kind, provider, identifier, ifsc, settlesToAccountId, note); }
   }
 
   /** Request body of a hand-entered movement. {@code at} defaults to now. */
   public record EntryBody(String direction, long amountPaise, Instant at, String note) {}
 
-  /** Accounts A to Z. kind, active and q (name, provider or identifier) are optional filters. */
+  /** Accounts A to Z. kind, active and q (name, provider, identifier or IFSC) are optional filters. */
   @GetMapping
   public Page<Account> list(@RequestParam(required = false) String kind, @RequestParam(required = false) Boolean active,
                             @RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int page,

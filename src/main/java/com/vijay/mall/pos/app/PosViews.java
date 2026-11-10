@@ -1,5 +1,8 @@
 package com.vijay.mall.pos.app;
 
+import java.math.BigDecimal;
+import com.vijay.mall.common.tax.GstRateJson;
+import com.vijay.mall.common.tax.GstSlab;
 import com.vijay.mall.inventory.domain.LotInfo;
 import com.vijay.mall.pos.domain.SoldBy;
 import com.vijay.mall.wallet.domain.CoinRedemption;
@@ -90,26 +93,43 @@ public final class PosViews {
    * @param linePaise      the line amount the till charged before discount (optional; when given it must equal price x quantity,
    *                       with weighed items priced per 1000 g)
    */
-  public record RungLine(UUID productId, Integer qty, Long unitPricePaise, Integer gstPercent, Long discountPaise, String name,
+  public record RungLine(UUID productId, Integer qty, Long unitPricePaise, @GstRateJson BigDecimal gstPercent, Long discountPaise, String name,
                          Long linePaise) {}
 
   /** The bill as rung at an offline till. */
   public record Rung(List<RungLine> lines) {}
 
   /**
-   * One priced line of a bill in paise: gross line amount, discount share, net amount and the GST percent applied.
+   * One priced line of a bill in paise: gross line amount, discount share, net amount, the GST percent applied and the split of the net
+   * amount into taxable value, CGST and SGST (the same figures the finished sale stores).
    */
   public record BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
-                         long discountPaise, long netPaise, int gstPercent) {}
+                         long discountPaise, long netPaise, @GstRateJson BigDecimal gstPercent, long taxablePaise, long cgstPaise,
+                         long sgstPaise) {
+    /** A line whose GST split is not shown. */
+    public BillLine(UUID productId, String name, SoldBy soldBy, int qty, long unitPricePaise, long linePaise,
+                    long discountPaise, long netPaise, BigDecimal gstPercent) {
+      this(productId, name, soldBy, qty, unitPricePaise, linePaise, discountPaise, netPaise, gstPercent, 0, 0, 0);
+    }
+  }
 
   /**
    * A priced basket: lines, coupon and coin discounts, round-off, total, GST split, coins that would be earned and
-   * the customer's coin balance, all money in paise.
+   * the customer's coin balance, all money in paise. {@code gstSlabs} has one entry per GST rate on the bill, lowest rate first; its amounts
+   * add up to {@code taxablePaise}, {@code cgstPaise} and {@code sgstPaise}.
    */
   public record BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise,
                          int coinsUsed, long coinDiscountPaise, long totalPaise, long taxablePaise, long cgstPaise,
                          long sgstPaise, long coinsToEarn, int customerCoinBalance, List<String> warnings, long roundOffPaise,
-                         long manualDiscountPaise) {
+                         long manualDiscountPaise, List<GstSlab> gstSlabs) {
+    /** A bill that shows no GST slabs. */
+    public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
+                    long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
+                    List<String> warnings, long roundOffPaise, long manualDiscountPaise) {
+      this(lines, subtotalPaise, couponCode, couponDiscountPaise, coinsUsed, coinDiscountPaise, totalPaise, taxablePaise, cgstPaise, sgstPaise,
+          coinsToEarn, customerCoinBalance, warnings, roundOffPaise, manualDiscountPaise, List.of());
+    }
+
     /** A bill with no manual discount. */
     public BillView(List<BillLine> lines, long subtotalPaise, String couponCode, long couponDiscountPaise, int coinsUsed, long coinDiscountPaise,
                     long totalPaise, long taxablePaise, long cgstPaise, long sgstPaise, long coinsToEarn, int customerCoinBalance,
@@ -155,12 +175,12 @@ public final class PosViews {
    * to show "after N more the price is X").
    */
   public record PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                           int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                           @GstRateJson BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                            boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
                            String variantName, String displayName, LotInfo lot) {
     /** A product with no lot information (no lot-priced stock). */
     public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                       boolean coinRedeemable, boolean earnsCoins, List<String> barcodes, String packSize, String unit,
                       String variantName, String displayName) {
       this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
@@ -169,7 +189,7 @@ public final class PosViews {
 
     /** A product without pack size, unit or variant details: the display name is the plain name. */
     public PosProduct(UUID productId, String name, String nameGu, long pricePaise, long mrpPaise, SoldBy soldBy,
-                      int gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
+                      BigDecimal gstPercent, String hsn, String plu, boolean posOnly, int qtyOnHand, String imageUrl,
                       boolean coinRedeemable, boolean earnsCoins, List<String> barcodes) {
       this(productId, name, nameGu, pricePaise, mrpPaise, soldBy, gstPercent, hsn, plu, posOnly, qtyOnHand, imageUrl,
           coinRedeemable, earnsCoins, barcodes, "", "", "", name);
@@ -185,9 +205,15 @@ public final class PosViews {
     public Scan(PosProduct product, int qty, long linePaise) { this(product, qty, linePaise, null); }
   }
 
-  /** The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes. */
-  public record PosAttributes(UUID productId, SoldBy soldBy, String plu, int gstPercent, String hsn, boolean posOnly,
-                              List<String> barcodes) {}
+  /**
+   * The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes.
+   * {@code gstSource} says where the rate came from: {@code USER} (typed in this save), {@code MASTER} (filled from the GST master),
+   * {@code STORED} (kept from an earlier save) or {@code DEFAULT} (nothing known: 0% and no HSN). {@code gstVerification} is
+   * {@code VERIFIED} or {@code VERIFY_PRODUCT} when the master filled the rate or the HSN in this save (show "please confirm this rate
+   * with your CA" for {@code VERIFY_PRODUCT}), otherwise null.
+   */
+  public record PosAttributes(UUID productId, SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent, String hsn, boolean posOnly,
+                              List<String> barcodes, String gstSource, String gstVerification) {}
 
   /**
    * The cash-up for one day (shop time): bills, sales and GST, coins redeemed, credit notes and refunds, net sales,
