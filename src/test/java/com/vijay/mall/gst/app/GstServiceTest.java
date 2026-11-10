@@ -142,12 +142,12 @@ class GstServiceTest {
     assertThat(s.choices()).extracting(GstService.RowView::rowId).doesNotContain(best.rowId());
   }
 
-  @Test void aTooHighRateIsMarkedNotAcceptedForBilling() {
+  @Test void theFortyPercentRateIsAcceptedForBilling() {
     loaded();
     GstService.RowView cola = service.suggest("coca cola", null, null, null, null).best();
     assertThat(cola.hsn()).isEqualTo("220210");
     assertThat(cola.gstPercent()).isEqualTo(new BigDecimal("40"));
-    assertThat(cola.acceptedForBilling()).isFalse();
+    assertThat(cola.acceptedForBilling()).isTrue();
   }
 
   @Test void priceBandRowsCarryTheirLimitsAndThePriceDecidesTheBand() {
@@ -226,7 +226,7 @@ class GstServiceTest {
     assertThat(rates).extracting(GstService.RateView::gstPercent)
         .containsExactly(new BigDecimal("0"), new BigDecimal("0.25"), new BigDecimal("1.5"), new BigDecimal("5"), new BigDecimal("40"));
     assertThat(rates.get(3).cgstRate()).isEqualTo(new BigDecimal("2.5"));
-    assertThat(rates).extracting(GstService.RateView::acceptedForBilling).containsExactly(true, false, false, true, false);
+    assertThat(rates).extracting(GstService.RateView::acceptedForBilling).containsExactly(true, true, true, true, true);
   }
 
   // --- defaults -------------------------------------------------------------------------------------------------
@@ -241,10 +241,19 @@ class GstServiceTest {
     assertThat(d.verification()).isIn("VERIFIED", "VERIFY_PRODUCT");
   }
 
-  @Test void defaultsLeaveTheRateOutWhenBillingCannotStoreIt() {
+  @Test void defaultsCarryTheFortyPercentRate() {
     loaded();
     GstService.Defaults d = service.defaultsFor("coca cola", null, null).orElseThrow();
     assertThat(d.hsn()).isEqualTo("220210");
+    assertThat(d.gstPercent()).isEqualByComparingTo("40");
+  }
+
+  @Test void defaultsLeaveTheRateOutWhenBillingCannotStoreIt() {
+    when(repo.allHsn()).thenReturn(List.of(GstFixtures.hsn("3333", 1, "ANY", "7", "VERIFIED")));
+    when(repo.activeKeywords()).thenReturn(List.of(GstFixtures.keyword(1, "Zorbo Widget", "zorbo widget", "3333", "VERIFIED")));
+    loaded();
+    GstService.Defaults d = service.defaultsFor("zorbo widget", null, null).orElseThrow();
+    assertThat(d.hsn()).isEqualTo("3333");
     assertThat(d.gstPercent()).isNull();
   }
 

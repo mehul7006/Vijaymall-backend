@@ -9,9 +9,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 class BillingRateRuleTest {
   @ParameterizedTest
-  @CsvSource({"0,true", "0.000,true", "3,true", "5.000,true", "12,true", "18,true", "28,true", "40,false", "1.5,false", "0.25,false",
+  @CsvSource({"0,true", "0.000,true", "3,true", "5.000,true", "12,true", "18,true", "28,true", "40,true", "1.5,true", "0.25,true", "0.250,true",
       "7,false", "100,false", "1E+3,false", "-5,false"})
-  void onlyTheSixWholeNumberRatesOfTodayAreAccepted(String rate, boolean accepted) {
+  void onlyTheRatesOfTheGstRateListAreAccepted(String rate, boolean accepted) {
     assertThat(BillingRateRule.accepts(new BigDecimal(rate))).isEqualTo(accepted);
   }
 

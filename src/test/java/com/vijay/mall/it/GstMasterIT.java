@@ -110,7 +110,7 @@ class GstMasterIT extends IntegrationTestBase {
     List<Map<String, Object>> ch = (List<Map<String, Object>>) body.get("choices");
     assertThat(ch.stream().map(c -> (String) c.get("condition")).toList()).isEqualTo(choices.isEmpty() ? List.of() : List.of(choices));
     assertThat(ch).allMatch(c -> !c.get("rowId").equals(best.get("rowId")));
-    assertThat(best.get("acceptedForBilling")).isEqualTo(!rate.equals("40"));
+    assertThat(best.get("acceptedForBilling")).isEqualTo(true);
     double score = ((Number) best.get("score")).doubleValue();
     assertThat(score).isBetween(0.5, 1.0);
     assertThat((String) best.get("matchedName")).isNotBlank();
@@ -205,8 +205,9 @@ class GstMasterIT extends IntegrationTestBase {
     List<Map<String, Object>> items = (List<Map<String, Object>>) get("/api/v1/gst/rates", admin).getBody().get("items");
     assertThat(items).hasSize(11);
     assertThat(items).noneMatch(r -> r.get("code").equals("GST_SPECIAL_CESS"));
-    assertThat(items).filteredOn(r -> List.of("GST_0_25", "GST_1_5", "GST_40").contains(r.get("code"))).hasSize(3).allMatch(r -> r.get("acceptedForBilling").equals(false));
-    assertThat(items).filteredOn(r -> !List.of("GST_0_25", "GST_1_5", "GST_40").contains(r.get("code"))).allMatch(r -> r.get("acceptedForBilling").equals(true));
+    assertThat(items).allMatch(r -> r.get("acceptedForBilling").equals(true));
+    assertThat(items).filteredOn(r -> List.of("GST_0_25", "GST_1_5", "GST_40").contains(r.get("code"))).hasSize(3)
+        .allMatch(r -> !String.valueOf(r.get("note")).contains("Not accepted"));
   }
 
   @Test void theThreeReadEndpointsHaveAnEtagAndAnswer304ButTheSuggestHasNone() {

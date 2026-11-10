@@ -187,9 +187,15 @@ public final class PosViews {
     public Scan(PosProduct product, int qty, long linePaise) { this(product, qty, linePaise, null); }
   }
 
-  /** The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes. */
+  /**
+   * The counter attributes of a product: how it is sold, item code, GST, HSN, counter-only flag and barcodes.
+   * {@code gstSource} says where the rate came from: {@code USER} (typed in this save), {@code MASTER} (filled from the GST master),
+   * {@code STORED} (kept from an earlier save) or {@code DEFAULT} (nothing known: 0% and no HSN). {@code gstVerification} is
+   * {@code VERIFIED} or {@code VERIFY_PRODUCT} when the master filled the rate or the HSN in this save (show "please confirm this rate
+   * with your CA" for {@code VERIFY_PRODUCT}), otherwise null.
+   */
   public record PosAttributes(UUID productId, SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent, String hsn, boolean posOnly,
-                              List<String> barcodes) {}
+                              List<String> barcodes, String gstSource, String gstVerification) {}
 
   /**
    * The cash-up for one day (shop time): bills, sales and GST, coins redeemed, credit notes and refunds, net sales,

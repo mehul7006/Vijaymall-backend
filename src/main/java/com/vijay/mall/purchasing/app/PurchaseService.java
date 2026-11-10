@@ -5,12 +5,14 @@ import com.vijay.mall.common.tax.GstRateJson;
 import com.vijay.mall.catalog.app.CatalogService;
 import com.vijay.mall.catalog.app.ProductPatch;
 import com.vijay.mall.catalog.domain.AdminProduct;
+import com.vijay.mall.catalog.domain.ProductData;
 import com.vijay.mall.common.Page;
 import com.vijay.mall.common.audit.AuditService;
 import com.vijay.mall.common.error.ApiException;
 import com.vijay.mall.common.idem.AdminOps;
 import com.vijay.mall.config.RuntimeSettings;
 import com.vijay.mall.config.Settings;
+import com.vijay.mall.gst.app.GstService;
 import com.vijay.mall.inventory.app.InventoryService;
 import com.vijay.mall.pos.app.PosCatalogService;
 import com.vijay.mall.pos.app.ShopService;
@@ -38,6 +40,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,6 +50,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -137,11 +141,16 @@ public class PurchaseService {
     }
   }
 
-  /** What the form needs when a product is picked: its tax defaults and prices, and what the last purchase cost. */
+  /**
+   * What the form needs when a product is picked: its tax defaults and prices, and what the last purchase cost. A product with no saved
+   * counter attributes (or with no HSN) gets the blank parts from the GST master. {@code gstSource} is {@code STORED} (the product's own
+   * saved rate), {@code MASTER} (the rate came from the master) or {@code DEFAULT} (nothing known, 0%); {@code gstVerification} is
+   * {@code VERIFIED} or {@code VERIFY_PRODUCT} when the master filled the rate or the HSN, otherwise null.
+   */
   @Schema(name = "PurchaseLookup")
   public record Lookup(UUID productId, String name, @GstRateJson BigDecimal gstPercent, String hsn, long mrpPaise, long pricePaise, int qtyOnHand,
                        BigDecimal lastPurchaseCostPaise, BigDecimal lastLandedUnitCostPaise, String lastSupplierName, LocalDate lastInvoiceDate,
-                       UUID lastPurchaseId) {}
+                       UUID lastPurchaseId, String gstSource, String gstVerification) {}
 
   /** One earlier purchase of a product. */
   @Schema(name = "PurchasePriceView")
@@ -186,6 +195,11 @@ public class PurchaseService {
   private final Clock clock;
   private final AdminOps ops;
   private final RuntimeSettings settings;
+  private GstService gst;
+
+  /** Optional (plain unit tests run without it): the GST master, which fills a blank rate or HSN of a purchase line. */
+  @Autowired(required = false)
+  void setGst(GstService gst) { this.gst = gst; }
 
   /**
    * Creates the service. The transaction template lets {@code receive} catch a duplicate-key failure outside the transaction; {@code ops}
@@ -216,8 +230,12 @@ public class PurchaseService {
     var existing = repo.findByIdem(idemKey);
     if (existing.isPresent()) return replay(existing.get(), in);
     try {
-      UUID id = tx.execute(s -> doReceive(actor, idemKey, in));
-      return recorded(repo.find(id).orElseThrow());
+      Received done = tx.execute(s -> doReceive(actor, idemKey, in));
+      PurchaseView view = recorded(repo.find(done.id()).orElseThrow());
+      if (done.warnings().isEmpty()) return view;
+      List<String> all = new ArrayList<>(view.warnings());
+      all.addAll(done.warnings());
+      return view.withWarnings(all);
     } catch (DataIntegrityViolationException e) {
       return replay(repo.findByIdem(idemKey).orElseThrow(() -> e), in);
     }
@@ -266,10 +284,6 @@ public class PurchaseService {
     return r;
   }
 
-  private static BigDecimal rate(BigDecimal given, BigDecimal fallback, String field) {
-    return GstRates.require(given == null ? fallback : given, field);
-  }
-
   private static BigDecimal percent(BigDecimal p, String field) {
     if (p == null) return BigDecimal.ZERO;
     if (p.signum() < 0 || p.compareTo(BigDecimal.valueOf(100)) > 0 || p.stripTrailingZeros().scale() > 2) {
@@ -284,7 +298,55 @@ public class PurchaseService {
     return v;
   }
 
-  private UUID doReceive(UUID actor, String idemKey, Input in) {
+  /** The id of a recorded delivery and the warnings of this request that cannot be worked out from the stored delivery. */
+  private record Received(UUID id, List<String> warnings) {}
+
+  /** What a line falls back on for its rate and HSN: the product's counter attributes, whether they were really saved, and the master's answer. */
+  record TaxBasis(ProductPos product, boolean configured, GstService.Defaults master) {
+    /** The rate: the line's own (a typed 0 counts), else the product's saved rate, else the master's, else 0. */
+    BigDecimal rate(BigDecimal onLine) {
+      if (onLine != null) return onLine;
+      if (configured) return product.gstPercent();
+      return master != null && master.gstPercent() != null ? master.gstPercent() : BigDecimal.ZERO;
+    }
+
+    /** The HSN: the line's own, else the product's, else the master's, else empty. */
+    String hsn(String onLine) {
+      if (!text(onLine).isEmpty()) return text(onLine);
+      if (!text(product.hsn()).isEmpty()) return product.hsn();
+      return master == null ? "" : master.hsn();
+    }
+
+    /** True when the master supplied the rate or the HSN of this line and the row still needs a check by the CA. */
+    boolean needsConfirmation(BigDecimal rateOnLine, String hsnOnLine) {
+      if (master == null || !"VERIFY_PRODUCT".equals(master.verification())) return false;
+      boolean rateFromMaster = rateOnLine == null && !configured && master.gstPercent() != null;
+      boolean hsnFromMaster = text(hsnOnLine).isEmpty() && text(product.hsn()).isEmpty();
+      return rateFromMaster || hsnFromMaster;
+    }
+  }
+
+  /** True when the line leaves out something the product's own attributes cannot supply, so the master is asked. */
+  private static boolean needsMaster(ItemInput l, ProductPos product, boolean configured) {
+    return (l.gstPercent() == null && !configured) || (text(l.hsn()).isEmpty() && text(product.hsn()).isEmpty());
+  }
+
+  /** One in-memory master lookup per line that needs it; products are read in one batch, categories once each. */
+  private Map<UUID, GstService.Defaults> masterAnswers(List<ItemInput> items, Map<UUID, ProductPos> defaults, Set<UUID> configured) {
+    Map<UUID, GstService.Defaults> out = new HashMap<>();
+    if (gst == null) return out;
+    List<UUID> ids = items.stream().filter(l -> needsMaster(l, defaults.get(l.productId()), configured.contains(l.productId())))
+        .map(ItemInput::productId).toList();
+    if (ids.isEmpty()) return out;
+    Map<UUID, String> categories = new HashMap<>();
+    for (ProductData p : catalog.posProducts(ids)) {
+      String category = categories.computeIfAbsent(p.categoryId(), k -> catalog.categoryName(p.categoryId()).orElse(""));
+      gst.defaultsFor(p.nameEn(), category.isEmpty() ? null : category, BigDecimal.valueOf(p.pricePaise(), 2)).ifPresent(d -> out.put(p.id(), d));
+    }
+    return out;
+  }
+
+  private Received doReceive(UUID actor, String idemKey, Input in) {
     String invoice = text(in.invoiceNo());
     String note = text(in.note());
     String attachment = text(in.attachmentNote());
@@ -300,11 +362,23 @@ public class PurchaseService {
     for (ItemInput l : items) {
       if (!seen.add(l.productId())) throw ApiException.validation("items", "a product appears twice: add its quantities together");
     }
-    if (catalog.names(seen).size() != seen.size()) throw ApiException.validation("productId", "a product does not exist");
+    Map<UUID, String> names = catalog.names(seen);
+    if (names.size() != seen.size()) throw ApiException.validation("productId", "a product does not exist");
     Map<UUID, ProductPos> defaults = pos.attributesFor(seen);
+    Set<UUID> configured = pos.configured(seen);
+    Map<UUID, GstService.Defaults> masters = masterAnswers(items, defaults, configured);
+    Map<UUID, TaxBasis> basis = new HashMap<>();
+    List<String> fillWarnings = new ArrayList<>();
+    for (ItemInput l : items) {
+      TaxBasis b = new TaxBasis(defaults.get(l.productId()), configured.contains(l.productId()), masters.get(l.productId()));
+      basis.put(l.productId(), b);
+      if (b.needsConfirmation(l.gstPercent(), l.hsn())) {
+        fillWarnings.add("GST for " + names.get(l.productId()) + " was filled from the master and needs your CA's confirmation");
+      }
+    }
 
     List<PurchaseMath.LineIn> mathLines = new ArrayList<>();
-    for (ItemInput l : items) mathLines.add(lineIn(l, defaults.get(l.productId())));
+    for (ItemInput l : items) mathLines.add(lineIn(l, basis.get(l.productId())));
     BigDecimal docPercent = percent(in.docDiscountPercent(), "docDiscountPercent");
     long docAmount = money(in.docDiscountPaise(), "docDiscountPaise");
     if (docPercent.signum() > 0 && docAmount > 0) throw ApiException.validation("docDiscountPaise", "give either a percent or an amount");
@@ -328,7 +402,7 @@ public class PurchaseService {
     PaymentPlan pay = paymentPlan(in, math.totalPaise());
     LocalDate dueDate = dueDate(in.dueDate(), invoiceDate, supplier);
     List<Line> lines = new ArrayList<>();
-    for (int i = 0; i < items.size(); i++) lines.add(line(items.get(i), mathLines.get(i), math.lines().get(i), defaults.get(items.get(i).productId())));
+    for (int i = 0; i < items.size(); i++) lines.add(line(items.get(i), mathLines.get(i), math.lines().get(i), basis.get(items.get(i).productId())));
     Header header = new Header(id, supplier.id(), supplier.name(), supplier.phone(), supplier.gstin(), supplierState, interState, mode.name(), invoice,
         invoiceDate, receivedDate, note, attachment, math.lineDiscountPaise(), docPercent.signum() > 0 ? docPercent : null, math.docDiscountPaise(),
         math.taxablePaise(), math.cgstPaise(), math.sgstPaise(), math.igstPaise(), math.cessPaise(), freight, freightRate, math.freightGstPaise(),
@@ -340,7 +414,7 @@ public class PurchaseService {
     applyToVariants(actor, id, items);
     receiveStock(actor, id, lines, receivedDate);
     audit.log(actor, "PURCHASE", "purchase", id, supplier.name() + " " + invoice + " total=" + math.totalPaise());
-    return id;
+    return new Received(id, fillWarnings);
   }
 
   private static String supplierState(String given, Supplier supplier) {
@@ -354,14 +428,14 @@ public class PurchaseService {
     return c;
   }
 
-  private PurchaseMath.LineIn lineIn(ItemInput l, ProductPos product) {
+  private PurchaseMath.LineIn lineIn(ItemInput l, TaxBasis basis) {
     int free = l.freeQty() == null ? 0 : l.freeQty();
     if (free < 0 || (long) free + l.qty() > MAX_QTY) throw ApiException.validation("freeQty", free < 0 ? "must be 0 or more"
         : "paid plus free must be at most " + MAX_QTY);
     BigDecimal discountPercent = percent(l.discountPercent(), "discountPercent");
     long discountPaise = money(l.discountPaise(), "discountPaise");
     if (discountPercent.signum() > 0 && discountPaise > 0) throw ApiException.validation("discountPaise", "give either a percent or an amount");
-    BigDecimal gst = rate(l.gstPercent(), product.gstPercent(), "gstPercent");
+    BigDecimal gst = GstRates.require(basis.rate(l.gstPercent()), "gstPercent");
     if (!text(l.hsn()).isEmpty() && !HSN.matcher(text(l.hsn())).matches()) throw ApiException.validation("hsn", "4 to 8 digits");
     long mrp = l.mrpPaise() == null ? 0 : money(l.mrpPaise(), "mrpPaise");
     long price = l.sellingPricePaise() == null ? 0 : money(l.sellingPricePaise(), "sellingPricePaise");
@@ -372,8 +446,8 @@ public class PurchaseService {
     return new PurchaseMath.LineIn(l.qty(), free, unitCost(l.unitCostPaise()), discountPercent, discountPaise, gst, percent(l.cessPercent(), "cessPercent"));
   }
 
-  private static Line line(ItemInput l, PurchaseMath.LineIn in, PurchaseMath.LineOut out, ProductPos product) {
-    String hsn = text(l.hsn()).isEmpty() ? product.hsn() : text(l.hsn());
+  private static Line line(ItemInput l, PurchaseMath.LineIn in, PurchaseMath.LineOut out, TaxBasis basis) {
+    String hsn = basis.hsn(l.hsn());
     return new Line(UUID.randomUUID(), l.productId(), l.qty(), in.freeQty(), in.unitCostPaise(), in.discountPercent().signum() > 0 ? in.discountPercent() : null,
         out.lineDiscountPaise(), out.docDiscountSharePaise(), out.taxablePaise(), in.gstPercent(), out.cgstPaise(), out.sgstPaise(), out.igstPaise(),
         in.cessPercent(), out.cessPaise(), out.lineTotalPaise(), out.landedTotalPaise(), out.landedUnitCost(), hsn, l.mrpPaise(), l.sellingPricePaise(),
@@ -510,10 +584,25 @@ public class PurchaseService {
   public Lookup lookup(UUID productId) {
     AdminProduct p = catalog.adminGet(productId);
     ProductPos attrs = pos.attributesFor(List.of(productId)).get(productId);
+    boolean configured = pos.configured(List.of(productId)).contains(productId);
+    GstService.Defaults master = gst == null || (configured && !text(attrs.hsn()).isEmpty()) ? null
+        : gst.defaultsFor(p.nameEn(), catalog.categoryName(p.categoryId()).orElse(null), BigDecimal.valueOf(p.pricePaise(), 2)).orElse(null);
+    BigDecimal rate = attrs.gstPercent();
+    String hsn = attrs.hsn();
+    String source = configured ? "STORED" : "DEFAULT";
+    String verification = null;
+    if (master != null) {
+      verification = master.verification();
+      if (!configured && master.gstPercent() != null) {
+        rate = master.gstPercent();
+        source = "MASTER";
+      }
+      if (text(hsn).isEmpty()) hsn = master.hsn();
+    }
     PriceRow last = repo.priceHistory(productId, 1).stream().findFirst().orElse(null);
-    return new Lookup(productId, p.nameEn(), attrs.gstPercent(), attrs.hsn(), p.mrpPaise(), p.pricePaise(),
+    return new Lookup(productId, p.nameEn(), rate, hsn, p.mrpPaise(), p.pricePaise(),
         p.qtyOnHand(), last == null ? null : PurchaseMath.plain(last.unitCostPaise()), last == null ? null : last.landedUnitCost(), last == null ? null : last.supplierName(),
-        last == null ? null : last.invoiceDate(), last == null ? null : last.purchaseId());
+        last == null ? null : last.invoiceDate(), last == null ? null : last.purchaseId(), source, verification);
   }
 
   /** The last {@code limit} (1 to 100) purchases of a product, newest first, with each supplier's cost. */

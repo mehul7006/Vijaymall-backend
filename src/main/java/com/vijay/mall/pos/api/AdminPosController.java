@@ -86,7 +86,8 @@ public class AdminPosController {
    * Request body for a product's counter attributes: how it is sold (piece or weight), item code (PLU), GST percent,
    * HSN code and the barcodes that identify it.
    */
-  public record PosBody(@NotNull SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent, String hsn, List<String> barcodes) {}
+  public record PosBody(@NotNull SoldBy soldBy, String plu, @GstRateJson BigDecimal gstPercent,
+                        @Pattern(regexp = "^\\s*$|\\d{4}|\\d{6}|\\d{8}", message = "must be 4, 6 or 8 digits") String hsn, List<String> barcodes) {}
 
   /**
    * Request body for creating a cashier account; the email is the sign-in identity. {@code name} is 1 to 80 characters,

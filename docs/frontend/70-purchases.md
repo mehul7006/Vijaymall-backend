@@ -189,9 +189,9 @@ Header `Idempotency-Key` mandatory. Only `items` and one of `supplierId` / `supp
 | items[].freeQty | default 0; units that cost nothing but are added to stock and shared in the landed cost |
 | items[].unitCostPaise | required, decimal 0..100,000,000 with at most 4 decimals (JSON number, e.g. `5.5`), before tax; see 2.4 |
 | items[].discountPercent / discountPaise | one of them; percent 0..100 (max 2 decimals); amount not above the line amount |
-| items[].gstPercent | one of 0, 3, 5, 12, 18, 28; default **the product's GST percent** (product counter attributes) |
+| items[].gstPercent | one of 0, 0.25, 1.5, 3, 5, 12, 18, 28, 40; when left out: the product's **saved** GST percent, else the rate from the GST master (see 75-gst-master.md section 6), else 0. A typed 0 is used as 0 |
 | items[].cessPercent | 0..100, default 0 |
-| items[].hsn | blank or 4..8 digits; default the product's HSN |
+| items[].hsn | blank or 4..8 digits; when blank: the product's HSN, else the HSN from the GST master. The line keeps what it used and the product is not changed. A fill from a master row marked `VERIFY_PRODUCT` adds a `warnings` entry ("needs your CA's confirmation") |
 | items[].mrpPaise / sellingPricePaise | optional, `sellingPricePaise` not above `mrpPaise` |
 | items[].batchNo | max 40 |
 | items[].applyToVariant | default false; needs `mrpPaise` or `sellingPricePaise` |
@@ -245,9 +245,9 @@ For the form, when a product is picked. 404 for an unknown product.
 ```json
 { "productId": "uuid", "name": "Bath Soap", "gstPercent": 18, "hsn": "3401", "mrpPaise": 15000, "pricePaise": 14000, "qtyOnHand": 12,
   "lastPurchaseCostPaise": 10000, "lastLandedUnitCostPaise": 8333.3333, "lastSupplierName": "Agro Traders",
-  "lastInvoiceDate": "2026-11-09", "lastPurchaseId": "uuid" }
+  "lastInvoiceDate": "2026-11-09", "lastPurchaseId": "uuid", "gstSource": "STORED", "gstVerification": null }
 ```
-The `last*` fields are null when the product was never purchased. `lastPurchaseCostPaise` is the invoice price before tax (a decimal, printed without needless zeros, e.g. `5.5`).
+`gstPercent` and `hsn` are the product's saved values; for a product with no saved counter attributes (or a blank HSN) the blank parts come from the GST master, `gstSource` says which (`STORED`, `MASTER`, `DEFAULT`) and `gstVerification` (`VERIFIED`, `VERIFY_PRODUCT`, `null`) is set when the master filled something: show "please confirm this rate with your CA" for `VERIFY_PRODUCT`. The `last*` fields are null when the product was never purchased. `lastPurchaseCostPaise` is the invoice price before tax (a decimal, printed without needless zeros, e.g. `5.5`).
 
 ### GET /api/v1/admin/products/{id}/purchase-prices?limit=20&rounding=
 The last `limit` (1..100) purchases of the product, newest first, so the admin can compare suppliers over time. A plain array:

@@ -52,8 +52,8 @@ Output formats: a **PDF** (A4 sheets or one page per thermal label, for any prin
 |---|---|---|
 | `soldBy` | **yes, always** | `UNIT` or `WEIGHT`. A body without it answers `400 VALIDATION_FAILED`, `details.fields.soldBy` = `is required`. A barcodes-only change must therefore repeat the product's current `soldBy` |
 | `plu` | no | item code of a weighed item; omitted/empty = none |
-| `gstPercent` | no | a GST rate; omitted keeps the stored rate (default 5) |
-| `hsn` | no | HSN code; omitted/empty = none |
+| `gstPercent` | no | a GST rate; omitted keeps the stored rate; for a product with no saved attributes yet the rate comes from the GST master (0 if nothing matches). A typed 0 is kept as 0 |
+| `hsn` | no | HSN code, empty (or spaces) or 4, 6 or 8 digits; omitted/empty keeps the stored HSN, or for a product with no saved attributes yet the master's (none if nothing matches) |
 | `barcodes` | no | the new full list (omitted = the product ends with no barcodes, so send the whole list every time) |
 
 A barcodes-only example (read `GET /admin/products/{id}/pos` first and send back its `soldBy`):

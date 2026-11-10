@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -45,6 +46,11 @@ public class PosCatalogRepository {
         .collect(Collectors.toMap(ProductPos::productId, Function.identity()));
     return ids.stream().distinct().collect(Collectors.toMap(Function.identity(),
         id -> found.getOrDefault(id, ProductPos.defaults(id))));
+  }
+
+  /** The products among {@code ids} that really have a saved row (the others only get the defaults from {@link #forProducts}). */
+  public Set<UUID> configured(Collection<UUID> ids) {
+    return ids.isEmpty() ? Set.of() : Set.copyOf(pos.configuredIds(ids));
   }
 
   /** Creates or updates the counter attributes of a product. */

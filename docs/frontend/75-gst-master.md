@@ -4,10 +4,7 @@ Scope: the shop's GST rate and HSN code for a product name come from the backend
 
 Conventions as in `00-overview.md` (Bearer token, camelCase, error body `{code, message, traceId, details}`, validation errors in `details.fields`). Rates are JSON numbers in percent: `5`, `2.5`, `0.25` (never `5.000`).
 
-**Status.** Built and tested against the delivered data (564 HSN rows, 5,950 item names, 12 rate-card entries). Two parts are **not in this release**:
-
-- *Server-side fill of a blank HSN / GST %* (section 6): available after the wire-in release. Until then the app must send what the user sees.
-- *Rates 40, 1.5 and 0.25 in billing*: the master suggests them but marks them `acceptedForBilling: false` (section 4).
+**Status.** Built and tested against the delivered data (564 HSN rows, 5,950 item names, 12 rate-card entries). Both parts are live: the server fills a blank HSN / GST % (section 6), and billing stores the rates 40, 1.5 and 0.25 (`acceptedForBilling: true` for every rate today, section 4).
 
 ## Who can do what
 
@@ -28,7 +25,7 @@ No `Idempotency-Key` on any of these.
 6. `best.verification == "VERIFY_PRODUCT"`: also show **"Please confirm this rate with your CA"** (the rate in the master is not checked against the official notification). `VERIFIED`: no note.
 7. `choices` (not empty): the same HSN under other conditions, for example "Packed and labelled 5 %" and "Loose 0 %". Show a two-way selector with `best` and the `choices`, labelled with `conditionLabel` (fall back to `condition`). Picking one replaces GST % (and keeps the HSN, which is the same). Rows with `priceMin` / `priceMax` (clothes, footwear) mean the rate depends on the price per piece: if the price field is empty, ask the user to enter it, then call again with `price`.
 8. `alternatives` (not empty): other likely HSN codes, best first. Show them behind "Other matches" (`matchedName`, `hsn`, `gstPercent`). Picking one fills both fields.
-9. `best.acceptedForBilling == false`: the rate is real but billing cannot store it yet (today 40, 1.5 and 0.25). Show the suggestion greyed with "This rate cannot be billed yet, ask the owner" and **do not fill GST %** (you may fill HSN). The save would be refused with 400 anyway.
+9. `best.acceptedForBilling == false`: the rate is real but billing cannot store it. Every rate of the master is accepted today (0, 0.25, 1.5, 3, 5, 12, 18, 28, 40), but keep this branch: show the suggestion greyed with "This rate cannot be billed yet, ask the owner" and **do not fill GST %** (you may fill HSN). The save would be refused with 400 anyway.
 10. Network or 5xx error: stay silent and keep the fields as typed. The suggestion is a convenience, never a blocker. 403 means the user is not staff: hide the feature.
 
 Where each screen calls it:
@@ -39,7 +36,7 @@ Where each screen calls it:
 | Purchase form, each line | after the product is chosen or a new item name is typed | line GST %, line HSN |
 | New-item-from-bill sheet | name field | GST %, HSN of the new item |
 
-For an existing product, the purchase lookup (`GET /admin/purchases/lookup`) will return the filled values by itself after the wire-in release (section 6); do not call `suggest` for a product that already has a configured rate.
+For an existing product, the purchase lookup (`GET /admin/purchases/lookup`) returns the filled values by itself (section 6); do not call `suggest` for a product that already has a configured rate.
 
 ## 2. `GET /api/v1/gst/suggest`
 
@@ -104,11 +101,11 @@ All three carry an `ETag`. Send `If-None-Match` with the last ETag; `304` with n
 
 `GET /api/v1/gst/hsn/{hsn}` (4, 6 or 8 digits): `{ "hsn": "1006", "items": [row, ...] }`: all conditions and rates of the code, switched-off rows included. 404 `NOT_FOUND` for an unknown code, 400 when it is not 4, 6 or 8 digits. Use it when the user types an HSN and the app shows its rate.
 
-`GET /api/v1/gst/rates`: `{ "items": [ { "code": "GST_5", "gstPercent": 5, "cgstRate": 2.5, "sgstRate": 2.5, "igstRate": 5, "cessRate": 0, "taxType": "TAXABLE", "acceptedForBilling": true, "note": "" } ] }`. Only fixed-percent entries (11 today). Use it to fill the GST % drop-down: show every entry, grey those with `acceptedForBilling: false`.
+`GET /api/v1/gst/rates`: `{ "items": [ { "code": "GST_5", "gstPercent": 5, "cgstRate": 2.5, "sgstRate": 2.5, "igstRate": 5, "cessRate": 0, "taxType": "TAXABLE", "acceptedForBilling": true, "note": "" } ] }`. Only fixed-percent entries (11 today). Use it to fill the GST % drop-down: show every entry, grey any with `acceptedForBilling: false` (none today).
 
 ## 4. `acceptedForBilling`
 
-`true` when the billing engine can store that rate on a product or a bill line. Today it is true for **0, 3, 5, 12, 18, 28** and false for **40, 1.5, 0.25** (the master knows them, billing does not yet). Every row and every rate-card entry carries it. When billing is widened (a separate release) the same field turns `true` for those rates with no app change: read the flag, do not hard-code the list.
+`true` when the billing engine can store that rate on a product or a bill line. Today it is true for every rate of the rate card: **0, 0.25, 1.5, 3, 5, 12, 18, 28, 40**; a rate outside that list (a hand-edited master row) is `false`. Every row and every rate-card entry carries it. Read the flag, do not hard-code the list.
 
 ## 5. Admin edit screens (ADMIN only)
 
@@ -163,16 +160,27 @@ Errors:
 | 409 | `GST_HSN_IN_USE` | switching off, or changing the HSN of, the last active row of a code that item names still point to (`details.hsn`). Add another row for the code first |
 | 403 / 401 | `FORBIDDEN` / `UNAUTHENTICATED` | not an admin / no token |
 
-## 6. Server-side fill of a blank HSN / GST % (available after the wire-in release)
+## 6. Server-side fill of a blank HSN / GST %
 
-**Not live yet.** When it ships, the server fills a blank `hsn` or `gstPercent` in `PUT /admin/products/{id}/pos`, in purchase lines and in `GET /admin/purchases/lookup` from the master, using the product name, category and price, and returns the filled values with their source (`MASTER`, `USER`, `STORED`, `DEFAULT`) and `gstVerification`. Rules:
+The server fills a blank `hsn` or `gstPercent` from the master, using the product name, the category name and the selling price, in three places, and returns where the value came from (`gstSource`) and `gstVerification`. Rules everywhere:
 
-- Only a **blank** is filled. A value the caller sent always wins, and a typed `0` is not blank.
+- Only a **blank** is filled ("not sent", `null`, and for the HSN also empty or spaces). A value the caller sent always wins, and a typed `0` is not blank.
 - The server uses a match only when `score >= 0.6` (stricter than the 0.5 shown by `suggest`, because nobody confirms it on screen). Among matches within a hair of each other, the `VERIFIED` row wins.
-- If the master's rate is one billing cannot store yet (40, 1.5, 0.25), only the HSN is filled.
-- The app should therefore **omit** `gstPercent` / `hsn` from the body when the user has not touched them, and show `gstVerification == "VERIFY_PRODUCT"` as "Please confirm this rate with your CA".
+- If the master's rate is one billing cannot store, only the HSN is filled (not the case for any rate today).
+- Show `gstVerification == "VERIFY_PRODUCT"` as "Please confirm this rate with your CA".
 
-Until then, keep sending the values the user sees.
+**`PUT /admin/products/{id}/pos`.** The body's `gstPercent` and `hsn` are optional; **omit** them when the user did not touch them. `hsn`, when sent, is empty (or spaces) or 4, 6 or 8 digits (otherwise `400`, `fields.hsn` = `must be 4, 6 or 8 digits`). The master fills the blank parts only when the product has **no saved counter attributes yet**; a product that already has a saved row keeps its stored rate and HSN (the master never overwrites the owner's choice). If nothing matches: rate 0 and empty HSN, no error. The answer carries two new last fields:
+
+| field | values |
+|---|---|
+| `gstSource` | `USER` (the rate was sent), `MASTER` (the rate was filled from the master), `STORED` (kept from an earlier save), `DEFAULT` (nothing known: 0 and no HSN) |
+| `gstVerification` | `VERIFIED` or `VERIFY_PRODUCT` when the master filled the rate **or** the HSN in this save, else `null` |
+
+The rate source and the HSN can differ (the user typed a rate, the master filled the HSN: `gstSource` is `USER`, `gstVerification` is set). `GET /admin/products/{id}/pos` answers `gstSource` `STORED` or `DEFAULT` and `gstVerification` `null`. The audit line of a filled save ends with `(from master <rowId>)`.
+
+**Purchase lines (`POST /admin/purchases`).** Rate: the line's `gstPercent` (a typed 0 wins), else the product's **saved** rate (only when it has saved counter attributes), else the master's, else 0. HSN: the line's, else the product's, else the master's. The line stores what it used; a purchase never writes to the product's counter attributes. When a value came from a `VERIFY_PRODUCT` master row the response `warnings` gets an entry such as `GST for Brass Ganesh was filled from the master and needs your CA's confirmation` (shown only in the answer to the request that recorded the delivery, not in a replay of the same `Idempotency-Key`).
+
+**`GET /admin/purchases/lookup`.** If the product has no saved counter attributes, or its HSN is blank, the blank parts come from the master. New last fields: `gstSource` (`STORED`, `MASTER`, `DEFAULT`) and `gstVerification` (`VERIFIED`, `VERIFY_PRODUCT` or `null`).
 
 ## 7. Dart sketches
 
@@ -235,7 +243,7 @@ class GstSuggestController {
   }
 }
 
-// Applying a result: typed values always win, 40 / 1.5 / 0.25 are not filled while acceptedForBilling is false.
+// Applying a result: typed values always win, a rate is not filled while acceptedForBilling is false.
 void applySuggestion(GstSuggestion s, FormState f) {
   final b = s.best;
   if (b == null) return;
@@ -271,7 +279,7 @@ Future<List<GstRow>> loadRates(Api api, Cache cache) async {
 - [ ] Errors of `suggest` ignored silently; 403 hides the feature.
 - [ ] ETag / 304 on `/gst/hsn`, `/gst/hsn/{hsn}`, `/gst/rates`.
 - [ ] Admin editor: all field errors shown together, 409 `GST_HSN_IN_USE` explained, "switched off" rows shown greyed.
-- [ ] Server-side fill (section 6): omit untouched fields only after the wire-in release.
+- [ ] Server-side fill (section 6): omit untouched `gstPercent` / `hsn` from the product PUT; show `gstSource` and the "confirm with your CA" note for `VERIFY_PRODUCT`; `hsn` is empty (or spaces) or 4, 6 or 8 digits.
 
 ## Before go-live (owner and CA decisions, data is delivered as is)
 

@@ -1262,3 +1262,12 @@ Rejected: `{ "gstPercent": 18.5 }` -> `400`, `fields.gstPercent` = `must be one 
 **Purchases.** `gstPercent` on a purchase line takes the same rates; `freightGstPercent` stays a whole number (one of the whole-number rates above, for example 5 or 18); the response items and the GST-by-rate report (`GET /admin/reports/purchases/input-gst`) show `gstPercent` as above (`"gstPercent": 1.5`). The register filter `?gstRate=1.5` matches numerically.
 
 Checklist: [ ] type `gstPercent` as `num`; [ ] offer the nine rates in the GST dropdown; [ ] leave `gstPercent` and `hsn` out of the product-counter PUT when the field was not touched.
+
+## Addendum 9: GST and HSN fill
+
+The server now fills a blank GST rate or HSN from the GST master (guide 75, section 6). A value the caller sent always wins and a typed `0` is a rate, not blank. The master is used only when it matches the product name with a score of at least 0.6.
+
+- **`PUT /admin/products/{id}/pos`**: `gstPercent` and `hsn` may be omitted. `hsn` is empty (or spaces) or 4, 6 or 8 digits (`400` `fields.hsn` otherwise). A product with no saved counter attributes yet gets the blank parts from the master; a product with a saved row keeps its stored values. The answer has two new last fields: `gstSource` (`USER`, `MASTER`, `STORED`, `DEFAULT`) and `gstVerification` (`VERIFIED`, `VERIFY_PRODUCT`, `null`). Show "Please confirm this rate with your CA" for `VERIFY_PRODUCT`.
+- **`POST /admin/purchases`**: a line without `gstPercent` / `hsn` uses the product's saved values, then the master, then 0 / empty. The line stores what it used; the product is not changed. `warnings` gets an entry when a value came from a `VERIFY_PRODUCT` master row.
+- **`GET /admin/purchases/lookup`**: blank parts are filled from the master for a product with no saved counter attributes (or no HSN); new last fields `gstSource` (`STORED`, `MASTER`, `DEFAULT`) and `gstVerification`.
+- The rates 0.25, 1.5 and 40 are accepted by billing, so the GST master reports `acceptedForBilling: true` for every rate and may fill them.
