@@ -95,3 +95,7 @@ The full explanation, before/after examples and what changes for the app is in [
 ## Round 3 (findings register)
 
 See [52-backend-response-findings-register.md](52-backend-response-findings-register.md).
+
+## Round 4 (frontend audit of 2026-11-10)
+
+See [53-backend-response-audit-2026-11-10.md](53-backend-response-audit-2026-11-10.md).
